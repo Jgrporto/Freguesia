@@ -72,10 +72,10 @@ As respostas de listas da integracao podem chegar como array puro ou payload env
 ## Variaveis de ambiente locais
 
 ```env
-VITE_WHATSAPP_API_BASE_URL=http://localhost:5050
+VITE_WHATSAPP_API_BASE_URL=http://localhost:5250
 VITE_WHATSAPP_API_ADDITIONAL_BASE_URLS=
 VITE_WHATSAPP_KNOWN_NUMBERS=
-VITE_LOCAL_API_BASE_URL=http://localhost:5053/api/local
+VITE_LOCAL_API_BASE_URL=http://localhost:5253/api/local
 VITE_APP_BUILD_LABEL=
 ```
 

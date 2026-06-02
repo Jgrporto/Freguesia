@@ -12,8 +12,8 @@ export const resolveLocalApiBaseUrl = () => {
 
   if (canUseBrowser()) {
     const { hostname, port, protocol } = window.location;
-    if ((hostname === '127.0.0.1' || hostname === 'localhost') && port && port !== '5053') {
-      return `${protocol}//127.0.0.1:5053/api/local`;
+    if ((hostname === '127.0.0.1' || hostname === 'localhost') && port && port !== '5253') {
+      return `${protocol}//127.0.0.1:5253/api/local`;
     }
   }
 

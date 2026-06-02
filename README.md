@@ -16,24 +16,24 @@ Painel web independente para atendimento, conversas WhatsApp, respostas rapidas,
 3. Configure as URLs da aplicacao:
 
 ```env
-VITE_WHATSAPP_API_BASE_URL=http://localhost:5050
+VITE_WHATSAPP_API_BASE_URL=http://localhost:5250
 VITE_WHATSAPP_API_ADDITIONAL_BASE_URLS=
 VITE_WHATSAPP_KNOWN_NUMBERS=
-VITE_LOCAL_API_BASE_URL=http://localhost:5053/api/local
+VITE_LOCAL_API_BASE_URL=http://localhost:5253/api/local
 VITE_APP_BUILD_LABEL=
 ```
 
 ## Backend local
 
 ```env
-PORT=5053
+PORT=5253
 SQL_STORE_ENABLED=true
 SQL_STORE_DRIVER=sqlite
 SQLITE_DB_PATH=server/data/freguesia.sqlite
 SQL_STORE_REQUIRE=true
-LOCAL_WHATSAPP_API_BASE_URL=http://127.0.0.1:5050
-LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5051
-LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5050
+LOCAL_WHATSAPP_API_BASE_URL=http://127.0.0.1:5250
+LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5251
+LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5250
 ```
 
 As variaveis `NEWBR_*` continuam existindo por compatibilidade com a integracao atual de base de clientes. Na nova VPS, defina usuario e senha no `.env`; o projeto nao carrega mais credenciais antigas por padrao.

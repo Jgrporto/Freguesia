@@ -10,8 +10,8 @@ Este documento descreve como instalar e publicar o projeto Freguesia em uma nova
 - Web root do build: `/var/www/freguesia/current`
 - Dominio principal: `freguesia.hakione.tech`
 - Alias: `www.freguesia.hakione.tech`
-- Backend local: `freguesia-local-api.service` em `127.0.0.1:5053`
-- WhatsApp: `freguesia-whatsapp.service` em `127.0.0.1:5050`
+- Backend local: `freguesia-local-api.service` em `127.0.0.1:5253`
+- WhatsApp: `freguesia-whatsapp.service` em `127.0.0.1:5250`
 - Worker: `freguesia-worker.service`
 
 ## DNS necessario
@@ -61,7 +61,7 @@ Base minima:
 
 ```env
 NODE_ENV=production
-PORT=5053
+PORT=5253
 
 SQL_STORE_ENABLED=true
 SQL_STORE_DRIVER=sqlite
@@ -73,17 +73,17 @@ SQL_STORE_CACHE_TTL_MS=1200
 WHATSAPP_HTTP_ENABLED=true
 WHATSAPP_SCHEDULERS_ENABLED=false
 WHATSAPP_STORE_CACHE_TTL_MS=3000
-WHATSAPP_SERVER_PORT=5050
-CHECKOUT_SERVER_PORT=5051
-PANEL_AGENT_PORT=5052
+WHATSAPP_SERVER_PORT=5250
+CHECKOUT_SERVER_PORT=5251
+PANEL_AGENT_PORT=5252
 
-LOCAL_WHATSAPP_API_BASE_URL=http://127.0.0.1:5050
-WHATSAPP_API_BASE_URL=http://127.0.0.1:5050
-LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5051
-CHECKOUT_API_BASE_URL=http://127.0.0.1:5051
-LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5050
-CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5050
-CHECKOUT_WHATSAPP_API_URL=http://127.0.0.1:5050
+LOCAL_WHATSAPP_API_BASE_URL=http://127.0.0.1:5250
+WHATSAPP_API_BASE_URL=http://127.0.0.1:5250
+LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5251
+CHECKOUT_API_BASE_URL=http://127.0.0.1:5251
+LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5250
+CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5250
+CHECKOUT_WHATSAPP_API_URL=http://127.0.0.1:5250
 
 VITE_LOCAL_API_BASE_URL=/api/local
 VITE_WHATSAPP_API_BASE_URL=/api/whatsapp
@@ -129,7 +129,7 @@ Validar:
 systemctl status freguesia-local-api.service --no-pager
 systemctl status freguesia-whatsapp.service --no-pager
 systemctl status freguesia-worker.service --no-pager
-curl -i http://127.0.0.1:5053/api/local/health
+curl -i http://127.0.0.1:5253/api/local/health
 ```
 
 ## Nginx
@@ -153,7 +153,7 @@ server {
     client_max_body_size 25m;
 
     location /api/local/ {
-        proxy_pass http://127.0.0.1:5053/api/local/;
+        proxy_pass http://127.0.0.1:5253/api/local/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -162,7 +162,7 @@ server {
     }
 
     location /api/whatsapp/ {
-        proxy_pass http://127.0.0.1:5050/api/whatsapp/;
+        proxy_pass http://127.0.0.1:5250/api/whatsapp/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -171,7 +171,7 @@ server {
     }
 
     location /api/checkout/ {
-        proxy_pass http://127.0.0.1:5051/api/checkout/;
+        proxy_pass http://127.0.0.1:5251/api/checkout/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
