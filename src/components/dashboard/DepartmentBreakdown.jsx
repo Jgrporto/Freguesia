@@ -1,7 +1,7 @@
 import React from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 
-const COLORS = ['#25D366', '#1E88E5', '#FFC107', '#8E44AD'];
+const COLORS = ['#B10D14', '#85070B', '#C8A24D', '#2D2F36'];
 const deptLabels = { general: 'Geral', sales: 'Vendas', support: 'Suporte', billing: 'Financeiro' };
 
 export default function DepartmentBreakdown({ conversations }) {

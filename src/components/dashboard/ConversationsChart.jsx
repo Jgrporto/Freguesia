@@ -1,6 +1,9 @@
 import React from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
+const PRIMARY_CHART = '#B10D14';
+const SECONDARY_CHART = '#C8A24D';
+
 export default function ConversationsChart({ conversations }) {
   const last7Days = [];
 
@@ -26,12 +29,12 @@ export default function ConversationsChart({ conversations }) {
         <AreaChart data={last7Days}>
           <defs>
             <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#25D366" stopOpacity={0.24} />
-              <stop offset="95%" stopColor="#25D366" stopOpacity={0} />
+              <stop offset="5%" stopColor={PRIMARY_CHART} stopOpacity={0.24} />
+              <stop offset="95%" stopColor={PRIMARY_CHART} stopOpacity={0} />
             </linearGradient>
             <linearGradient id="colorResolved" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#1E88E5" stopOpacity={0.2} />
-              <stop offset="95%" stopColor="#1E88E5" stopOpacity={0} />
+              <stop offset="5%" stopColor={SECONDARY_CHART} stopOpacity={0.2} />
+              <stop offset="95%" stopColor={SECONDARY_CHART} stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" vertical={false} />
@@ -45,11 +48,11 @@ export default function ConversationsChart({ conversations }) {
               fontSize: '12px',
             }}
           />
-          <Area type="monotone" dataKey="total" stroke="#25D366" fill="url(#colorTotal)" strokeWidth={2.5} name="Total" />
+          <Area type="monotone" dataKey="total" stroke={PRIMARY_CHART} fill="url(#colorTotal)" strokeWidth={2.5} name="Total" />
           <Area
             type="monotone"
             dataKey="resolved"
-            stroke="#1E88E5"
+            stroke={SECONDARY_CHART}
             fill="url(#colorResolved)"
             strokeWidth={2.5}
             name="Resolvidas"

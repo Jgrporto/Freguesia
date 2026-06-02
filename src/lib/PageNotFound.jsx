@@ -29,7 +29,7 @@ export default function PageNotFound() {
 
         <button
           onClick={() => window.location.assign('/')}
-          className="mt-8 inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-[0_2px_4px_rgba(37,211,102,0.25)] transition-colors hover:bg-primary/90"
+          className="mt-8 inline-flex items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-[0_2px_4px_rgba(177,13,20,0.24)] transition-colors hover:bg-primary/90"
         >
           Voltar para o início
         </button>

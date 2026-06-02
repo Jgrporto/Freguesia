@@ -13,7 +13,7 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, tr
           <span
             className={cn(
               'rounded-full px-2.5 py-1 text-[11px] font-semibold',
-              trendUp ? 'bg-[#E6F7ED] text-primary' : 'bg-[#F8D7DA] text-destructive'
+              trendUp ? 'bg-[#F8E9EA] text-primary' : 'bg-[#F8D7DA] text-destructive'
             )}
           >
             {trendUp ? '↑' : '↓'} {trend}

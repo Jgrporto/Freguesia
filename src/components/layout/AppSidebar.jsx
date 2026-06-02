@@ -58,14 +58,16 @@ export default function AppSidebar({ collapsed, onToggle }) {
         key={path}
         to={path}
         className={cn(
-          'group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-all duration-200',
+          'group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200',
+          collapsed && 'justify-center px-2',
           isActive
-            ? 'bg-sidebar-accent text-sidebar-primary'
-            : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+            ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
+            : 'text-white/90 hover:bg-white/10 hover:text-white'
         )}
+        title={collapsed ? label : undefined}
       >
-        <Icon className={cn('h-5 w-5 flex-shrink-0', isActive && 'text-sidebar-primary')} />
-        {!collapsed && <span className="font-inter whitespace-nowrap text-sm font-medium">{label}</span>}
+        <Icon className={cn('h-5 w-5 flex-shrink-0 transition-colors', isActive ? 'text-white' : 'text-white/80')} />
+        {!collapsed && <span className="font-inter whitespace-nowrap text-sm font-semibold tracking-[-0.01em]">{label}</span>}
       </Link>
     );
   };
@@ -74,37 +76,44 @@ export default function AppSidebar({ collapsed, onToggle }) {
     <>
       <aside
         className={cn(
-          'fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300',
-          collapsed ? 'w-[68px]' : 'w-[240px]'
+          'barber-sidebar fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/10 text-sidebar-foreground shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300',
+          collapsed ? 'w-[76px]' : 'w-[280px]'
         )}
       >
-        <div className="flex h-16 items-center border-b border-sidebar-border px-4">
-          <div className="flex items-center overflow-hidden">
-            <span
-              className={cn(
-                'truncate text-[18px] font-semibold tracking-[0.02em] text-sidebar-primary transition-opacity',
-                collapsed && 'text-xs tracking-[0.12em]'
-              )}
-            >
-              {collapsed ? 'FG' : 'Freguesia'}
-            </span>
-          </div>
+        <div className={cn('border-b border-white/10 transition-all duration-300', collapsed ? 'flex h-[92px] items-center justify-center px-3' : 'px-5 py-6')}>
+          {collapsed ? (
+            <img src="/freguesia_crest.png" alt="Freguesia Barbearia" className="h-12 w-auto object-contain drop-shadow-[0_8px_18px_rgba(0,0,0,0.28)]" />
+          ) : (
+            <div className="flex w-full flex-col items-center text-center text-white">
+              <img src="/freguesia_crest.png" alt="Freguesia Barbearia" className="h-[72px] w-auto object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]" />
+              <div className="barber-brand-text mt-2 text-[32px] font-bold uppercase leading-none tracking-[0.055em]">
+                Freguesia
+              </div>
+              <div className="barber-brand-text mt-1 text-[12px] font-bold uppercase leading-none tracking-[0.36em] text-white/90">
+                Barbearia
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="flex flex-1 flex-col overflow-y-auto">
-          <nav className="space-y-1 px-3 py-4">{primaryNavItems.map(renderNavLink)}</nav>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <nav className={cn('space-y-1.5 px-4 py-4', collapsed && 'px-3')}>{primaryNavItems.map(renderNavLink)}</nav>
 
-          <div className="mt-auto space-y-1 px-3 py-3">
+          <div className={cn('mt-auto space-y-1.5 px-4 py-3', collapsed && 'px-3')}>
             <button
               type="button"
               onClick={() => setHistoryOpen(true)}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sidebar-foreground transition-all hover:bg-sidebar-accent"
+              className={cn(
+                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/90 transition-all hover:bg-white/10 hover:text-white',
+                collapsed && 'justify-center px-2'
+              )}
+              title={collapsed ? 'Novidades' : undefined}
             >
               <History className="h-5 w-5 flex-shrink-0" />
               {!collapsed && (
                 <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                  <span className="font-inter text-sm">Novidades</span>
-                  <span className="rounded-full border border-sidebar-border bg-sidebar-accent px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-primary">
+                  <span className="font-inter text-sm font-semibold">Novidades</span>
+                  <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white">
                     {currentBuildLabel}
                   </span>
                 </div>
@@ -115,20 +124,28 @@ export default function AppSidebar({ collapsed, onToggle }) {
           </div>
         </div>
 
-        <div className="space-y-1 border-t border-sidebar-border p-3">
+        <div className={cn('space-y-1.5 border-t border-white/10 p-4', collapsed && 'px-3')}>
           <button
             onClick={() => onToggle()}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sidebar-foreground transition-all hover:bg-sidebar-accent"
+            className={cn(
+              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/90 transition-all hover:bg-white/10 hover:text-white',
+              collapsed && 'justify-center px-2'
+            )}
+            title={collapsed ? 'Expandir' : undefined}
           >
             {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
-            {!collapsed && <span className="font-inter text-sm">Recolher</span>}
+            {!collapsed && <span className="font-inter text-sm font-semibold">Recolher</span>}
           </button>
           <button
             onClick={() => logout()}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sidebar-foreground transition-all hover:bg-destructive/10 hover:text-destructive"
+            className={cn(
+              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/90 transition-all hover:bg-white/10 hover:text-white',
+              collapsed && 'justify-center px-2'
+            )}
+            title={collapsed ? 'Sair' : undefined}
           >
             <LogOut className="h-5 w-5 flex-shrink-0" />
-            {!collapsed && <span className="font-inter text-sm">Sair</span>}
+            {!collapsed && <span className="font-inter text-sm font-semibold">Sair</span>}
           </button>
         </div>
       </aside>

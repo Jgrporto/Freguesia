@@ -54,14 +54,18 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(37,211,102,0.12),_transparent_32%),linear-gradient(180deg,#f8faf8_0%,#f3f5f4_100%)] px-4 py-8 sm:px-6">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(177,13,20,0.13),_transparent_32%),linear-gradient(180deg,#faf8f8_0%,#f4f1f1_100%)] px-4 py-8 sm:px-6">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
         <div className="w-full max-w-md rounded-[32px] border border-white/80 bg-white/92 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur sm:p-10">
           <div className="mb-8 flex flex-col items-center text-center">
-            <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-[24px] bg-[#25D366] shadow-[0_18px_40px_rgba(37,211,102,0.32)]">
-              <img src="/freguesia_favicon.png" alt="Freguesia" className="h-11 w-11 object-contain" />
+            <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-[28px] bg-[#B10D14] shadow-[0_18px_40px_rgba(177,13,20,0.28)]">
+              <img src="/freguesia_crest.png" alt="Freguesia Barbearia" className="h-16 w-auto object-contain drop-shadow-[0_8px_16px_rgba(0,0,0,0.20)]" />
             </div>
-            <div className="mb-4 flex items-center gap-10 text-[#c6d2cd]">
+            <div className="barber-brand-text mb-4 text-center text-[#B10D14]">
+              <div className="text-[34px] font-bold uppercase leading-none tracking-[0.055em]">Freguesia</div>
+              <div className="mt-1 text-[12px] font-bold uppercase leading-none tracking-[0.38em]">Barbearia</div>
+            </div>
+            <div className="mb-4 flex items-center gap-10 text-[#dbc4c5]">
               <span className="text-xl leading-none">···</span>
               <span className="text-xl leading-none">···</span>
             </div>
@@ -72,7 +76,7 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <label className="block">
               <span className="sr-only">Usuário</span>
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition focus-within:border-[#25D366] focus-within:bg-white">
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition focus-within:border-[#B10D14] focus-within:bg-white">
                 <UserRound className="h-4 w-4 text-slate-400" />
                 <Input
                   value={username}
@@ -86,7 +90,7 @@ export default function Login() {
 
             <label className="block">
               <span className="sr-only">Senha</span>
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition focus-within:border-[#25D366] focus-within:bg-white">
+              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] transition focus-within:border-[#B10D14] focus-within:bg-white">
                 <Lock className="h-4 w-4 text-slate-400" />
                 <Input
                   type="password"
@@ -107,7 +111,7 @@ export default function Login() {
               <button
                 type="button"
                 onClick={handleForgotPassword}
-                className="text-sm font-medium text-slate-500 transition hover:text-[#25D366]"
+                className="text-sm font-medium text-slate-500 transition hover:text-[#B10D14]"
               >
                 Esqueceu a senha?
               </button>
@@ -116,7 +120,7 @@ export default function Login() {
             <Button
               type="submit"
               disabled={submitting || isLoadingAuth}
-              className="mt-2 h-12 w-full rounded-2xl bg-[#25D366] text-base font-semibold text-white shadow-[0_12px_24px_rgba(37,211,102,0.28)] hover:bg-[#20c55b]"
+              className="mt-2 h-12 w-full rounded-2xl bg-[#B10D14] text-base font-semibold text-white shadow-[0_12px_24px_rgba(177,13,20,0.28)] hover:bg-[#940A10]"
             >
               {submitting ? 'Entrando...' : 'Entrar'}
             </Button>
@@ -124,7 +128,7 @@ export default function Login() {
 
           <div className="mt-8 border-t border-slate-200 pt-6 text-center text-sm text-slate-500">
             <span>Precisa de ajuda? </span>
-            <button type="button" onClick={handleSupport} className="font-semibold text-[#25D366] transition hover:text-[#20c55b]">
+            <button type="button" onClick={handleSupport} className="font-semibold text-[#B10D14] transition hover:text-[#940A10]">
               Contate o suporte Freguesia
             </button>
           </div>

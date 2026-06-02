@@ -13,7 +13,7 @@ export default function AppLayout() {
       <AppSidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
       <main className={cn(
         "min-h-screen transition-all duration-300",
-        collapsed ? "ml-[68px]" : "ml-[240px]"
+        collapsed ? "ml-[76px]" : "ml-[280px]"
       )}>
         <div className="flex min-h-screen flex-col">
           <div className="flex-1 min-h-0">
