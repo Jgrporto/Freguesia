@@ -923,7 +923,7 @@ export default function RoutineForm({
               ) : null}
 
               {draft.type === 'disparo' ? (
-                <Section title="Envio manual" description="Selecione clientes da base do SaaSTV e execute esta rotina sem depender da regra de data.">
+                <Section title="Envio manual" description="Selecione clientes da base da Freguesia e execute esta rotina sem depender da regra de data.">
                   <button
                     type="button"
                     onClick={() => setManualOpen(true)}

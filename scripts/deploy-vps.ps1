@@ -1,8 +1,9 @@
 param(
   [Parameter(Mandatory = $true)]
   [string[]]$Files,
-  [string]$SshHost = "root@89.117.32.226",
-  [string]$RemoteRoot = "/root/SaasTV",
+  [Parameter(Mandatory = $true)]
+  [string]$SshHost,
+  [string]$RemoteRoot = "/root/Freguesia",
   [switch]$SkipBuild,
   [switch]$SkipRestart
 )
@@ -30,7 +31,7 @@ $relativeFiles = $Files | ForEach-Object { Resolve-RelativePath $_ } | Select-Ob
 $frontendPaths = @("src/", "public/", "index.html", "vite.config.js", "tailwind.config.js", "postcss.config.js")
 $localApiChanged = $relativeFiles | Where-Object { $_ -eq "server/local-api.mjs" }
 $stackChanged = $relativeFiles | Where-Object {
-  $_ -in @("server/whatsapp-server.js", "server/checkout-server.js", "server/painel-agent-broker.js", "server/start-all.js", "package.json", "package-lock.json")
+  $_ -in @("server/whatsapp-server.js", "server/checkout-server.js", "server/painel-agent-broker.js", "server/start-all.js", "server/freguesia-worker.js", "package.json", "package-lock.json")
 }
 $needsBuild = -not $SkipBuild -and ($relativeFiles | Where-Object {
   $path = $_
@@ -57,12 +58,14 @@ if ($needsBuild) {
 
 if (-not $SkipRestart) {
   if ($stackChanged) {
-    Write-Host "Reiniciando tv-assist-whatsapp.service"
-    ssh $SshHost "systemctl restart tv-assist-whatsapp.service && systemctl is-active tv-assist-whatsapp.service"
+    Write-Host "Reiniciando freguesia-whatsapp.service"
+    ssh $SshHost "systemctl restart freguesia-whatsapp.service && systemctl is-active freguesia-whatsapp.service"
+    Write-Host "Reiniciando freguesia-worker.service"
+    ssh $SshHost "systemctl restart freguesia-worker.service && systemctl is-active freguesia-worker.service"
   }
   if ($localApiChanged) {
-    Write-Host "Reiniciando saastv-local-api.service"
-    ssh $SshHost "systemctl restart saastv-local-api.service && systemctl is-active saastv-local-api.service"
+    Write-Host "Reiniciando freguesia-local-api.service"
+    ssh $SshHost "systemctl restart freguesia-local-api.service && systemctl is-active freguesia-local-api.service"
   }
 }
 

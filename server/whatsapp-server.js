@@ -246,7 +246,7 @@ const parseBooleanEnv = (value, defaultValue = false) => {
   return normalized === "true" || normalized === "1" || normalized === "yes";
 };
 
-const RUNTIME_ROLE = String(process.env.MAISTV_RUNTIME_ROLE || "").trim().toLowerCase();
+const RUNTIME_ROLE = String(process.env.FREGUESIA_RUNTIME_ROLE || "").trim().toLowerCase();
 const IS_WORKER_ROLE = RUNTIME_ROLE === "worker";
 const WHATSAPP_HTTP_ENABLED = parseBooleanEnv(process.env.WHATSAPP_HTTP_ENABLED, !IS_WORKER_ROLE);
 const WHATSAPP_SCHEDULERS_ENABLED = parseBooleanEnv(process.env.WHATSAPP_SCHEDULERS_ENABLED, IS_WORKER_ROLE);
@@ -1543,8 +1543,8 @@ const DEFAULT_UI_TAGS = [
 ];
 const DEFAULT_UI_NEWBR_CREDENTIALS = {
   baseUrl: String(process.env.PANEL_NEWBR_BASE_URL || "https://painel.newbr.top").trim().replace(/\/+$/, ""),
-  username: String(process.env.PANEL_NEWBR_USERNAME || "suportemaistv").trim(),
-  password: String(process.env.PANEL_NEWBR_PASSWORD || "suporte+TV1").trim(),
+  username: String(process.env.PANEL_NEWBR_USERNAME || "").trim(),
+  password: String(process.env.PANEL_NEWBR_PASSWORD || "").trim(),
 };
 
 const normalizeUiTagList = (value) => {
@@ -21908,10 +21908,10 @@ const PLUSTV_METRICS_API_BASE = String(
   process.env.PLUSTV_METRICS_API_BASE || "https://painel.newbr.top",
 ).replace(/\/+$/, "");
 const PLUSTV_METRICS_USERNAME = String(
-  process.env.PLUSTV_METRICS_USERNAME || process.env.PANEL_NEWBR_USERNAME || "suportemaistv",
+  process.env.FREGUESIA_METRICS_USERNAME || process.env.PANEL_NEWBR_USERNAME || "",
 ).trim();
 const PLUSTV_METRICS_PASSWORD = String(
-  process.env.PLUSTV_METRICS_PASSWORD || process.env.PANEL_NEWBR_PASSWORD || "suporte+TV1",
+  process.env.FREGUESIA_METRICS_PASSWORD || process.env.PANEL_NEWBR_PASSWORD || "",
 );
 const PLUSTV_METRICS_CACHE_MS = Number.parseInt(
   process.env.PLUSTV_METRICS_CACHE_MS || "300000",
@@ -21937,7 +21937,7 @@ const PLUSTV_METRICS_SALES_USERNAME = String(
   process.env.PLUSTV_METRICS_SALES_USERNAME || "vendaiptv",
 ).trim();
 const PLUSTV_METRICS_SALES_PASSWORD = String(
-  process.env.PLUSTV_METRICS_SALES_PASSWORD || "suporte+TV1",
+  process.env.FREGUESIA_METRICS_SALES_PASSWORD || "",
 );
 const PLUSTV_METRICS_SALES_RESELLER = String(
   process.env.PLUSTV_METRICS_SALES_RESELLER || "vendaiptv",
@@ -32777,7 +32777,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         ok: false,
-        error: error?.message || "Falha ao carregar metricas +TV.",
+        error: error?.message || "Falha ao carregar metricas Freguesia.",
         raw: error?.payload || null,
       }));
     }
@@ -32793,7 +32793,7 @@ const server = http.createServer(async (req, res) => {
       const customersAll = raw?.customersAll && typeof raw.customersAll === "object" ? raw.customersAll : {};
       if (!raw?.customersCount || !raw?.newCustomers || !Array.isArray(customersAll.rows)) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Payload de metricas +TV incompleto." }));
+        res.end(JSON.stringify({ ok: false, error: "Payload de metricas Freguesia incompleto." }));
         return;
       }
       const payload = buildPlusTvMetricsPayloadFromRaw({
@@ -32820,7 +32820,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
         ok: false,
-        error: error?.message || "Falha ao salvar metricas +TV coletadas pelo navegador.",
+        error: error?.message || "Falha ao salvar metricas Freguesia coletadas pelo navegador.",
       }));
     }
     return;
@@ -40357,7 +40357,7 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, {
           "Content-Type": cachedMedia.mimeType || "application/octet-stream",
           "Cache-Control": "private, max-age=300",
-          "X-SaaSTV-Media-Cache": "hit",
+          "X-Freguesia-Media-Cache": "hit",
         });
         res.end(cachedMedia.buffer);
         return;
@@ -40406,7 +40406,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, {
         "Content-Type": mimeType,
         "Cache-Control": "private, max-age=300",
-        "X-SaaSTV-Media-Cache": "miss",
+        "X-Freguesia-Media-Cache": "miss",
       });
       res.end(buffer);
     } catch (error) {
@@ -52832,7 +52832,7 @@ const startBackgroundSchedulers = () => {
 if (WHATSAPP_SCHEDULERS_ENABLED) {
   startBackgroundSchedulers();
 } else {
-  console.log("[maistv-whatsapp] background schedulers disabled for this process");
+  console.log("[freguesia-whatsapp] background schedulers disabled for this process");
 }
 
 if (WHATSAPP_HTTP_ENABLED) {
@@ -52902,7 +52902,7 @@ server.listen(PORT, () => {
 
 });
 } else {
-  console.log("[maistv-worker] HTTP server disabled; running background schedulers only");
+  console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
 
 

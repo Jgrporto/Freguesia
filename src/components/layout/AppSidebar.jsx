@@ -86,7 +86,7 @@ export default function AppSidebar({ collapsed, onToggle }) {
                 collapsed && 'text-xs tracking-[0.12em]'
               )}
             >
-              {collapsed ? 'WA' : 'WhatsApp'}
+              {collapsed ? 'FG' : 'Freguesia'}
             </span>
           </div>
         </div>

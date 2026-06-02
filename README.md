@@ -1,18 +1,19 @@
-# +TV Atendimento
+# Freguesia Atendimento
 
-Painel web para atendimento, acompanhamento de conversas, respostas rápidas e configurações da operação.
+Painel web independente para atendimento, conversas WhatsApp, respostas rapidas, HSMs, rotinas e base de clientes da operacao Freguesia.
 
 ## Requisitos
 
-- Node.js 20+ recomendado
-- npm 10+ recomendado
+- Node.js 20+
+- npm 10+
+- Nginx para publicacao em producao
 
 ## Configuracao local
 
 1. Instale as dependencias:
    `npm install`
 2. Crie um arquivo `.env.local` na raiz do projeto.
-3. Defina as variaveis de ambiente da aplicacao:
+3. Configure as URLs da aplicacao:
 
 ```env
 VITE_WHATSAPP_API_BASE_URL=http://localhost:5050
@@ -22,69 +23,47 @@ VITE_LOCAL_API_BASE_URL=http://localhost:5053/api/local
 VITE_APP_BUILD_LABEL=
 ```
 
-Para a tela `HSMs`, a integracao com os templates da Meta usa `VITE_WHATSAPP_API_BASE_URL`.
-Para descobrir numeros adicionais em `Configuracoes > Servicos`, use `VITE_WHATSAPP_API_ADDITIONAL_BASE_URLS` com hosts extras separados por virgula e `VITE_WHATSAPP_KNOWN_NUMBERS` como fallback explicito.
-Para a tela `Base de Clientes`, a persistencia e sincronizacao com o NewBr usam `VITE_LOCAL_API_BASE_URL` no frontend e variaveis `NEWBR_SYNC_*` no processo `server/local-api.mjs`.
-O projeto nao usa mais Base44. A autenticacao da SPA acontece inteiramente pelo backend local.
-
-### Variaveis do backend local
+## Backend local
 
 ```env
 PORT=5053
-NEWBR_SYNC_BASE_URL=https://painel.newbr.top
-NEWBR_SYNC_USERNAME=
-NEWBR_SYNC_PASSWORD=
-NEWBR_SYNC_PER_PAGE=100
-CUSTOMER_AUTO_SYNC_INTERVAL_MS=1800000
-CUSTOMER_SYNC_RETRY_INTERVAL_MS=300000
+SQL_STORE_ENABLED=true
+SQL_STORE_DRIVER=sqlite
+SQLITE_DB_PATH=server/data/freguesia.sqlite
+SQL_STORE_REQUIRE=true
 LOCAL_WHATSAPP_API_BASE_URL=http://127.0.0.1:5050
 LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5051
 LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5050
-CHATBOT_WHATSAPP_TIMEOUT_MS=10000
-ROUTINE_CHECKOUT_TIMEOUT_MS=15000
-ROUTINE_WHATSAPP_TIMEOUT_MS=45000
 ```
 
-`server/local-api.mjs` usa `LOCAL_WHATSAPP_API_BASE_URL` para `/api/whatsapp/*` e `LOCAL_CHECKOUT_API_BASE_URL` para `/api/checkout/*`.
-Para a geracao de token usada nas rotinas com `{{checkoutoken}}`, o endpoint atual fica na stack WhatsApp e usa `LOCAL_CHECKOUT_TOKEN_API_BASE_URL`.
-Em producao, prefira esses enderecos internos para evitar timeout por proxy externo quando a VPS fala com ela mesma.
+As variaveis `NEWBR_*` continuam existindo por compatibilidade com a integracao atual de base de clientes. Na nova VPS, defina usuario e senha no `.env`; o projeto nao carrega mais credenciais antigas por padrao.
 
-### Login local
+## Login local
 
 - Rota: `/login`
 - Sessao: cookie HttpOnly emitido por `server/local-api.mjs`
-- Persistencia longa: opcao `Manter-me conectado`
-- Credencial padrao de migracao do admin local: `admin` / `admin`
+- Cookie: `freguesia_session`
+- Credencial inicial de migracao: `admin` / `admin`
 
 ## Execucao
 
-Ambiente de desenvolvimento:
-
 ```bash
 npm run dev
-```
-
-Build de producao:
-
-```bash
 npm run build
-```
-
-Pre-visualizacao local do build:
-
-```bash
 npm run preview
 ```
 
 ## Estrutura principal
 
 - `src/pages`: telas da aplicacao
-- `src/components`: componentes de layout, chat e dashboard
+- `src/components`: componentes de layout, chat, rotinas e dashboard
 - `src/lib/local-api.js`: cliente compartilhado da API local
 - `src/lib/local-auth.js`: login, logout e consulta da sessao local
-- `server/local-api.mjs`: API local com persistencia em arquivo e sincronizacao do NewBr
+- `server/local-api.mjs`: API local com persistencia e autenticacao
+- `server/whatsapp-server.js`: WhatsApp, HSMs e rotinas
+- `server/checkout-server.js`: checkout
+- `server/freguesia-worker.js`: worker de agendamentos
 
-## Documentacao complementar
+## Deploy
 
-- Contexto funcional e tecnico: `PROJECT_CONTEXT.md`
-- Fluxo operacional de deploy na VPS: `docs/maintenance/deploy-vps.md`
+O fluxo de VPS e Nginx esta em `docs/maintenance/deploy-vps.md`.

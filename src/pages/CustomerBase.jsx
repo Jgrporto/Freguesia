@@ -877,7 +877,7 @@ export default function CustomerBase() {
                 onChange={(event) =>
                   setBrowserSyncConfig((current) => ({ ...current, username: event.target.value }))
                 }
-                placeholder="suportemaistv"
+                placeholder="usuario-do-painel"
                 disabled={isBrowserSyncRunning}
               />
             </div>

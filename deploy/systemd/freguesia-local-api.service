@@ -1,0 +1,16 @@
+[Unit]
+Description=Freguesia Local API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Freguesia
+EnvironmentFile=/root/Freguesia/.env
+Environment=NODE_ENV=production
+Environment=PORT=5053
+ExecStart=/usr/bin/node /root/Freguesia/server/local-api.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

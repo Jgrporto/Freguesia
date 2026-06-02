@@ -1,6 +1,6 @@
 const DEFAULT_LOCAL_API_BASE_URL = '/api/local';
 
-export const LOCAL_AUTH_UNAUTHORIZED_EVENT = 'saastv:auth:unauthorized';
+export const LOCAL_AUTH_UNAUTHORIZED_EVENT = 'freguesia:auth:unauthorized';
 
 const canUseBrowser = () => typeof window !== 'undefined';
 

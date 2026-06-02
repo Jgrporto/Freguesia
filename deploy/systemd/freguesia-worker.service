@@ -1,0 +1,18 @@
+[Unit]
+Description=Freguesia Background Worker
+After=network.target freguesia-local-api.service freguesia-whatsapp.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Freguesia
+EnvironmentFile=/root/Freguesia/.env
+Environment=NODE_ENV=production
+Environment=FREGUESIA_RUNTIME_ROLE=worker
+Environment=WHATSAPP_HTTP_ENABLED=false
+Environment=WHATSAPP_SCHEDULERS_ENABLED=true
+ExecStart=/usr/bin/node /root/Freguesia/server/freguesia-worker.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

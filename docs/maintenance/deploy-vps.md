@@ -1,169 +1,254 @@
-# Deploy na VPS
+# Deploy na VPS - Freguesia
 
 ## Escopo
 
-Este documento descreve o fluxo operacional para publicar alteracoes deste projeto na VPS usada pelo ambiente `SaasTV`.
+Este documento descreve como instalar e publicar o projeto Freguesia em uma nova VPS, servindo a SPA pelo Nginx e proxyando a API para `freguesia.hakione.tech`.
 
-## Destino atual
+## Destino recomendado
 
-- Host de publicacao: `root@89.117.32.226`
-- Diretorio da aplicacao na VPS: `/root/SaasTV`
-- Pasta de backup remoto: `/root/SaasTV/.deploy-backups`
-- Service do backend local: `saastv-local-api.service`
-- Service da stack WhatsApp/Checkout/Painel Agent: `tv-assist-whatsapp.service`
+- Diretorio da aplicacao: `/root/Freguesia`
+- Web root do build: `/var/www/freguesia/current`
+- Dominio principal: `freguesia.hakione.tech`
+- Alias: `www.freguesia.hakione.tech`
+- Backend local: `freguesia-local-api.service` em `127.0.0.1:5053`
+- WhatsApp: `freguesia-whatsapp.service` em `127.0.0.1:5050`
+- Worker: `freguesia-worker.service`
 
-## Premissas
+## DNS necessario
 
-- O operador precisa ter acesso SSH valido ao host.
-- Senhas, chaves privadas e tokens nao devem ser versionados neste repositorio.
-- O deploy padrao deste projeto e feito no proprio diretorio `/root/SaasTV`, preservando a estrutura de arquivos local.
-- Toda atualização enviada para a VPS deve manter as acentuações corretas em português do Brasil na interface e na documentação.
-- Os arquivos alterados devem ser salvos em codificação `UTF-8` para evitar texto corrompido ou caracteres quebrados no deploy.
+Voce ja criou:
 
-## Quando este fluxo deve ser usado
-
-- Alteracoes em `src/`, `docs/`, `README.md`, `PROJECT_CONTEXT.md` e outros arquivos do frontend.
-- Ajustes que dependem de novo `build` Vite para atualizar o conteudo servido em `dist/`.
-
-## Regra critica sobre dados persistidos
-
-- `server/data/store.json` e estado vivo da VPS e nao deve ser sobrescrito em deploys comuns.
-- O arquivo local do repositorio pode servir apenas como referencia de desenvolvimento ou massa minima, nunca como fonte canonica de producao.
-- So envie `server/data/store.json` para a VPS em manutencao controlada de dados, com backup explicito e restauracao planejada.
-- Em publicacoes normais de frontend/backend local, excluir `server/data/store.json` do pacote enviado.
-
-## Fluxo padrao
-
-1. Validar localmente o que sera publicado.
-   - Revisar `git diff` e garantir que apenas os arquivos esperados serao enviados.
-   - Rodar `npm run build` localmente para pegar regressao obvia antes do upload.
-
-2. Conectar na VPS e confirmar o projeto alvo.
-   - Entrar em `root@89.117.32.226`.
-   - Confirmar que o deploy sera aplicado em `/root/SaasTV`.
-
-3. Criar backup remoto antes de sobrescrever arquivos.
-   - Gerar um timestamp.
-   - Copiar para `/root/SaasTV/.deploy-backups/<timestamp>/...` cada arquivo que sera alterado.
-   - O backup deve manter a mesma arvore relativa dos arquivos originais.
-
-4. Enviar apenas os arquivos alterados.
-   - Preservar o mesmo caminho relativo dentro de `/root/SaasTV`.
-   - Nao apagar arquivos remotos sem necessidade.
-
-5. Rebuildar o frontend na VPS.
-   - Executar `cd /root/SaasTV && npm run build`.
-   - Esse passo atualiza a pasta `dist/` usada pelo ambiente remoto.
-
-6. Validar o resultado minimo do deploy.
-   - Confirmar que `dist/index.html` recebeu novo timestamp.
-   - Conferir se o build terminou sem erro.
-   - Se necessario, abrir a aplicacao publicada no navegador e validar a tela alterada.
-
-## Comandos uteis
-
-### Build local
-
-```bash
-npm run build
+```text
+CNAME www.freguesia -> freguesia.hakione.tech
 ```
 
-### Deploy automatizado com backup
+Ainda e necessario que o host raiz exista:
+
+```text
+A freguesia -> IP_DA_NOVA_VPS
+```
+
+Sem esse registro `A`, o `www.freguesia.hakione.tech` pode apontar para `freguesia.hakione.tech`, mas o destino final nao resolve para a VPS.
+
+## Instalar dependencias na VPS
+
+```bash
+apt update
+apt install -y nginx git curl
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt install -y nodejs
+node -v
+npm -v
+```
+
+## Clonar o projeto
+
+```bash
+cd /root
+git clone https://github.com/Jgrporto/Freguesia.git Freguesia
+cd /root/Freguesia
+npm ci
+```
+
+## Criar `.env`
+
+```bash
+cd /root/Freguesia
+nano .env
+```
+
+Base minima:
+
+```env
+NODE_ENV=production
+PORT=5053
+
+SQL_STORE_ENABLED=true
+SQL_STORE_DRIVER=sqlite
+SQLITE_DB_PATH=server/data/freguesia.sqlite
+SQL_STORE_REQUIRE=true
+SQL_STORE_DUAL_WRITE_JSON=false
+SQL_STORE_CACHE_TTL_MS=1200
+
+WHATSAPP_HTTP_ENABLED=true
+WHATSAPP_SCHEDULERS_ENABLED=false
+WHATSAPP_STORE_CACHE_TTL_MS=3000
+WHATSAPP_SERVER_PORT=5050
+CHECKOUT_SERVER_PORT=5051
+PANEL_AGENT_PORT=5052
+
+LOCAL_WHATSAPP_API_BASE_URL=http://127.0.0.1:5050
+WHATSAPP_API_BASE_URL=http://127.0.0.1:5050
+LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5051
+CHECKOUT_API_BASE_URL=http://127.0.0.1:5051
+LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5050
+CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5050
+CHECKOUT_WHATSAPP_API_URL=http://127.0.0.1:5050
+
+VITE_LOCAL_API_BASE_URL=/api/local
+VITE_WHATSAPP_API_BASE_URL=/api/whatsapp
+VITE_APP_BUILD_LABEL=Freguesia
+```
+
+Se a base de clientes continuar usando o painel NewBr, configure tambem:
+
+```env
+NEWBR_SYNC_BASE_URL=https://painel.newbr.top
+NEWBR_SYNC_USERNAME=
+NEWBR_SYNC_PASSWORD=
+PANEL_NEWBR_BASE_URL=https://painel.newbr.top
+PANEL_NEWBR_USERNAME=
+PANEL_NEWBR_PASSWORD=
+```
+
+## Build e publicacao da SPA
+
+```bash
+cd /root/Freguesia
+npm run build
+mkdir -p /var/www/freguesia/current
+rsync -a --delete /root/Freguesia/dist/ /var/www/freguesia/current/
+```
+
+## Instalar services systemd
+
+```bash
+cp /root/Freguesia/deploy/systemd/freguesia-local-api.service /etc/systemd/system/
+cp /root/Freguesia/deploy/systemd/freguesia-whatsapp.service /etc/systemd/system/
+cp /root/Freguesia/deploy/systemd/freguesia-worker.service /etc/systemd/system/
+
+systemctl daemon-reload
+systemctl enable --now freguesia-local-api.service
+systemctl enable --now freguesia-whatsapp.service
+systemctl enable --now freguesia-worker.service
+```
+
+Validar:
+
+```bash
+systemctl status freguesia-local-api.service --no-pager
+systemctl status freguesia-whatsapp.service --no-pager
+systemctl status freguesia-worker.service --no-pager
+curl -i http://127.0.0.1:5053/api/local/health
+```
+
+## Nginx
+
+Crie o arquivo:
+
+```bash
+nano /etc/nginx/sites-available/freguesia.hakione.tech
+```
+
+Conteudo:
+
+```nginx
+server {
+    listen 80;
+    server_name freguesia.hakione.tech www.freguesia.hakione.tech;
+
+    root /var/www/freguesia/current;
+    index index.html;
+
+    client_max_body_size 25m;
+
+    location /api/local/ {
+        proxy_pass http://127.0.0.1:5053/api/local/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/whatsapp/ {
+        proxy_pass http://127.0.0.1:5050/api/whatsapp/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/checkout/ {
+        proxy_pass http://127.0.0.1:5051/api/checkout/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+```
+
+Ativar:
+
+```bash
+ln -s /etc/nginx/sites-available/freguesia.hakione.tech /etc/nginx/sites-enabled/freguesia.hakione.tech
+nginx -t
+systemctl reload nginx
+```
+
+Validar por host header antes ou durante propagacao:
+
+```bash
+curl -I -H "Host: freguesia.hakione.tech" http://127.0.0.1/
+curl -i -H "Host: freguesia.hakione.tech" http://127.0.0.1/api/local/health
+```
+
+Validar publico:
+
+```bash
+curl -I http://freguesia.hakione.tech
+curl -i http://freguesia.hakione.tech/api/local/health
+```
+
+## HTTPS
+
+Depois que `freguesia.hakione.tech` resolver para a nova VPS:
+
+```bash
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d freguesia.hakione.tech -d www.freguesia.hakione.tech
+```
+
+Validar:
+
+```bash
+curl -I https://freguesia.hakione.tech
+curl -i https://freguesia.hakione.tech/api/local/health
+```
+
+## Deploy incremental
+
+O script local usa `/root/Freguesia` e os services da Freguesia:
 
 ```powershell
-npm run deploy:vps -- -Files server/local-api.mjs,docs/maintenance/deploy-vps.md
+npm run deploy:vps -- -SshHost root@IP_DA_NOVA_VPS -Files src/pages/Login.jsx,server/local-api.mjs
 ```
 
-O script:
-
-- cria backup remoto em `/root/SaasTV/.deploy-backups/<timestamp>`;
-- envia apenas os arquivos informados;
-- roda `npm run build` na VPS quando houver impacto em frontend;
-- reinicia `saastv-local-api.service` se `server/local-api.mjs` mudar;
-- reinicia `tv-assist-whatsapp.service` se a stack `server/whatsapp-server.js`, `server/checkout-server.js`, `server/painel-agent-broker.js`, `server/start-all.js`, `package.json` ou `package-lock.json` mudar.
-
-### Build remoto
-
-```bash
-cd /root/SaasTV
-npm run build
-```
-
-### Exemplo de backup remoto
-
-```bash
-mkdir -p /root/SaasTV/.deploy-backups/20260505-091838/src/pages
-cp /root/SaasTV/src/pages/Attendance.jsx /root/SaasTV/.deploy-backups/20260505-091838/src/pages/Attendance.jsx
-```
-
-### Exemplo de verificacao remota
-
-```bash
-cd /root/SaasTV
-stat -c '%y %n' dist/index.html
-git status --short
-systemctl status saastv-local-api.service --no-pager
-systemctl status tv-assist-whatsapp.service --no-pager
-```
-
-## O que precisa ser feito em cada tipo de alteracao
-
-### Alteracao apenas de frontend
-
-- Fazer backup dos arquivos alterados.
-- Enviar os arquivos para `/root/SaasTV`.
-- Rodar `npm run build` na VPS.
-
-### Alteracao de documentacao
-
-- Enviar os arquivos de `docs/`, `README.md` e/ou `PROJECT_CONTEXT.md`.
-- Se nao houver impacto em `src/`, o rebuild nao e tecnicamente obrigatorio, mas pode ser mantido quando o deploy fizer parte de um pacote maior ja rebuildado.
-
-### Alteracao em backend local da aplicacao
-
-Arquivos tipicos:
-
-- `server/local-api.mjs`
-- `server.py`
-- `server/data/store.json` quando houver manutencao controlada
-
-Nesses casos, alem do upload:
-
-- confirmar qual processo realmente esta em uso na VPS;
-- aplicar o restart correspondente ao runtime ativo;
-- validar logs e disponibilidade do endpoint afetado.
-
-Observacao:
-
-- Atualmente a VPS usa `saastv-local-api.service` para `server/local-api.mjs`.
-- Atualmente a VPS usa `tv-assist-whatsapp.service` para `server/start-all.js`, que sobe `server/whatsapp-server.js`, `server/checkout-server.js` e `server/painel-agent-broker.js`.
-- Se houver mudanca estrutural de runtime, valide novamente os units antes de reiniciar.
+O parametro `-SshHost` e obrigatorio para evitar deploy acidental em uma VPS antiga.
 
 ## Rollback
 
-Se o deploy precisar ser revertido:
-
-1. Identificar o backup criado em `/root/SaasTV/.deploy-backups/<timestamp>`.
-2. Restaurar os arquivos afetados para seus caminhos originais.
-3. Rodar `npm run build` novamente, se a reversao envolver arquivos do frontend.
-
-### Rollback automatizado
-
 ```powershell
-npm run rollback:vps -- -Timestamp 20260516-153000
+npm run rollback:vps -- -Timestamp 20260602-153000 -SshHost root@IP_DA_NOVA_VPS
 ```
-
-O rollback:
-
-- restaura todos os arquivos presentes naquele backup remoto;
-- roda `npm run build` na VPS por padrao;
-- reinicia `tv-assist-whatsapp.service` e `saastv-local-api.service` por padrao.
 
 ## Checklist rapido
 
-- Diff revisado.
-- `npm run build` local validado.
-- Backup remoto criado.
-- Arquivos corretos enviados para `/root/SaasTV`.
-- `npm run build` executado na VPS.
-- Validacao basica concluida.
+- Registro `A freguesia -> IP_DA_NOVA_VPS` criado.
+- `www.freguesia` como CNAME para `freguesia.hakione.tech`.
+- Projeto em `/root/Freguesia`.
+- `.env` criado sem credenciais herdadas.
+- `npm ci` executado.
+- `npm run build` executado.
+- `dist` copiado para `/var/www/freguesia/current`.
+- Services Freguesia ativos.
+- `nginx -t` aprovado.
+- HTTP validado.
+- Certbot executado apos propagacao.

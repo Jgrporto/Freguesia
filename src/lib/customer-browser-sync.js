@@ -11,7 +11,7 @@ import {
 } from '@/lib/customer-sync-api';
 import { queryClientInstance } from '@/lib/query-client';
 
-export const NEWBR_BROWSER_SYNC_STORAGE_KEY = 'saastv:newbr-browser-sync';
+export const NEWBR_BROWSER_SYNC_STORAGE_KEY = 'freguesia:newbr-browser-sync';
 
 const listeners = new Set();
 

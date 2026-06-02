@@ -51,12 +51,12 @@ const NEWBR_CHECKOUT_BASE_URL = String(
 const NEWBR_CHECKOUT_USERNAME = String(
   process.env.NEWBR_CHECKOUT_USERNAME ||
     process.env.VITE_NEWBR_USERNAME ||
-    "suportemaistv",
+    "",
 ).trim();
 const NEWBR_CHECKOUT_PASSWORD = String(
   process.env.NEWBR_CHECKOUT_PASSWORD ||
     process.env.VITE_NEWBR_PASSWORD ||
-    "suporte+TV1",
+    "",
 ).trim();
 const NEWBR_CHECKOUT_TOKEN_CACHE_MS = Number.parseInt(
   process.env.NEWBR_CHECKOUT_TOKEN_CACHE_MS || "600000",

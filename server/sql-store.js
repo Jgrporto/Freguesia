@@ -39,9 +39,9 @@ const sanitizeIdentifier = (value, fallback) => {
 };
 
 const sqlSchema = sanitizeIdentifier(process.env.SQL_STORE_SCHEMA, "public");
-const sqlTable = sanitizeIdentifier(process.env.SQL_STORE_TABLE, "tvassist_json_store");
+const sqlTable = sanitizeIdentifier(process.env.SQL_STORE_TABLE, "freguesia_json_store");
 const tableRef = `"${sqlSchema}"."${sqlTable}"`;
-const sqliteTable = sanitizeIdentifier(process.env.SQL_STORE_TABLE, "tvassist_json_store");
+const sqliteTable = sanitizeIdentifier(process.env.SQL_STORE_TABLE, "freguesia_json_store");
 
 const FILE_BASENAME_TO_KEY = Object.freeze({
   "store.json": "main_store",

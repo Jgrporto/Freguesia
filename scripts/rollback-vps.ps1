@@ -1,8 +1,9 @@
 param(
   [Parameter(Mandatory = $true)]
   [string]$Timestamp,
-  [string]$SshHost = "root@89.117.32.226",
-  [string]$RemoteRoot = "/root/SaasTV",
+  [Parameter(Mandatory = $true)]
+  [string]$SshHost,
+  [string]$RemoteRoot = "/root/Freguesia",
   [switch]$SkipBuild,
   [switch]$SkipRestart
 )
@@ -37,7 +38,7 @@ if (-not $SkipBuild) {
 
 if (-not $SkipRestart) {
   Write-Host "Reiniciando servicos"
-  ssh $SshHost "systemctl restart tv-assist-whatsapp.service saastv-local-api.service && systemctl is-active tv-assist-whatsapp.service && systemctl is-active saastv-local-api.service"
+  ssh $SshHost "systemctl restart freguesia-whatsapp.service freguesia-worker.service freguesia-local-api.service && systemctl is-active freguesia-whatsapp.service && systemctl is-active freguesia-worker.service && systemctl is-active freguesia-local-api.service"
 }
 
 Write-Host "Rollback concluido para backup $Timestamp"

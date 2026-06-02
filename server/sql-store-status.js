@@ -68,7 +68,7 @@ const runSqlite = async () => {
   if (!config.sqlitePath) {
     throw new Error("SQLITE_DB_PATH/SQL_STORE_SQLITE_PATH nao configurado.");
   }
-  const table = sanitizeIdentifier(config.table, "tvassist_json_store");
+  const table = sanitizeIdentifier(config.table, "freguesia_json_store");
   const db = new Database(config.sqlitePath, { readonly: true, fileMustExist: true });
   try {
     const rows = db
@@ -100,7 +100,7 @@ const runPostgres = async () => {
     throw new Error("SQL_STORE_DATABASE_URL/DATABASE_URL nao configurada.");
   }
   const schema = sanitizeIdentifier(config.schema, "public");
-  const table = sanitizeIdentifier(config.table, "tvassist_json_store");
+  const table = sanitizeIdentifier(config.table, "freguesia_json_store");
   const tableRef = `"${schema}"."${table}"`;
   const pool = new Pool({
     connectionString,

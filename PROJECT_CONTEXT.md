@@ -1,8 +1,8 @@
-# Contexto do Projeto +TV
+# Contexto do Projeto Freguesia
 
 ## Objetivo
 
-Aplicacao web para operacao de atendimento, com foco em:
+Aplicacao web independente para a operacao Freguesia, com foco em:
 
 - fila de conversas
 - acompanhamento de status
@@ -10,6 +10,8 @@ Aplicacao web para operacao de atendimento, com foco em:
 - respostas rapidas
 - configuracoes de equipe, servicos e notificacoes
 - autenticacao local com sessao persistida
+- rotinas de disparo HSM
+- base de clientes sincronizada com o painel configurado
 
 ## Stack atual
 
@@ -20,6 +22,7 @@ Aplicacao web para operacao de atendimento, com foco em:
 - Tailwind CSS
 - Radix UI / shadcn
 - API local Node em `server/local-api.mjs`
+- SQLite por padrao em `server/data/freguesia.sqlite`
 
 ## Integracao da aplicacao
 
@@ -34,7 +37,7 @@ As respostas de listas da integracao podem chegar como array puro ou payload env
 
 1. `Login`
    - autentica usuarios locais
-   - persiste a sessao via cookie
+   - persiste a sessao via cookie `freguesia_session`
    - redireciona o usuario para a rota solicitada
 2. `Atendimento`
    - lista conversas
@@ -64,7 +67,7 @@ As respostas de listas da integracao podem chegar como array puro ou payload env
 10. `Base de Clientes`
    - lista clientes em tabela paginada
    - aplica filtros locais
-   - consome base persistida sincronizada com o NewBr
+   - consome a base persistida da integracao configurada
 
 ## Variaveis de ambiente locais
 
@@ -79,33 +82,19 @@ VITE_APP_BUILD_LABEL=
 ## Backend local
 
 - `server/local-api.mjs` roda como API local em Node.
-- O arquivo `server/data/store.json` persiste:
-  - usuarios locais
-  - hashes de senha
-  - sessoes autenticadas
-  - conversas e mensagens locais
-  - clientes sincronizados do NewBr
-  - rotinas de disparo HSM e logs de execucao
-  - etiquetas personalizadas e seus vinculos
-  - estado da sincronizacao
-  - logs das execucoes
+- `server/data/freguesia.sqlite` e a tabela `freguesia_json_store` persistem o estado quando SQLite esta habilitado.
 - O login da SPA e 100% local.
 - O backend emite cookie HttpOnly para autenticacao.
 - A opcao `Manter-me conectado` usa expiracao longa de sessao.
 - O endpoint administrativo de logout invalida as sessoes do usuario selecionado no servidor.
 
-## Comandos uteis
-
-```bash
-npm install
-npm run dev
-npm run build
-npm run preview
-```
-
 ## Deploy na VPS
 
-- O fluxo operacional de publicacao remota esta documentado em `docs/maintenance/deploy-vps.md`.
-- Toda atualizacao publicada deve preservar as acentuacoes corretas em portugues do Brasil.
-- Os arquivos de interface e manutencao devem ser mantidos em `UTF-8`.
-- O diretorio alvo atual da aplicacao na VPS e `/root/SaasTV`.
+- Diretorio alvo recomendado: `/root/Freguesia`.
+- Dominio recomendado: `freguesia.hakione.tech`.
+- Services recomendados:
+  - `freguesia-local-api.service`
+  - `freguesia-whatsapp.service`
+  - `freguesia-worker.service`
+- O fluxo operacional esta documentado em `docs/maintenance/deploy-vps.md`.
+Toda atualizacao publicada deve preservar UTF-8 e acentuacoes corretas em portugues do Brasil.

@@ -78,7 +78,7 @@ import {
   SETTINGS_SECTION_OPTIONS,
 } from '@/lib/role-settings-access';
 
-const SETTINGS_AUDIT_STORAGE_KEY = 'saastv:settings:audit:v1';
+const SETTINGS_AUDIT_STORAGE_KEY = 'freguesia:settings:audit:v1';
 
 const DEFAULT_ROLE_PERMISSIONS = {
   attendance: true,
@@ -680,7 +680,7 @@ export default function Settings() {
     }
 
     const existingUser = users.find((teamUser) => teamUser.id === userForm.id) || null;
-    const emailFallback = `${toSlug(userForm.username)}@saastv.local`;
+    const emailFallback = `${toSlug(userForm.username)}@freguesia.local`;
     const payload = {
       full_name: userForm.full_name.trim(),
       username: userForm.username.trim(),

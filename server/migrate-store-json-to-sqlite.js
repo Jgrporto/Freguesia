@@ -5,7 +5,7 @@ import { getSqlStoreConfig, upsertSqlStoreValue } from "./sql-store.js";
 
 const sourcePath = path.resolve(
   process.cwd(),
-  process.argv[2] || process.env.MAISTV_STORE_JSON_SOURCE || "server/data/store.json",
+  process.argv[2] || process.env.FREGUESIA_STORE_JSON_SOURCE || "server/data/store.json",
 );
 
 const objectCount = (value) => {

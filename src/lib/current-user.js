@@ -1,7 +1,7 @@
 export const DEFAULT_LOCAL_ADMIN_USER = {
   id: 'user-admin',
-  full_name: 'Administrador SaaSTV',
-  email: 'admin@saastv.local',
+  full_name: 'Administrador Freguesia',
+  email: 'admin@freguesia.local',
   username: 'admin',
   role: 'admin',
   role_name: 'Administrador',

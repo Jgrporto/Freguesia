@@ -752,7 +752,7 @@ function ChatbotFlowEditorCanvas() {
   }, [nodes, onNodesChange]);
 
   const handleDragStart = (event, type) => {
-    event.dataTransfer.setData('application/x-saastv-chatbot-component', type);
+    event.dataTransfer.setData('application/x-freguesia-chatbot-component', type);
     event.dataTransfer.effectAllowed = 'move';
   };
 
@@ -763,7 +763,7 @@ function ChatbotFlowEditorCanvas() {
 
   const handleDrop = useCallback((event) => {
     event.preventDefault();
-    const type = event.dataTransfer.getData('application/x-saastv-chatbot-component');
+    const type = event.dataTransfer.getData('application/x-freguesia-chatbot-component');
     if (!type || !reactFlowInstance?.screenToFlowPosition) return;
     addNode(type, reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
   }, [addNode, reactFlowInstance]);

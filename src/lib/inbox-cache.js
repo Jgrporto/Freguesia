@@ -1,9 +1,9 @@
-const DB_NAME = 'saastv-inbox-cache';
+const DB_NAME = 'freguesia-inbox-cache';
 const DB_VERSION = 2;
 const CONVERSATIONS_STORE = 'conversations';
 const MESSAGE_LISTS_STORE = 'messageLists';
 const DRAFTS_STORE = 'drafts';
-const DRAFTS_CHANGE_EVENT = 'saastv:inbox-cache:drafts:change';
+const DRAFTS_CHANGE_EVENT = 'freguesia:inbox-cache:drafts:change';
 
 let dbPromise = null;
 

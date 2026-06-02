@@ -46,11 +46,11 @@ export default function Login() {
   };
 
   const handleForgotPassword = () => {
-    toast.info('Solicite a redefinição de senha ao suporte +TV.');
+    toast.info('Solicite a redefinição de senha ao suporte Freguesia.');
   };
 
   const handleSupport = () => {
-    toast.info('Contate o suporte +TV para ajuda com acesso.');
+    toast.info('Contate o suporte Freguesia para ajuda com acesso.');
   };
 
   return (
@@ -59,14 +59,14 @@ export default function Login() {
         <div className="w-full max-w-md rounded-[32px] border border-white/80 bg-white/92 p-8 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur sm:p-10">
           <div className="mb-8 flex flex-col items-center text-center">
             <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-[24px] bg-[#25D366] shadow-[0_18px_40px_rgba(37,211,102,0.32)]">
-              <img src="/saastv_favicon_option4.png" alt="+TV" className="h-11 w-11 object-contain" />
+              <img src="/freguesia_favicon.png" alt="Freguesia" className="h-11 w-11 object-contain" />
             </div>
             <div className="mb-4 flex items-center gap-10 text-[#c6d2cd]">
               <span className="text-xl leading-none">···</span>
               <span className="text-xl leading-none">···</span>
             </div>
             <h1 className="text-3xl font-bold tracking-[-0.03em] text-slate-900">Bem-vindo de volta</h1>
-            <p className="mt-3 text-base text-slate-500">Acesse o sistema +TV Atendimento</p>
+            <p className="mt-3 text-base text-slate-500">Acesse o sistema Freguesia Atendimento</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -125,7 +125,7 @@ export default function Login() {
           <div className="mt-8 border-t border-slate-200 pt-6 text-center text-sm text-slate-500">
             <span>Precisa de ajuda? </span>
             <button type="button" onClick={handleSupport} className="font-semibold text-[#25D366] transition hover:text-[#20c55b]">
-              Contate o suporte +Tv
+              Contate o suporte Freguesia
             </button>
           </div>
 

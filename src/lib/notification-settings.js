@@ -1,6 +1,6 @@
 import { parseJsonResponse, requestLocalApi } from '@/lib/local-api';
 
-export const NOTIFICATION_SETTINGS_CHANGE_EVENT = 'saastv:settings:notifications:change';
+export const NOTIFICATION_SETTINGS_CHANGE_EVENT = 'freguesia:settings:notifications:change';
 export const MAX_NOTIFICATION_AUDIO_SIZE_BYTES = 2 * 1024 * 1024;
 
 export const DEFAULT_NOTIFICATION_SETTINGS = {

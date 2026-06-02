@@ -177,7 +177,7 @@ const AUTH_DEFAULT_STATE = {
 
 const DEFAULT_SERVICE_PHONE_NUMBER = '+55 24 99966-3511';
 const DEFAULT_SERVICE_ICON_KEY = 'headphones';
-const AUTH_COOKIE_NAME = 'saastv_session';
+const AUTH_COOKIE_NAME = 'freguesia_session';
 const DEFAULT_ADMIN_PASSWORD = 'admin';
 const LOCAL_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const LOCAL_REMEMBER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -292,7 +292,7 @@ const toSlug = (value) =>
 
 const log = (message) => {
   const timestamp = new Date().toISOString();
-  console.log(`[saastv-local-api] ${timestamp} ${message}`);
+  console.log(`[freguesia-local-api] ${timestamp} ${message}`);
 };
 
 const chatbotDebugLog = (message) => {
@@ -1688,7 +1688,7 @@ const normalizeUserRecord = (user = {}, index = 0, fallbackCreatedAt = nowIso())
   return {
     id: String(user.id || `user-${index + 1}`),
     full_name: String(user.full_name || user.name || '').trim(),
-    email: String(user.email || (username ? `${toSlug(username)}@saastv.local` : '')).trim().toLowerCase(),
+    email: String(user.email || (username ? `${toSlug(username)}@freguesia.local` : '')).trim().toLowerCase(),
     role: normalizedRole || 'admin',
     role_id: String(user.role_id || '').trim() || (inferredAdminUser ? 'role-admin' : ''),
     role_name: normalizedRoleName,
@@ -2252,8 +2252,8 @@ const seedStore = () => {
   const users = [
     {
       id: 'user-admin',
-      full_name: 'Administrador SaaSTV',
-      email: 'admin@saastv.local',
+      full_name: 'Administrador Freguesia',
+      email: 'admin@freguesia.local',
       role: 'admin',
       role_id: 'role-admin',
       role_name: 'Administrador',
@@ -2389,7 +2389,7 @@ const seedStore = () => {
     {
       id: 'qr-1',
       title: 'Boas-vindas',
-      content: 'Ola. Seja bem-vindo(a) ao atendimento da SaaSTV. Como posso ajudar?',
+      content: 'Ola. Seja bem-vindo(a) ao atendimento da Freguesia. Como posso ajudar?',
       shortcut: '/boasvindas',
       category: 'greeting',
       created_date: createdAt,

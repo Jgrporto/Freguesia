@@ -50,7 +50,7 @@ export default function ManualRunDialog({
         <header className="flex items-start justify-between border-b border-border px-5 py-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Envio manual</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Selecione clientes da base do SaaSTV antes de executar a rotina.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Selecione clientes da base da Freguesia antes de executar a rotina.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
             <X className="h-5 w-5" />

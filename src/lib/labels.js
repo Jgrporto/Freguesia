@@ -13,11 +13,11 @@ import {
 } from './labels-api';
 import { queryClientInstance } from './query-client';
 
-const LEGACY_CUSTOM_LABELS_STORAGE_KEY = 'saastv:labels:custom:v1';
-const LEGACY_LABEL_ASSIGNMENTS_STORAGE_KEY = 'saastv:labels:assignments:v1';
-const LEGACY_STAGE_ASSIGNMENTS_STORAGE_KEY = 'saastv:labels:stages:v1';
-const LEGACY_LABEL_MIGRATION_KEY = 'saastv:labels:migrated-to-store:v1';
-const LABELS_CHANGE_EVENT = 'saastv:labels:change';
+const LEGACY_CUSTOM_LABELS_STORAGE_KEY = 'freguesia:labels:custom:v1';
+const LEGACY_LABEL_ASSIGNMENTS_STORAGE_KEY = 'freguesia:labels:assignments:v1';
+const LEGACY_STAGE_ASSIGNMENTS_STORAGE_KEY = 'freguesia:labels:stages:v1';
+const LEGACY_LABEL_MIGRATION_KEY = 'freguesia:labels:migrated-to-store:v1';
+const LABELS_CHANGE_EVENT = 'freguesia:labels:change';
 const LABELS_QUERY_KEY = ['labels', 'catalog'];
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 

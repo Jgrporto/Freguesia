@@ -4,9 +4,9 @@ export const DEFAULT_NEWBR_BROWSER_BASE_URL =
     .trim()
     .replace(/\/+$/, '');
 export const DEFAULT_NEWBR_BROWSER_USERNAME =
-  String(import.meta.env.VITE_NEWBR_SYNC_USERNAME || 'suportemaistv').trim();
+  String(import.meta.env.VITE_NEWBR_SYNC_USERNAME || '').trim();
 export const DEFAULT_NEWBR_BROWSER_PASSWORD =
-  String(import.meta.env.VITE_NEWBR_SYNC_PASSWORD || 'suporte+TV1');
+  String(import.meta.env.VITE_NEWBR_SYNC_PASSWORD || '');
 
 const requestLocalApiJson = async (path, options = {}) => {
   const response = await requestLocalApi(path, options);

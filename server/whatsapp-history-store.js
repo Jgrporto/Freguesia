@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 
-const DEFAULT_HISTORY_DB_PATH = "server/data/maistv-history.sqlite";
+const DEFAULT_HISTORY_DB_PATH = "server/data/freguesia-history.sqlite";
 
 const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
 
