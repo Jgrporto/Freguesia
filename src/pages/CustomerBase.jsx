@@ -1,13 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  CalendarDays,
+  ChevronDown,
+  Clock3,
+  Download,
+  Filter,
+  Gift,
   Loader2,
   Logs,
   MessageSquare,
+  MoreHorizontal,
   Pencil,
   RefreshCw,
+  Search,
   Send,
-  WandSparkles,
+  Users,
+  X,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -98,6 +107,11 @@ const birthdayOptions = [
   { value: 'month', label: 'Aniversariantes do mes' },
   { value: 'week', label: 'Aniversariantes da semana' },
   { value: 'today', label: 'Aniversariantes de hoje' },
+];
+
+const periodFieldOptions = [
+  { value: 'registration', label: 'Cadastro' },
+  { value: 'lastVisit', label: 'Ultima visita' },
 ];
 
 function formatDateInputValue(date) {
@@ -209,6 +223,18 @@ function matchesProfileCompleteness(customer, filter) {
   return true;
 }
 
+function getOptionLabel(options, value, fallback = 'Todos') {
+  return options.find((option) => option.value === value)?.label || fallback;
+}
+
+function escapeCsvValue(value) {
+  const normalized = String(value ?? '');
+  if (/[,;"\n]/.test(normalized)) {
+    return `"${normalized.replace(/"/g, '""')}"`;
+  }
+  return normalized;
+}
+
 async function createOutboundMessage(customer, content) {
   if (!customer.phoneDigits) {
     throw new Error(`Cliente sem WhatsApp valido: ${customer.name}`);
@@ -224,6 +250,7 @@ export default function CustomerBase() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const previousSyncStatusRef = useRef(null);
+  const previousSuccessfulSyncAtRef = useRef(null);
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [page, setPage] = useState(1);
@@ -236,6 +263,7 @@ export default function CustomerBase() {
   const [browserSyncErrorMessage, setBrowserSyncErrorMessage] = useState('');
   const [isSubmittingAppBarberSync, setIsSubmittingAppBarberSync] = useState(false);
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(true);
 
   const { data: conversations = [] } = useQuery({
     queryKey: ['conversations', 'customer-base'],
@@ -321,6 +349,51 @@ export default function CustomerBase() {
   const pageIds = paginatedCustomers.map((customer) => customer.id);
   const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
 
+  const customerStats = useMemo(() => {
+    const total = customers.length;
+    const noVisit = customers.filter((customer) => customer.status === 'no_visit').length;
+    const aboveThirtyDays = customers.filter(
+      (customer) => Number.isFinite(customer.daysWithoutVisit) && customer.daysWithoutVisit >= 31,
+    ).length;
+    const birthdaysThisMonth = customers.filter((customer) => matchesBirthdayFilter(customer.birthDate, 'month')).length;
+
+    return {
+      total,
+      noVisit,
+      aboveThirtyDays,
+      birthdaysThisMonth,
+    };
+  }, [customers]);
+
+  const activeFilterBadges = useMemo(() => {
+    const chips = [];
+
+    if (filters.search.trim()) chips.push({ key: 'search', label: `Busca: ${filters.search.trim()}` });
+    if (filters.periodField !== DEFAULT_FILTERS.periodField) {
+      chips.push({ key: 'periodField', label: `Periodo: ${getOptionLabel(periodFieldOptions, filters.periodField, 'Cadastro')}` });
+    }
+    if (filters.startDate) chips.push({ key: 'startDate', label: `Inicio: ${filters.startDate}` });
+    if (filters.endDate) chips.push({ key: 'endDate', label: `Fim: ${filters.endDate}` });
+    if (filters.returnStatus !== 'all') {
+      chips.push({ key: 'returnStatus', label: `Status: ${getOptionLabel(returnStatusOptions, filters.returnStatus)}` });
+    }
+    if (filters.daysWithoutVisit !== 'all') {
+      chips.push({ key: 'daysWithoutVisit', label: `Dias sem vir: ${getOptionLabel(daysWithoutVisitOptions, filters.daysWithoutVisit)}` });
+    }
+    if (filters.loginStatus !== 'all') {
+      chips.push({ key: 'loginStatus', label: `Login/App: ${getOptionLabel(loginStatusOptions, filters.loginStatus)}` });
+    }
+    if (filters.profileCompleteness !== 'all') {
+      chips.push({ key: 'profileCompleteness', label: `Cadastro: ${getOptionLabel(profileCompletenessOptions, filters.profileCompleteness)}` });
+    }
+    if (filters.birthday !== 'all') {
+      chips.push({ key: 'birthday', label: `Aniversario: ${getOptionLabel(birthdayOptions, filters.birthday)}` });
+    }
+    if (filters.neighborhood.trim()) chips.push({ key: 'neighborhood', label: `Bairro: ${filters.neighborhood.trim()}` });
+
+    return chips;
+  }, [filters]);
+
   useEffect(() => {
     setPage(1);
   }, [filters]);
@@ -335,8 +408,15 @@ export default function CustomerBase() {
   useEffect(() => {
     const currentStatus = syncMeta?.status || null;
     const previousStatus = previousSyncStatusRef.current;
+    const currentSuccessfulSyncAt = syncMeta?.lastSuccessfulSyncAt || null;
+    const previousSuccessfulSyncAt = previousSuccessfulSyncAtRef.current;
 
     if (previousStatus === 'running' && currentStatus === 'success') {
+      void queryClient.invalidateQueries({ queryKey: ['persisted-customers'] });
+      void queryClient.invalidateQueries({ queryKey: ['customer-sync-logs'] });
+    }
+
+    if (currentSuccessfulSyncAt && previousSuccessfulSyncAt && currentSuccessfulSyncAt !== previousSuccessfulSyncAt) {
       void queryClient.invalidateQueries({ queryKey: ['persisted-customers'] });
       void queryClient.invalidateQueries({ queryKey: ['customer-sync-logs'] });
     }
@@ -346,6 +426,7 @@ export default function CustomerBase() {
     }
 
     previousSyncStatusRef.current = currentStatus;
+    previousSuccessfulSyncAtRef.current = currentSuccessfulSyncAt;
   }, [queryClient, syncMeta]);
 
   useEffect(() => {
@@ -358,6 +439,10 @@ export default function CustomerBase() {
 
   const setFilterValue = (key, value) => {
     setFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const clearSingleFilter = (key) => {
+    setFilters((current) => ({ ...current, [key]: DEFAULT_FILTERS[key] }));
   };
 
   const handleTogglePageSelection = (checked) => {
@@ -392,9 +477,12 @@ export default function CustomerBase() {
     setIsSubmittingAppBarberSync(true);
 
     try {
-      await startAppBarberCustomerSync();
+      const result = await startAppBarberCustomerSync();
+      if (result?.sync) {
+        queryClient.setQueryData(['customer-sync-state'], result.sync);
+      }
 
-      toast.message('Sincronizacao do AppBarber iniciada na VPS.');
+      toast.message('Sincronização em andamento.');
       void queryClient.invalidateQueries({ queryKey: ['customer-sync-state'] });
       void queryClient.invalidateQueries({ queryKey: ['customer-sync-logs'] });
     } catch (error) {
@@ -404,6 +492,50 @@ export default function CustomerBase() {
     } finally {
       setIsSubmittingAppBarberSync(false);
     }
+  };
+
+  const handleExportCustomers = () => {
+    if (filteredCustomers.length === 0) {
+      toast.error('Nao ha clientes para exportar.');
+      return;
+    }
+
+    const header = [
+      'Cliente',
+      'WhatsApp',
+      'Login/App',
+      'Cadastro',
+      'Ultima visita',
+      'Dias sem vir',
+      'Status',
+      'Bairro',
+    ];
+
+    const rows = filteredCustomers.map((customer) => [
+      customer.name,
+      customer.whatsapp,
+      customer.appLogin || '-',
+      customer.registrationDateLabel,
+      customer.lastVisitLabel,
+      customer.daysWithoutVisitLabel,
+      customer.statusLabel,
+      customer.neighborhood,
+    ]);
+
+    const csvContent = [header, ...rows]
+      .map((line) => line.map(escapeCsvValue).join(';'))
+      .join('\n');
+
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `clientes-appbarber-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success('Exportacao iniciada.');
   };
 
   const openDispatchModal = (targets) => {
@@ -497,20 +629,59 @@ export default function CustomerBase() {
     : '';
   const logs = logsResponse?.logs || [];
 
+  const syncIndicator = isBrowserSyncRunning || isSyncRunning
+    ? { label: 'Em andamento', dotClass: 'bg-amber-500', badgeClass: 'bg-amber-500/10 text-amber-700 border-amber-500/20' }
+    : authErrorMessage
+      ? { label: 'Com erro', dotClass: 'bg-red-500', badgeClass: 'bg-red-500/10 text-red-600 border-red-500/20' }
+      : syncMeta?.lastSuccessfulSyncAt
+        ? { label: 'Atualizado', dotClass: 'bg-emerald-500', badgeClass: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20' }
+        : { label: 'Desatualizado', dotClass: 'bg-slate-400', badgeClass: 'bg-slate-500/10 text-slate-600 border-slate-500/20' };
+
+  const statsCards = [
+    {
+      title: 'Total de clientes',
+      value: customerStats.total,
+      description: 'Sincronizados',
+      icon: Users,
+      iconClass: 'bg-red-50 text-red-600 ring-red-100',
+    },
+    {
+      title: 'Sem visita',
+      value: customerStats.noVisit,
+      description: 'Nunca voltaram',
+      icon: Clock3,
+      iconClass: 'bg-amber-50 text-amber-600 ring-amber-100',
+    },
+    {
+      title: '31+ dias sem vir',
+      value: customerStats.aboveThirtyDays,
+      description: 'Clientes',
+      icon: CalendarDays,
+      iconClass: 'bg-violet-50 text-violet-600 ring-violet-100',
+    },
+    {
+      title: 'Aniversarios do mes',
+      value: customerStats.birthdaysThisMonth,
+      description: 'Este mes',
+      icon: Gift,
+      iconClass: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
+    },
+  ];
+
   return (
     <PageShell>
       <PageHeader
         title="Base de Clientes"
-        description="Clientes persisitdos do AppBarber."
+        description="Clientes persistidos do AppBarber."
         actions={
-          <div className="flex flex-col items-stretch gap-2">
+          <div className="flex flex-col items-stretch gap-2 lg:items-end">
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" onClick={() => setLogsOpen(true)} className="gap-2">
-                <Logs className="w-4 h-4" />
+                <Logs className="h-4 w-4" />
                 Logs
               </Button>
               <Button onClick={handleSyncCustomers} disabled={isBrowserSyncRunning} className="gap-2">
-                <RefreshCw className={cn('w-4 h-4', isBrowserSyncRunning && 'animate-spin')} />
+                <RefreshCw className={cn('h-4 w-4', isBrowserSyncRunning && 'animate-spin')} />
                 Sincronizar AppBarber
               </Button>
             </div>
@@ -529,16 +700,85 @@ export default function CustomerBase() {
         }
       />
 
+      <div className="grid gap-4 xl:grid-cols-4">
+        {statsCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <PageSectionCard key={card.title} className="p-5">
+              <div className="flex items-start gap-4">
+                <div className={cn('flex h-14 w-14 items-center justify-center rounded-2xl ring-1', card.iconClass)}>
+                  <Icon className="h-6 w-6" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-muted-foreground">{card.title}</p>
+                  <p className="text-3xl font-bold text-foreground">{card.value}</p>
+                  <p className="text-sm text-muted-foreground">{card.description}</p>
+                </div>
+              </div>
+            </PageSectionCard>
+          );
+        })}
+      </div>
+
       <PageSectionCard className="p-5 space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <div className="space-y-1.5 xl:col-span-2">
-            <label className="text-sm font-medium text-foreground">Buscar</label>
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] xl:items-center">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={filters.search}
               onChange={(event) => setFilterValue('search', event.target.value)}
-              placeholder="Nome, WhatsApp, e-mail, CPF ou telefone."
+              placeholder="Nome, WhatsApp, e-mail, CPF ou telefone"
+              className="h-12 rounded-xl pl-11"
             />
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <span className={cn('h-2.5 w-2.5 rounded-full', syncIndicator.dotClass)} />
+                Sincronizacao do AppBarber
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline" className={cn('rounded-full font-medium', syncIndicator.badgeClass)}>
+                  {syncIndicator.label}
+                </Badge>
+                <span>{authErrorMessage ? 'Verifique o log da ultima execucao.' : 'Base pronta para consulta.'}</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-muted/20 px-4 py-3">
+              <div className="text-sm font-medium text-foreground">Ultima atualizacao</div>
+              <div className="mt-2 text-xs text-muted-foreground">
+                <p>{lastSyncLabel}</p>
+                <p>Proxima: {nextSyncCountdown || nextSyncLabel}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Filter className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Filtros</h2>
+              <p className="text-sm text-muted-foreground">Refine a base e encontre oportunidades de retorno mais rapido.</p>
+            </div>
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={() => setShowAdvancedFilters((current) => !current)}
+            className="gap-2 self-start md:self-auto"
+          >
+            Filtros avancados
+            <ChevronDown className={cn('h-4 w-4 transition-transform', showAdvancedFilters && 'rotate-180')} />
+          </Button>
+        </div>
+
+        {showAdvancedFilters ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">Periodo</label>
             <Select value={filters.periodField} onValueChange={(value) => setFilterValue('periodField', value)}>
@@ -652,17 +892,43 @@ export default function CustomerBase() {
             <p className="text-xs text-muted-foreground">Use apenas quando o bairro estiver preenchido.</p>
           </div>
         </div>
+        ) : null}
 
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm text-muted-foreground">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-2">
+            <div className="text-sm text-muted-foreground">
             {filteredCustomers.length} cliente(s) encontrados • {selectedCount} marcado(s)
+            </div>
+            {activeFilterBadges.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {activeFilterBadges.map((chip) => (
+                  <Badge
+                    key={chip.key}
+                    variant="outline"
+                    className="flex items-center gap-1 rounded-full border-border bg-background px-3 py-1 text-xs font-medium text-foreground"
+                  >
+                    {chip.label}
+                    <button
+                      type="button"
+                      onClick={() => clearSingleFilter(chip.key)}
+                      className="rounded-full text-muted-foreground transition hover:text-foreground"
+                      aria-label={`Remover filtro ${chip.label}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Nenhum filtro adicional aplicado.</p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={handleClearFilters}>
               Limpar Filtros
             </Button>
             <Button onClick={() => openDispatchModal(selectedCustomers)} disabled={selectedCount === 0} className="gap-2">
-              <WandSparkles className="w-4 h-4" />
+              <Send className="h-4 w-4" />
               Disparo em Massa
             </Button>
           </div>
@@ -670,22 +936,38 @@ export default function CustomerBase() {
       </PageSectionCard>
 
       <PageSectionCard className="overflow-hidden">
-        <div className="flex flex-col gap-2 border-b border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Clientes</h2>
-            <p className="text-sm text-muted-foreground">
-              Mostrando {filteredCustomers.length === 0 ? 0 : pageStart + 1} a {Math.min(pageStart + PAGE_SIZE, filteredCustomers.length)} de{' '}
-              {filteredCustomers.length}
-            </p>
-          </div>
-          {(isLoadingCustomers || isFetchingCustomers || isFetchingSyncState) && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {isSyncRunning ? 'Sincronizando AppBarber...' : 'Atualizando base...'}
+        <div className="flex flex-col gap-3 border-b border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Users className="h-5 w-5" />
             </div>
-          )}
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Clientes</h2>
+              <p className="text-sm text-muted-foreground">
+                Mostrando {filteredCustomers.length === 0 ? 0 : pageStart + 1} a {Math.min(pageStart + PAGE_SIZE, filteredCustomers.length)} de{' '}
+                {filteredCustomers.length}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {(isLoadingCustomers || isFetchingCustomers || isFetchingSyncState) && (
+              <div className="mr-2 flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {isSyncRunning ? 'Sincronizando AppBarber...' : 'Atualizando base...'}
+              </div>
+            )}
+            <Button variant="outline" onClick={handleExportCustomers} disabled={filteredCustomers.length === 0} className="gap-2">
+              <Download className="h-4 w-4" />
+              Exportar
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => toast.message('Mais acoes em breve.')}>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow className="bg-secondary/60">
@@ -706,10 +988,24 @@ export default function CustomerBase() {
           <TableBody>
             {!isLoadingCustomers && paginatedCustomers.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
-                  {persistedCustomers.length === 0
-                    ? 'Nenhum cliente sincronizado ainda. Execute a primeira sincronizacao manual do AppBarber.'
-                    : 'Nenhum cliente encontrado para os filtros atuais.'}
+                <TableCell colSpan={10} className="px-5 py-16">
+                  <div className="flex flex-col items-center justify-center gap-3 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+                      <Users className="h-8 w-8" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-base font-semibold text-foreground">
+                        {persistedCustomers.length === 0
+                          ? 'Nenhum cliente sincronizado ainda.'
+                          : 'Nenhum cliente encontrado para os filtros atuais.'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {persistedCustomers.length === 0
+                          ? 'Execute a primeira sincronizacao manual do AppBarber.'
+                          : 'Ajuste os filtros para localizar outros clientes.'}
+                      </p>
+                    </div>
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -738,7 +1034,11 @@ export default function CustomerBase() {
                 <TableCell className="text-sm text-foreground">{customer.appLogin || '-'}</TableCell>
                 <TableCell className="text-sm text-foreground">{customer.registrationDateLabel}</TableCell>
                 <TableCell className="text-sm text-foreground">{customer.lastVisitLabel}</TableCell>
-                <TableCell className="text-sm font-medium text-foreground">{customer.daysWithoutVisitLabel}</TableCell>
+                <TableCell>
+                  <span className="inline-flex rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-foreground">
+                    {customer.daysWithoutVisitLabel}
+                  </span>
+                </TableCell>
                 <TableCell>
                   <Badge variant="outline" className={cn('rounded-full font-medium', customer.statusClasses)}>
                     {customer.statusLabel}
@@ -762,6 +1062,7 @@ export default function CustomerBase() {
             ))}
           </TableBody>
         </Table>
+        </div>
 
         <div className="flex flex-col gap-3 border-t border-border px-5 py-4 md:flex-row md:items-center md:justify-between">
           <div className="text-sm text-muted-foreground">
