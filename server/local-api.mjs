@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { readJsonBackedStore, writeJsonBackedStore } from './sql-store.js';
 import { resolveConversationLabels } from './labels-store.js';
+import { fetchAllCustomersFromAppBarber } from './appbarber-sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4121,12 +4122,12 @@ const fetchAllCustomersFromPythonBridge = async (config) => {
 };
 
 const buildCustomerStableKey = (customer, fallbackIndex) => {
-  const explicitId = extractCustomerField(customer, ['id', 'customer_id', 'customerId', 'uuid', '_id']);
+  const explicitId = extractCustomerField(customer, ['Codigo', 'UsuCodigo', 'id', 'customer_id', 'customerId', 'uuid', '_id']);
   if (explicitId) return explicitId;
 
-  const username = extractCustomerField(customer, ['username', 'user_name', 'login', 'user']);
+  const username = extractCustomerField(customer, ['Login', 'username', 'user_name', 'login', 'user']);
   const phone = normalizePhone(
-    extractCustomerField(customer, ['whatsapp', 'telefone', 'phone', 'phone_number', 'mobile', 'cellphone']),
+    extractCustomerField(customer, ['Celular', 'Telefone', 'whatsapp', 'telefone', 'phone', 'phone_number', 'mobile', 'cellphone']),
   );
 
   if (username || phone) {
@@ -4137,11 +4138,14 @@ const buildCustomerStableKey = (customer, fallbackIndex) => {
 };
 
 const normalizeCustomerRow = (customer, index, syncedAt) => {
+  const sourcePrefix = customer?.Nome || customer?.Codigo || customer?.UsuCodigo ? 'appbarber' : 'newbr';
   const expiresAt = findExpiryDate(customer);
   const status = extractCustomerField(customer, ['status', 'situation', 'state']).trim().toUpperCase();
-  const username = extractCustomerField(customer, ['username', 'user_name', 'login', 'user', 'nome', 'name']);
-  const displayName = extractCustomerField(customer, ['name', 'nome', 'full_name', 'fullName', 'username']);
-  const whatsapp = extractCustomerField(customer, ['whatsapp', 'telefone', 'phone', 'phone_number', 'mobile', 'cellphone']);
+  const username = extractCustomerField(customer, ['Login', 'username', 'user_name', 'login', 'user', 'nome', 'name']);
+  const displayName = extractCustomerField(customer, ['Nome', 'name', 'nome', 'full_name', 'fullName', 'username']);
+  const ddi = extractCustomerField(customer, ['DDI', 'ddi', 'country_code', 'countryCode']);
+  const phoneRaw = extractCustomerField(customer, ['Celular', 'Telefone', 'whatsapp', 'telefone', 'phone', 'phone_number', 'mobile', 'cellphone']);
+  const whatsapp = `${ddi ? `+${normalizePhone(ddi)}` : ''}${phoneRaw ? ` ${phoneRaw}` : ''}`.trim() || phoneRaw;
   const reseller = extractCustomerField(customer, ['reseller', 'reseller_name', 'revendedor', 'seller', 'owner', 'parent_name']);
   const packageName = extractCustomerField(
     customer,
@@ -4153,7 +4157,7 @@ const normalizeCustomerRow = (customer, index, syncedAt) => {
     toNullableInteger(extractCustomerField(customer, ['connections', 'connection', 'connectionCount', 'max_connections'])) || 0;
 
   return {
-    id: `newbr-${toSlug(buildCustomerStableKey(customer, index))}`,
+    id: `${sourcePrefix}-${toSlug(buildCustomerStableKey(customer, index))}`,
     sync_key: buildCustomerStableKey(customer, index),
     username: username || displayName || `cliente-${index + 1}`,
     display_name: displayName || username || `Cliente ${index + 1}`,
@@ -6766,16 +6770,19 @@ const classifySyncError = (error) => {
   }
 
   if (error?.name === 'AbortError') {
-    return new SyncError('A sincronizacao com o NewBr excedeu o tempo limite.', 504, 'timeout');
+    return new SyncError('A sincronizacao de clientes excedeu o tempo limite.', 504, 'timeout');
   }
 
   return new SyncError(error?.message || 'Falha inesperada na sincronizacao.', 500, 'unknown');
 };
 
+const isAppBarberSyncMode = (mode) => String(mode || '').toLowerCase().includes('appbarber');
+
 const finishCustomerSyncSuccess = async (mode, startedAt, result) => {
   const finishedAt = nowIso();
   const customers = result.rows.map((row, index) => normalizeCustomerRow(row, index, finishedAt));
   const summary = buildCustomerSyncSummary(customers);
+  const source = String(result.source || (isAppBarberSyncMode(mode) ? 'appbarber' : 'newbr')).trim();
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   let autoSyncIntervalMs = CUSTOMER_SYNC_SETTINGS_DEFAULT.autoSyncIntervalMinutes * 60 * 1000;
 
@@ -6790,7 +6797,7 @@ const finishCustomerSyncSuccess = async (mode, startedAt, result) => {
       lastSyncAt: finishedAt,
       lastSuccessfulSyncAt: finishedAt,
       lastMode: mode,
-      nextScheduledAt: new Date(Date.now() + autoSyncIntervalMs).toISOString(),
+      nextScheduledAt: isAppBarberSyncMode(mode) ? null : new Date(Date.now() + autoSyncIntervalMs).toISOString(),
       hasCompletedInitialSync: true,
       lastError: null,
       lastErrorCode: null,
@@ -6803,6 +6810,7 @@ const finishCustomerSyncSuccess = async (mode, startedAt, result) => {
     current.customerSyncLogs = appendCustomerSyncLog(current.customerSyncLogs, {
       id: `customer-sync-${Date.now().toString(36)}`,
       mode,
+      source,
       status: 'success',
       startedAt,
       finishedAt,
@@ -6824,11 +6832,12 @@ const finishCustomerSyncFailure = async (mode, startedAt, error) => {
   const finishedAt = nowIso();
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   let autoSyncIntervalMs = CUSTOMER_SYNC_SETTINGS_DEFAULT.autoSyncIntervalMinutes * 60 * 1000;
+  const providerName = isAppBarberSyncMode(mode) ? 'AppBarber' : 'NewBr';
   const syncAuthMessage =
     syncError.code === 'auth'
-      ? 'Falha de autorizacao na sincronizacao NewBr. Revise as credenciais configuradas na VPS.'
+      ? `Falha de autorizacao na sincronizacao ${providerName}. Revise as credenciais configuradas.`
       : syncError.code === 'cloudflare'
-        ? 'O NewBr bloqueou a sincronizacao com uma protecao do Cloudflare. A tela continua operando, mas a carga de clientes nao conseguiu entrar.'
+        ? `${providerName} bloqueou a sincronizacao com uma protecao. A tela continua operando, mas a carga de clientes nao conseguiu entrar.`
         : null;
 
   const store = await updateStore((current) => {
@@ -6839,7 +6848,7 @@ const finishCustomerSyncFailure = async (mode, startedAt, error) => {
       currentRunStartedAt: null,
       lastAttemptAt: startedAt,
       lastMode: mode,
-      nextScheduledAt: new Date(Date.now() + autoSyncIntervalMs).toISOString(),
+      nextScheduledAt: isAppBarberSyncMode(mode) ? null : new Date(Date.now() + autoSyncIntervalMs).toISOString(),
       lastError: syncError.message,
       lastErrorCode: syncError.code,
       authErrorMessage: syncAuthMessage,
@@ -6895,7 +6904,7 @@ const finishCustomerSyncImportedSuccess = async (payload = {}) => {
       lastSyncAt: finishedAt,
       lastSuccessfulSyncAt: finishedAt,
       lastMode: mode,
-      nextScheduledAt: new Date(Date.now() + autoSyncIntervalMs).toISOString(),
+      nextScheduledAt: isAppBarberSyncMode(mode) ? null : new Date(Date.now() + autoSyncIntervalMs).toISOString(),
       hasCompletedInitialSync: true,
       lastError: null,
       lastErrorCode: null,
@@ -6983,6 +6992,43 @@ const executeCustomerSync = async (mode, startedAt, overrides = {}) => {
   } finally {
     customerSyncRunning = false;
   }
+};
+
+const executeAppBarberCustomerSync = async (mode, startedAt, overrides = {}) => {
+  try {
+    const result = await fetchAllCustomersFromAppBarber(overrides);
+    return await finishCustomerSyncSuccess(mode, startedAt, {
+      ...result,
+      source: 'appbarber',
+    });
+  } catch (error) {
+    await finishCustomerSyncFailure(mode, startedAt, error);
+    throw classifySyncError(error);
+  } finally {
+    customerSyncRunning = false;
+  }
+};
+
+const startAppBarberCustomerSync = async (overrides = {}) => {
+  if (customerSyncRunning) {
+    const store = await readStore();
+    return {
+      started: false,
+      sync: store.customerSync,
+    };
+  }
+
+  customerSyncRunning = true;
+  const mode = 'appbarber_manual';
+  const { startedAt, sync } = await markCustomerSyncRunning(mode);
+  void executeAppBarberCustomerSync(mode, startedAt, overrides).catch((error) => {
+    log(`Falha na sincronizacao AppBarber: ${error?.message || error}`);
+  });
+
+  return {
+    started: true,
+    sync,
+  };
 };
 
 const startCustomerSync = async (mode = 'manual', overrides = {}) => {
@@ -7605,6 +7651,22 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/local/customers/sync') {
       const payload = await readBody(req);
       const result = await startCustomerSync('manual', payload);
+      if (!result.started) {
+        return sendJson(res, 409, {
+          error: 'Ja existe uma sincronizacao de clientes em andamento.',
+          sync: getPublicCustomerSyncState(result.sync),
+        });
+      }
+
+      return sendJson(res, 202, {
+        ok: true,
+        sync: getPublicCustomerSyncState(result.sync),
+      });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/local/customers/sync/appbarber') {
+      const payload = await readBody(req);
+      const result = await startAppBarberCustomerSync(payload);
       if (!result.started) {
         return sendJson(res, 409, {
           error: 'Ja existe uma sincronizacao de clientes em andamento.',

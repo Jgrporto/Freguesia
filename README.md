@@ -36,7 +36,15 @@ LOCAL_CHECKOUT_API_BASE_URL=http://127.0.0.1:5251
 LOCAL_CHECKOUT_TOKEN_API_BASE_URL=http://127.0.0.1:5250
 ```
 
-As variaveis `NEWBR_*` continuam existindo por compatibilidade com a integracao atual de base de clientes. Na nova VPS, defina usuario e senha no `.env`; o projeto nao carrega mais credenciais antigas por padrao.
+As variaveis `APPBARBER_*` controlam a sincronizacao manual da base de clientes. Na VPS, defina usuario, senha e o caminho do Chrome/Chromium no `.env`; o projeto nao carrega credenciais reais por padrao.
+
+```env
+APPBARBER_USER=
+APPBARBER_PASSWORD=
+APPBARBER_CHROME_PATH=/usr/bin/chromium
+APPBARBER_SYNC_PAGE_SIZE=1000
+APPBARBER_SYNC_MAX_PAGES=0
+```
 
 ## Login local
 

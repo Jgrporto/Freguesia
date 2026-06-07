@@ -7,6 +7,14 @@ export const DEFAULT_NEWBR_BROWSER_USERNAME =
   String(import.meta.env.VITE_NEWBR_SYNC_USERNAME || '').trim();
 export const DEFAULT_NEWBR_BROWSER_PASSWORD =
   String(import.meta.env.VITE_NEWBR_SYNC_PASSWORD || '');
+export const DEFAULT_APPBARBER_BROWSER_BASE_URL =
+  String(import.meta.env.VITE_APPBARBER_SYNC_BASE_URL || 'https://sistema.appbarber.com.br')
+    .trim()
+    .replace(/\/+$/, '');
+export const DEFAULT_APPBARBER_BROWSER_USERNAME =
+  String(import.meta.env.VITE_APPBARBER_SYNC_USERNAME || '').trim();
+export const DEFAULT_APPBARBER_BROWSER_PASSWORD =
+  String(import.meta.env.VITE_APPBARBER_SYNC_PASSWORD || '');
 
 const requestLocalApiJson = async (path, options = {}) => {
   const response = await requestLocalApi(path, options);
@@ -39,6 +47,16 @@ export const markCustomerBrowserSyncStarted = async (payload = {}) => {
 
 export const startCustomerSync = async (payload = {}) => {
   return await requestLocalApiJson('/customers/sync', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const startAppBarberCustomerSync = async (payload = {}) => {
+  return await requestLocalApiJson('/customers/sync/appbarber', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
