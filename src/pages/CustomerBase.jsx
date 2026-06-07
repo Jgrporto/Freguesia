@@ -14,9 +14,6 @@ import { toast } from 'sonner';
 
 import { buildCustomerRows } from '@/lib/customer-base';
 import {
-  DEFAULT_APPBARBER_BROWSER_BASE_URL,
-  DEFAULT_APPBARBER_BROWSER_PASSWORD,
-  DEFAULT_APPBARBER_BROWSER_USERNAME,
   fetchCustomerSyncLogs,
   fetchCustomerSyncState,
   fetchPersistedCustomers,
@@ -44,7 +41,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 
 const PAGE_SIZE = 20;
-const APPBARBER_SYNC_STORAGE_KEY = 'freguesia:appbarber-sync';
 
 const DEFAULT_FILTERS = {
   search: '',
@@ -103,58 +99,6 @@ const birthdayOptions = [
   { value: 'week', label: 'Aniversariantes da semana' },
   { value: 'today', label: 'Aniversariantes de hoje' },
 ];
-
-const readStoredAppBarberSyncConfig = () => {
-  if (typeof window === 'undefined') {
-    return {
-      baseUrl: DEFAULT_APPBARBER_BROWSER_BASE_URL,
-      username: DEFAULT_APPBARBER_BROWSER_USERNAME,
-      password: DEFAULT_APPBARBER_BROWSER_PASSWORD,
-    };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(APPBARBER_SYNC_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return {
-      baseUrl: String(parsed?.baseUrl || DEFAULT_APPBARBER_BROWSER_BASE_URL).trim() || DEFAULT_APPBARBER_BROWSER_BASE_URL,
-      username: String(parsed?.username || DEFAULT_APPBARBER_BROWSER_USERNAME).trim() || DEFAULT_APPBARBER_BROWSER_USERNAME,
-      password: String(parsed?.password || DEFAULT_APPBARBER_BROWSER_PASSWORD),
-    };
-  } catch {
-    return {
-      baseUrl: DEFAULT_APPBARBER_BROWSER_BASE_URL,
-      username: DEFAULT_APPBARBER_BROWSER_USERNAME,
-      password: DEFAULT_APPBARBER_BROWSER_PASSWORD,
-    };
-  }
-};
-
-const persistAppBarberSyncConfig = (config) => {
-  if (typeof window === 'undefined') return;
-
-  window.localStorage.setItem(
-    APPBARBER_SYNC_STORAGE_KEY,
-    JSON.stringify({
-      baseUrl: String(config?.baseUrl || DEFAULT_APPBARBER_BROWSER_BASE_URL).trim(),
-      username: String(config?.username || DEFAULT_APPBARBER_BROWSER_USERNAME).trim(),
-      password: String(config?.password || DEFAULT_APPBARBER_BROWSER_PASSWORD),
-    }),
-  );
-};
-
-const hasStoredAppBarberSyncConfig = () => {
-  if (typeof window === 'undefined') return false;
-
-  try {
-    const raw = window.localStorage.getItem(APPBARBER_SYNC_STORAGE_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    return Boolean(String(parsed?.username || '').trim() && String(parsed?.password || '').trim());
-  } catch {
-    return false;
-  }
-};
 
 function formatDateInputValue(date) {
   return date instanceof Date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : '';
@@ -289,10 +233,7 @@ export default function CustomerBase() {
   const [dispatchOpen, setDispatchOpen] = useState(false);
   const [dispatchSending, setDispatchSending] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
-  const [browserSyncDialogOpen, setBrowserSyncDialogOpen] = useState(false);
-  const [browserSyncProgress, setBrowserSyncProgress] = useState('');
   const [browserSyncErrorMessage, setBrowserSyncErrorMessage] = useState('');
-  const [browserSyncConfig, setBrowserSyncConfig] = useState(() => readStoredAppBarberSyncConfig());
   const [isSubmittingAppBarberSync, setIsSubmittingAppBarberSync] = useState(false);
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
 
@@ -447,35 +388,12 @@ export default function CustomerBase() {
   };
 
   const handleSyncCustomers = async () => {
-    setBrowserSyncConfig(readStoredAppBarberSyncConfig());
     setBrowserSyncErrorMessage('');
-    setBrowserSyncProgress('');
-    setBrowserSyncDialogOpen(true);
-  };
-
-  const handleSubmitBrowserSync = async () => {
-    const username = String(browserSyncConfig.username || '').trim();
-    const password = String(browserSyncConfig.password || '');
-
-    if (!username || !password) {
-      toast.error('Informe usuario e senha do AppBarber.');
-      return;
-    }
-
-    setBrowserSyncErrorMessage('');
-    setBrowserSyncProgress('Iniciando sincronizacao AppBarber na API local...');
     setIsSubmittingAppBarberSync(true);
 
     try {
-      persistAppBarberSyncConfig({
-        baseUrl: browserSyncConfig.baseUrl,
-        username,
-        password,
-      });
-      await startAppBarberCustomerSync({ username, password });
+      await startAppBarberCustomerSync();
 
-      setBrowserSyncDialogOpen(false);
-      setBrowserSyncProgress('');
       toast.message('Sincronizacao do AppBarber iniciada na VPS.');
       void queryClient.invalidateQueries({ queryKey: ['customer-sync-state'] });
       void queryClient.invalidateQueries({ queryKey: ['customer-sync-logs'] });
@@ -571,7 +489,6 @@ export default function CustomerBase() {
   };
 
   const authErrorMessage = browserSyncErrorMessage || syncMeta?.authErrorMessage || syncMeta?.lastError || '';
-  const browserCredentialsSaved = hasStoredAppBarberSyncConfig();
   const lastSyncLabel = syncMeta?.lastSuccessfulSyncAt ? formatDateTime(syncMeta.lastSuccessfulSyncAt) : 'Nunca';
   const nextSyncTimestamp = Date.parse(String(syncMeta?.nextScheduledAt || ''));
   const nextSyncLabel = Number.isFinite(nextSyncTimestamp) ? formatDateTime(syncMeta.nextScheduledAt) : 'Nao agendada';
@@ -897,11 +814,7 @@ export default function CustomerBase() {
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div>
                 <div className="text-sm font-medium text-foreground">Execucoes recentes</div>
-                <div className="text-xs text-muted-foreground">
-                  {browserCredentialsSaved
-                    ? 'Credenciais AppBarber salvas neste dispositivo.'
-                    : 'Credenciais AppBarber ainda nao foram salvas neste dispositivo.'}
-                </div>
+                <div className="text-xs text-muted-foreground">Sincronizacao manual usando as credenciais do .env.</div>
               </div>
               {isFetchingLogs && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
             </div>
@@ -941,59 +854,6 @@ export default function CustomerBase() {
               )}
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={browserSyncDialogOpen} onOpenChange={setBrowserSyncDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Sincronizar AppBarber</DialogTitle>
-            <DialogDescription>
-              Informe as credenciais do painel para buscar os clientes e salvar a base no SQLite da Freguesia.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Usuario</label>
-              <Input
-                value={browserSyncConfig.username}
-                onChange={(event) =>
-                  setBrowserSyncConfig((current) => ({ ...current, username: event.target.value }))
-                }
-                placeholder="usuario-do-painel"
-                disabled={isBrowserSyncRunning}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium text-foreground">Senha</label>
-              <Input
-                type="password"
-                value={browserSyncConfig.password}
-                onChange={(event) =>
-                  setBrowserSyncConfig((current) => ({ ...current, password: event.target.value }))
-                }
-                placeholder="Senha do painel AppBarber"
-                disabled={isBrowserSyncRunning}
-              />
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-              <p>A API local vai autenticar no AppBarber, coletar os clientes e persistir a base no SQLite da Freguesia.</p>
-            </div>
-            {browserSyncProgress || isSyncRunning ? (
-              <div className="rounded-lg border border-border bg-secondary/40 p-3 text-sm text-foreground">
-                {browserSyncProgress || 'Sincronizacao AppBarber em andamento...'}
-              </div>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBrowserSyncDialogOpen(false)}>
-              {isBrowserSyncRunning ? 'Fechar' : 'Cancelar'}
-            </Button>
-            <Button onClick={handleSubmitBrowserSync} disabled={isBrowserSyncRunning} className="gap-2">
-              {isBrowserSyncRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-              {isBrowserSyncRunning ? 'Sincronizando...' : 'Executar sincronizacao'}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 
