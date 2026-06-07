@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  History,
-  Link2,
-  List,
   Loader2,
   Logs,
   MessageSquare,
@@ -12,6 +9,7 @@ import {
   Send,
   WandSparkles,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import { buildCustomerRows } from '@/lib/customer-base';
@@ -52,19 +50,60 @@ const PAGE_SIZE = 20;
 
 const DEFAULT_FILTERS = {
   search: '',
+  periodField: 'registration',
   startDate: '',
   endDate: '',
-  status: 'all',
-  plan: 'all',
-  test: 'all',
-  connections: 'all',
-  conversation: 'all',
+  returnStatus: 'all',
+  daysWithoutVisit: 'all',
+  loginStatus: 'all',
+  profileCompleteness: 'all',
+  birthday: 'all',
+  neighborhood: '',
 };
 
-const booleanOptions = [
+const returnStatusOptions = [
   { value: 'all', label: 'Todos' },
-  { value: 'yes', label: 'Sim' },
-  { value: 'no', label: 'Nao' },
+  { value: 'active', label: 'Ativo' },
+  { value: 'attention', label: 'Atenção' },
+  { value: 'reactivation', label: 'Reativação' },
+  { value: 'inactive', label: 'Inativo' },
+  { value: 'lost', label: 'Perdido' },
+  { value: 'no_visit', label: 'Sem visita' },
+];
+
+const daysWithoutVisitOptions = [
+  { value: 'all', label: 'Todos' },
+  { value: '0-7', label: '0 a 7' },
+  { value: '8-15', label: '8 a 15' },
+  { value: '16-30', label: '16 a 30' },
+  { value: '31-45', label: '31 a 45' },
+  { value: '46-60', label: '46 a 60' },
+  { value: '61-90', label: '61 a 90' },
+  { value: '91+', label: '91+' },
+];
+
+const loginStatusOptions = [
+  { value: 'all', label: 'Todos' },
+  { value: 'has', label: 'Possui Acesso' },
+  { value: 'missing', label: 'Nao Possui' },
+  { value: 'disabled', label: 'Desativado' },
+];
+
+const profileCompletenessOptions = [
+  { value: 'all', label: 'Todos' },
+  { value: 'email_yes', label: 'Com e-mail' },
+  { value: 'email_no', label: 'Sem e-mail' },
+  { value: 'cpf_yes', label: 'Com CPF' },
+  { value: 'cpf_no', label: 'Sem CPF' },
+  { value: 'birth_yes', label: 'Com nascimento' },
+  { value: 'birth_no', label: 'Sem nascimento' },
+];
+
+const birthdayOptions = [
+  { value: 'all', label: 'Todos' },
+  { value: 'month', label: 'Aniversariantes do mes' },
+  { value: 'week', label: 'Aniversariantes da semana' },
+  { value: 'today', label: 'Aniversariantes de hoje' },
 ];
 
 function formatDateInputValue(date) {
@@ -116,6 +155,66 @@ function formatCountdown(remainingMs) {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
+function getFilterDate(customer, periodField) {
+  return periodField === 'lastVisit' ? customer.lastVisitDate : customer.registrationDate;
+}
+
+function matchesDaysRange(daysWithoutVisit, range) {
+  if (range === 'all') return true;
+  if (!Number.isFinite(daysWithoutVisit)) return false;
+  if (range === '91+') return daysWithoutVisit >= 91;
+
+  const [min, max] = range.split('-').map((value) => Number.parseInt(value, 10));
+  return daysWithoutVisit >= min && daysWithoutVisit <= max;
+}
+
+function isBirthdayInCurrentWeek(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(today.getDate() - today.getDay());
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+
+  const birthdayThisYear = new Date(today.getFullYear(), date.getMonth(), date.getDate());
+  return birthdayThisYear >= start && birthdayThisYear <= end;
+}
+
+function matchesBirthdayFilter(date, filter) {
+  if (filter === 'all') return true;
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+
+  const today = new Date();
+  if (filter === 'today') {
+    return date.getDate() === today.getDate() && date.getMonth() === today.getMonth();
+  }
+
+  if (filter === 'week') {
+    return isBirthdayInCurrentWeek(date);
+  }
+
+  if (filter === 'month') {
+    return date.getMonth() === today.getMonth();
+  }
+
+  return true;
+}
+
+function matchesProfileCompleteness(customer, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'email_yes') return Boolean(customer.email);
+  if (filter === 'email_no') return !customer.email;
+  if (filter === 'cpf_yes') return Boolean(customer.cpf);
+  if (filter === 'cpf_no') return !customer.cpf;
+  if (filter === 'birth_yes') return Boolean(customer.birthDate);
+  if (filter === 'birth_no') return !customer.birthDate;
+  return true;
+}
+
 async function createOutboundMessage(customer, content) {
   if (!customer.phoneDigits) {
     throw new Error(`Cliente sem WhatsApp valido: ${customer.name}`);
@@ -129,6 +228,7 @@ async function createOutboundMessage(customer, content) {
 
 export default function CustomerBase() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const previousSyncStatusRef = useRef(null);
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
@@ -184,71 +284,41 @@ export default function CustomerBase() {
   const isSyncRunning = syncMeta?.status === 'running';
   const isBrowserSyncRunning = browserSyncRuntime.status === 'running';
 
-  const planOptions = useMemo(
-    () => Array.from(new Set(customers.map((customer) => customer.planName).filter(Boolean))).sort((left, right) => left.localeCompare(right)),
-    [customers],
-  );
-
-  const connectionOptions = useMemo(
-    () =>
-      Array.from(new Set(customers.map((customer) => String(customer.connections)).filter(Boolean))).sort(
-        (left, right) => Number(left) - Number(right),
-      ),
-    [customers],
-  );
-
-  const statusOptions = useMemo(() => {
-    const options = customers.reduce((accumulator, customer) => {
-      if (!customer.status || accumulator.some((item) => item.value === customer.status)) {
-        return accumulator;
-      }
-
-      accumulator.push({
-        value: customer.status,
-        label: customer.statusLabel,
-      });
-      return accumulator;
-    }, []);
-
-    return [{ value: 'all', label: 'Todos' }, ...options.sort((left, right) => left.label.localeCompare(right.label))];
-  }, [customers]);
-
   const filteredCustomers = useMemo(() => {
     return customers.filter((customer) => {
       const searchTerm = filters.search.trim().toLowerCase();
-      const dueDateValue = formatDateInputValue(customer.dueDate);
+      const searchDigits = searchTerm.replace(/\D/g, '');
+      const dateValue = formatDateInputValue(getFilterDate(customer, filters.periodField));
+      const neighborhoodTerm = filters.neighborhood.trim().toLowerCase();
       const matchesSearch =
         !searchTerm ||
         customer.name.toLowerCase().includes(searchTerm) ||
-        customer.username.toLowerCase().includes(searchTerm) ||
-        customer.planName.toLowerCase().includes(searchTerm) ||
+        customer.appLogin.toLowerCase().includes(searchTerm) ||
         customer.whatsapp.toLowerCase().includes(searchTerm) ||
-        customer.reseller.toLowerCase().includes(searchTerm);
+        (searchDigits && customer.phoneDigits.includes(searchDigits)) ||
+        customer.email.toLowerCase().includes(searchTerm) ||
+        customer.cpf.toLowerCase().includes(searchTerm);
 
-      const matchesStartDate = !filters.startDate || dueDateValue >= filters.startDate;
-      const matchesEndDate = !filters.endDate || dueDateValue <= filters.endDate;
-      const matchesStatus = filters.status === 'all' || customer.status === filters.status;
-      const matchesPlan = filters.plan === 'all' || customer.planName === filters.plan;
-      const matchesTest =
-        filters.test === 'all' ||
-        (filters.test === 'yes' && customer.isTest) ||
-        (filters.test === 'no' && !customer.isTest);
-      const matchesConnections =
-        filters.connections === 'all' || String(customer.connections) === String(filters.connections);
-      const matchesConversation =
-        filters.conversation === 'all' ||
-        (filters.conversation === 'yes' && customer.conversationOpen) ||
-        (filters.conversation === 'no' && !customer.conversationOpen);
+      const matchesStartDate = !filters.startDate || (dateValue && dateValue >= filters.startDate);
+      const matchesEndDate = !filters.endDate || (dateValue && dateValue <= filters.endDate);
+      const matchesStatus = filters.returnStatus === 'all' || customer.status === filters.returnStatus;
+      const matchesDays = matchesDaysRange(customer.daysWithoutVisit, filters.daysWithoutVisit);
+      const matchesLogin = filters.loginStatus === 'all' || customer.appAccessStatus === filters.loginStatus;
+      const matchesCompleteness = matchesProfileCompleteness(customer, filters.profileCompleteness);
+      const matchesBirthday = matchesBirthdayFilter(customer.birthDate, filters.birthday);
+      const matchesNeighborhood =
+        !neighborhoodTerm || customer.neighborhood.toLowerCase().includes(neighborhoodTerm);
 
       return (
         matchesSearch &&
         matchesStartDate &&
         matchesEndDate &&
         matchesStatus &&
-        matchesPlan &&
-        matchesTest &&
-        matchesConnections &&
-        matchesConversation
+        matchesDays &&
+        matchesLogin &&
+        matchesCompleteness &&
+        matchesBirthday &&
+        matchesNeighborhood
       );
     });
   }, [customers, filters]);
@@ -339,7 +409,7 @@ export default function CustomerBase() {
     const password = String(browserSyncConfig.password || '');
 
     if (!baseUrl || !username || !password) {
-      toast.error('Informe base URL, usuario e senha do NewBr.');
+      toast.error('Informe base URL, usuario e senha do AppBarber.');
       return;
     }
 
@@ -356,9 +426,9 @@ export default function CustomerBase() {
 
       setBrowserSyncDialogOpen(false);
       setBrowserSyncProgress('');
-      toast.message('Sincronizacao iniciada no navegador em segundo plano.');
+      toast.message('Sincronizacao do AppBarber iniciada no navegador em segundo plano.');
     } catch (error) {
-      const message = error?.message || 'Nao foi possivel sincronizar clientes pelo navegador.';
+      const message = error?.message || 'Nao foi possivel sincronizar clientes do AppBarber pelo navegador.';
       setBrowserSyncErrorMessage(message);
       toast.error(message);
     }
@@ -371,7 +441,7 @@ export default function CustomerBase() {
     }
 
     if (browserSyncRuntime.status === 'error') {
-      setBrowserSyncErrorMessage(browserSyncRuntime.error || 'Nao foi possivel sincronizar clientes pelo navegador.');
+      setBrowserSyncErrorMessage(browserSyncRuntime.error || 'Nao foi possivel sincronizar clientes do AppBarber pelo navegador.');
       setBrowserSyncProgress('');
       return;
     }
@@ -399,38 +469,29 @@ export default function CustomerBase() {
     setDispatchOpen(true);
   };
 
-  const handleCopyText = async (value, label) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.success(`${label} copiado.`);
-    } catch {
-      toast.error(`Nao foi possivel copiar ${label.toLowerCase()}.`);
-    }
-  };
-
   const handleActionClick = (action, customer) => {
-    if (action === 'history') {
-      toast.message(`Historico de ${customer.name} sera ligado ao fluxo NewBr em uma etapa posterior.`);
+    if (action === 'open-conversation') {
+      const firstConversation = customer.sourceConversations?.[0];
+      if (!firstConversation && !customer.phoneDigits) {
+        toast.error(`Cliente sem WhatsApp valido: ${customer.name}`);
+        return;
+      }
+
+      navigate('/', {
+        state: {
+          openConversation: {
+            customerId: customer.customerId || customer.id,
+            phone: customer.phoneDigits,
+            conversationId: firstConversation?.id || '',
+            sourceConversationIds: customer.sourceConversations?.map((conversation) => conversation.id).filter(Boolean) || [],
+          },
+        },
+      });
       return;
     }
 
     if (action === 'edit') {
-      toast.message(`Edicao de ${customer.name} depende da proxima integracao de escrita com o NewBr.`);
-      return;
-    }
-
-    if (action === 'renew') {
-      toast.message(`Renovacao de ${customer.name} preparada para a fase de acoes do NewBr.`);
-      return;
-    }
-
-    if (action === 'renew-link') {
-      void handleCopyText(customer.renewUrl, 'Referencia NewBr');
-      return;
-    }
-
-    if (action === 'playlist') {
-      void handleCopyText(customer.playlist, 'Referencia de conversa');
+      toast.message(`Edicao de ${customer.name} depende da proxima integracao de escrita com o AppBarber.`);
       return;
     }
 
@@ -487,7 +548,7 @@ export default function CustomerBase() {
     <PageShell>
       <PageHeader
         title="Base de Clientes"
-        description="Clientes persistidos do NewBr com filtros operacionais, estado de sincronizacao e vinculo com conversas do WhatsApp para atendimento e disparo."
+        description="Clientes persisitdos do AppBarber."
         actions={
           <div className="flex flex-col items-stretch gap-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -497,24 +558,18 @@ export default function CustomerBase() {
               </Button>
               <Button onClick={handleSyncCustomers} disabled={isBrowserSyncRunning} className="gap-2">
                 <RefreshCw className={cn('w-4 h-4', isBrowserSyncRunning && 'animate-spin')} />
-                Sincronizar NewBr
+                Sincronizar AppBarber
               </Button>
             </div>
             {authErrorMessage ? (
               <div className="max-w-[360px] space-y-1">
                 <p className="text-xs font-medium text-red-600">{authErrorMessage}</p>
-                <p className="text-xs text-muted-foreground">
-                  Proxima sincronizacao automatica: {nextSyncLabel}
-                  {nextSyncCountdown ? ` (${nextSyncCountdown})` : ''}
-                </p>
+                <p className="text-xs text-muted-foreground">Ultima Sincronização: {lastSyncLabel}</p>
               </div>
             ) : (
               <div className="max-w-[360px] space-y-1 text-xs text-muted-foreground">
-                <p>Sincronizacao via navegador. Ultima sincronizacao valida: {lastSyncLabel}</p>
-                <p>
-                  Proxima sincronizacao automatica: {nextSyncLabel}
-                  {nextSyncCountdown ? ` (${nextSyncCountdown})` : ''}
-                </p>
+                <p>Sincronização do AppBarber.</p>
+                <p>Ultima Sincronização: {lastSyncLabel}</p>
               </div>
             )}
           </div>
@@ -528,8 +583,20 @@ export default function CustomerBase() {
             <Input
               value={filters.search}
               onChange={(event) => setFilterValue('search', event.target.value)}
-              placeholder="Buscar por usuario, WhatsApp, revendedor ou plano"
+              placeholder="Nome, WhatsApp, e-mail, CPF ou telefone."
             />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Periodo</label>
+            <Select value={filters.periodField} onValueChange={(value) => setFilterValue('periodField', value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Periodo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="registration">Cadastro</SelectItem>
+                <SelectItem value="lastVisit">Ultima visita</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">Data Inicial</label>
@@ -548,13 +615,13 @@ export default function CustomerBase() {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Status</label>
-            <Select value={filters.status} onValueChange={(value) => setFilterValue('status', value)}>
+            <label className="text-sm font-medium text-foreground">Status de retorno</label>
+            <Select value={filters.returnStatus} onValueChange={(value) => setFilterValue('returnStatus', value)}>
               <SelectTrigger>
-                <SelectValue placeholder="Status" />
+                <SelectValue placeholder="Status de retorno" />
               </SelectTrigger>
               <SelectContent>
-                {statusOptions.map((option) => (
+                {returnStatusOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -563,29 +630,13 @@ export default function CustomerBase() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Planos</label>
-            <Select value={filters.plan} onValueChange={(value) => setFilterValue('plan', value)}>
+            <label className="text-sm font-medium text-foreground">Dias sem vir</label>
+            <Select value={filters.daysWithoutVisit} onValueChange={(value) => setFilterValue('daysWithoutVisit', value)}>
               <SelectTrigger>
-                <SelectValue placeholder="Planos" />
+                <SelectValue placeholder="Dias sem vir" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {planOptions.map((plan) => (
-                  <SelectItem key={plan} value={plan}>
-                    {plan}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Teste</label>
-            <Select value={filters.test} onValueChange={(value) => setFilterValue('test', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Teste" />
-              </SelectTrigger>
-              <SelectContent>
-                {booleanOptions.map((option) => (
+                {daysWithoutVisitOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -594,35 +645,58 @@ export default function CustomerBase() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Conexoes</label>
-            <Select value={filters.connections} onValueChange={(value) => setFilterValue('connections', value)}>
+            <label className="text-sm font-medium text-foreground">Login/App</label>
+            <Select value={filters.loginStatus} onValueChange={(value) => setFilterValue('loginStatus', value)}>
               <SelectTrigger>
-                <SelectValue placeholder="Conexoes" />
+                <SelectValue placeholder="Login/App" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                {connectionOptions.map((connection) => (
-                  <SelectItem key={connection} value={connection}>
-                    {connection}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium text-foreground">Conversa</label>
-            <Select value={filters.conversation} onValueChange={(value) => setFilterValue('conversation', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Conversa" />
-              </SelectTrigger>
-              <SelectContent>
-                {booleanOptions.map((option) => (
+                {loginStatusOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Cadastro completo</label>
+            <Select value={filters.profileCompleteness} onValueChange={(value) => setFilterValue('profileCompleteness', value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Cadastro completo" />
+              </SelectTrigger>
+              <SelectContent>
+                {profileCompletenessOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Aniversario</label>
+            <Select value={filters.birthday} onValueChange={(value) => setFilterValue('birthday', value)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Aniversario" />
+              </SelectTrigger>
+              <SelectContent>
+                {birthdayOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Bairro</label>
+            <Input
+              value={filters.neighborhood}
+              onChange={(event) => setFilterValue('neighborhood', event.target.value)}
+              placeholder="Filtro avancado"
+            />
+            <p className="text-xs text-muted-foreground">Use apenas quando o bairro estiver preenchido.</p>
           </div>
         </div>
 
@@ -654,7 +728,7 @@ export default function CustomerBase() {
           {(isLoadingCustomers || isFetchingCustomers || isFetchingSyncState) && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="w-4 h-4 animate-spin" />
-              {isSyncRunning ? 'Sincronizando NewBr...' : 'Atualizando base...'}
+              {isSyncRunning ? 'Sincronizando AppBarber...' : 'Atualizando base...'}
             </div>
           )}
         </div>
@@ -665,22 +739,23 @@ export default function CustomerBase() {
               <TableHead className="w-12">
                 <Checkbox checked={pageAllSelected} onCheckedChange={(checked) => handleTogglePageSelection(Boolean(checked))} />
               </TableHead>
-              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Usuario</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Cliente</TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">WhatsApp</TableHead>
-              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Revendedor</TableHead>
-              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Plano</TableHead>
-              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Conexoes</TableHead>
-              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Vencimento</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Login/App</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Cadastro</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Ultima visita</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Dias sem vir</TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Status</TableHead>
-              <TableHead className="w-[220px] text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Acoes</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Bairro</TableHead>
+              <TableHead className="w-[150px] text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Acoes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {!isLoadingCustomers && paginatedCustomers.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={10} className="py-10 text-center text-sm text-muted-foreground">
                   {persistedCustomers.length === 0
-                    ? 'Nenhum cliente sincronizado ainda. Execute a primeira sincronizacao manual do NewBr.'
+                    ? 'Nenhum cliente sincronizado ainda. Execute a primeira sincronizacao manual do AppBarber.'
                     : 'Nenhum cliente encontrado para os filtros atuais.'}
                 </TableCell>
               </TableRow>
@@ -695,8 +770,8 @@ export default function CustomerBase() {
                 </TableCell>
                 <TableCell>
                   <div className="space-y-1">
-                    <div className="font-medium text-foreground">@{customer.username}</div>
-                    <div className="text-xs text-muted-foreground">{customer.name}</div>
+                    <div className="font-medium text-foreground">{customer.name}</div>
+                    <div className="text-xs text-muted-foreground">{customer.email || customer.cpf || 'Sem e-mail/CPF'}</div>
                   </div>
                 </TableCell>
                 <TableCell>
@@ -707,43 +782,26 @@ export default function CustomerBase() {
                     </div>
                   </div>
                 </TableCell>
-                <TableCell className="text-sm text-foreground">{customer.reseller}</TableCell>
-                <TableCell>
-                  <div className="space-y-1">
-                    <div className="text-sm text-foreground">{customer.planName}</div>
-                    {customer.isTest && (
-                      <Badge variant="outline" className="rounded-full border-[#FFF8E1] bg-[#FFF8E1] text-[#FFC107]">
-                        Teste
-                      </Badge>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell className="text-sm font-medium text-foreground">{customer.connections}</TableCell>
-                <TableCell className="text-sm text-foreground">{customer.dueDateLabel}</TableCell>
+                <TableCell className="text-sm text-foreground">{customer.appLogin || '-'}</TableCell>
+                <TableCell className="text-sm text-foreground">{customer.registrationDateLabel}</TableCell>
+                <TableCell className="text-sm text-foreground">{customer.lastVisitLabel}</TableCell>
+                <TableCell className="text-sm font-medium text-foreground">{customer.daysWithoutVisitLabel}</TableCell>
                 <TableCell>
                   <Badge variant="outline" className={cn('rounded-full font-medium', customer.statusClasses)}>
                     {customer.statusLabel}
                   </Badge>
                 </TableCell>
+                <TableCell className="text-sm text-foreground">{customer.neighborhood}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
-                    <Button variant="ghost" size="icon" title="Historico" onClick={() => handleActionClick('history', customer)}>
-                      <History className="w-4 h-4" />
+                    <Button variant="ghost" size="icon" title="Abrir conversa" onClick={() => handleActionClick('open-conversation', customer)}>
+                      <MessageSquare className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" title="Disparar" onClick={() => handleActionClick('send', customer)}>
+                      <Send className="w-4 h-4" />
                     </Button>
                     <Button variant="ghost" size="icon" title="Editar" onClick={() => handleActionClick('edit', customer)}>
                       <Pencil className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" title="Renovar" onClick={() => handleActionClick('renew', customer)}>
-                      <RefreshCw className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" title="Referencia NewBr" onClick={() => handleActionClick('renew-link', customer)}>
-                      <Link2 className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" title="Referencia de conversa" onClick={() => handleActionClick('playlist', customer)}>
-                      <List className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" title="Enviar mensagem" onClick={() => handleActionClick('send', customer)}>
-                      <MessageSquare className="w-4 h-4" />
                     </Button>
                   </div>
                 </TableCell>
@@ -770,7 +828,7 @@ export default function CustomerBase() {
       <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
         <DialogContent className="max-h-[92vh] max-w-4xl overflow-hidden">
           <DialogHeader>
-            <DialogTitle>Logs da sincronizacao NewBr</DialogTitle>
+            <DialogTitle>Logs da sincronizacao AppBarber</DialogTitle>
             <DialogDescription>
               Historico das execucoes, erros e resumo dos dados persistidos na VPS.
             </DialogDescription>
@@ -794,7 +852,7 @@ export default function CustomerBase() {
               <div className="mt-2 text-sm font-semibold text-foreground">{lastSyncLabel}</div>
             </div>
             <div className="rounded-lg border border-border bg-muted/20 p-4">
-              <div className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Proxima sync</div>
+              <div className="text-xs uppercase tracking-[0.08em] text-muted-foreground">Agendamento</div>
               <div className="mt-2 text-sm font-semibold text-foreground">{nextSyncCountdown || nextSyncLabel}</div>
             </div>
           </div>
@@ -853,9 +911,9 @@ export default function CustomerBase() {
       <Dialog open={browserSyncDialogOpen} onOpenChange={setBrowserSyncDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Sincronizar NewBr no Navegador</DialogTitle>
+            <DialogTitle>Sincronizar AppBarber no Navegador</DialogTitle>
             <DialogDescription>
-              Esse fluxo usa o navegador atual para autenticar no painel NewBr, coletar `/api/customers` e importar a base resultante para a VPS.
+              Esse fluxo usa o navegador atual para autenticar no painel AppBarber, coletar os clientes e importar a base resultante para a VPS.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -866,7 +924,7 @@ export default function CustomerBase() {
                 onChange={(event) =>
                   setBrowserSyncConfig((current) => ({ ...current, baseUrl: event.target.value }))
                 }
-                placeholder="https://painel.newbr.top"
+                placeholder="https://appbarber.com.br"
                 disabled={isBrowserSyncRunning}
               />
             </div>
@@ -889,12 +947,12 @@ export default function CustomerBase() {
                 onChange={(event) =>
                   setBrowserSyncConfig((current) => ({ ...current, password: event.target.value }))
                 }
-                placeholder="Senha do painel NewBr"
+                placeholder="Senha do painel AppBarber"
                 disabled={isBrowserSyncRunning}
               />
             </div>
             <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-              <p>Se o NewBr ainda bloquear o login, abra `painel.newbr.top` nesse mesmo navegador, conclua o desafio do Cloudflare e tente novamente.</p>
+              <p>Se o AppBarber bloquear o login, abra o painel nesse mesmo navegador, conclua a validacao e tente novamente.</p>
             </div>
             {browserSyncProgress ? (
               <div className="rounded-lg border border-border bg-secondary/40 p-3 text-sm text-foreground">
