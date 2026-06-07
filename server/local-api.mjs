@@ -4138,9 +4138,14 @@ const buildCustomerStableKey = (customer, fallbackIndex) => {
 };
 
 const normalizeCustomerRow = (customer, index, syncedAt) => {
-  const sourcePrefix = customer?.Nome || customer?.Codigo || customer?.UsuCodigo ? 'appbarber' : 'newbr';
+  const isRemoved = toBooleanFlag(customer?.Removido || customer?.removido) || String(customer?._appbarberCollection || '').toLowerCase() === 'removed';
+  const sourcePrefix = isRemoved
+    ? 'appbarber-removido'
+    : customer?.Nome || customer?.Codigo || customer?.UsuCodigo
+      ? 'appbarber'
+      : 'newbr';
   const expiresAt = findExpiryDate(customer);
-  const status = extractCustomerField(customer, ['status', 'situation', 'state']).trim().toUpperCase();
+  const status = isRemoved ? 'REMOVED' : extractCustomerField(customer, ['status', 'situation', 'state']).trim().toUpperCase();
   const username = extractCustomerField(customer, ['Login', 'username', 'user_name', 'login', 'user', 'nome', 'name']);
   const displayName = extractCustomerField(customer, ['Nome', 'name', 'nome', 'full_name', 'fullName', 'username']);
   const ddi = extractCustomerField(customer, ['DDI', 'ddi', 'country_code', 'countryCode']);
@@ -4170,6 +4175,7 @@ const normalizeCustomerRow = (customer, index, syncedAt) => {
     status: status || 'UNKNOWN',
     status_label: mapStatusLabel(status),
     is_trial: toBooleanFlag(trialRaw),
+    is_removed: isRemoved,
     synced_at: syncedAt,
     raw: customer,
   };
@@ -4182,6 +4188,7 @@ const buildCustomerSyncSummary = (customers) => {
       summary.total += 1;
       if (status === 'ACTIVE') summary.active += 1;
       if (status === 'EXPIRED') summary.expired += 1;
+      if (status === 'REMOVED' || customer?.is_removed) summary.removed += 1;
       if (customer?.is_trial) summary.trials += 1;
       if (customer?.phone_digits) summary.withWhatsapp += 1;
       return summary;
@@ -4190,6 +4197,7 @@ const buildCustomerSyncSummary = (customers) => {
       total: 0,
       active: 0,
       expired: 0,
+      removed: 0,
       trials: 0,
       withWhatsapp: 0,
     },

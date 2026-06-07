@@ -72,6 +72,7 @@ const returnStatusOptions = [
   { value: 'inactive', label: 'Inativo' },
   { value: 'lost', label: 'Perdido' },
   { value: 'no_visit', label: 'Sem visita' },
+  { value: 'removed', label: 'Removido' },
 ];
 
 const daysWithoutVisitOptions = [
@@ -355,13 +356,13 @@ export default function CustomerBase() {
     const aboveThirtyDays = customers.filter(
       (customer) => Number.isFinite(customer.daysWithoutVisit) && customer.daysWithoutVisit >= 31,
     ).length;
-    const birthdaysThisMonth = customers.filter((customer) => matchesBirthdayFilter(customer.birthDate, 'month')).length;
+    const removed = customers.filter((customer) => customer.status === 'removed').length;
 
     return {
       total,
       noVisit,
       aboveThirtyDays,
-      birthdaysThisMonth,
+      removed,
     };
   }, [customers]);
 
@@ -660,11 +661,11 @@ export default function CustomerBase() {
       iconClass: 'bg-violet-50 text-violet-600 ring-violet-100',
     },
     {
-      title: 'Aniversarios do mes',
-      value: customerStats.birthdaysThisMonth,
-      description: 'Este mes',
+      title: 'Removidos',
+      value: customerStats.removed,
+      description: 'Incluidos na base',
       icon: Gift,
-      iconClass: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
+      iconClass: 'bg-zinc-50 text-zinc-600 ring-zinc-100',
     },
   ];
 

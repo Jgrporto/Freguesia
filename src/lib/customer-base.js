@@ -104,6 +104,7 @@ export function getCustomerStatusLabel(status, fallbackLabel = '') {
   if (normalized === 'INACTIVE') return 'Inativo';
   if (normalized === 'BLOCKED') return 'Bloqueado';
   if (normalized === 'SUSPENDED') return 'Suspenso';
+  if (normalized === 'REMOVED') return 'Removido';
   if (!normalized) return 'Sem status';
   return normalized;
 }
@@ -147,6 +148,10 @@ export function getCustomerStatusClasses(status) {
     return 'border-amber-500/20 bg-amber-500/10 text-amber-700';
   }
 
+  if (normalized === 'REMOVED') {
+    return 'border-zinc-500/20 bg-zinc-500/10 text-zinc-700';
+  }
+
   return 'border-border bg-secondary/60 text-foreground';
 }
 
@@ -176,7 +181,11 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const birthDate = parseCustomerDate(getCustomerField(customer, ['Nascimento', 'nascimento', 'birth_date', 'birthDate']));
     const dueDate = parseCustomerDate(customer?.expires_at);
     const daysWithoutVisit = calculateDaysWithoutVisit(customer, lastVisitDate);
-    const returnStatus = getReturnStatus(daysWithoutVisit, lastVisitDate);
+    const isRemoved =
+      Boolean(customer?.is_removed) ||
+      String(getCustomerField(customer, ['Removido', 'removido', '_appbarberCollection'], '')).toLowerCase() === 'removed' ||
+      String(customer?.status || '').toUpperCase() === 'REMOVED';
+    const returnStatus = isRemoved ? { status: 'removed', label: 'Removido' } : getReturnStatus(daysWithoutVisit, lastVisitDate);
     const appLogin = String(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || '')).trim();
     const isAppDisabled = ['desativado', 'disabled', 'inativo'].includes(
       String(getCustomerField(customer, ['AppStatus', 'appStatus', 'login_status', 'loginStatus', 'status_login'])).trim().toLowerCase(),
@@ -204,7 +213,7 @@ export function buildCustomerRows(customers = [], conversations = []) {
       daysWithoutVisit,
       daysWithoutVisitLabel: Number.isFinite(daysWithoutVisit) ? String(daysWithoutVisit) : '-',
       neighborhood: String(getCustomerField(customer, ['Bairro', 'bairro', 'neighborhood'], '')).trim() || '-',
-      appAccessStatus: isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
+      appAccessStatus: isRemoved || isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
       reseller: customer?.reseller || '-',
       planName: customer?.package || '-',
       isTest: Boolean(customer?.is_trial),
