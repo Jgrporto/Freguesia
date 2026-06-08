@@ -146,6 +146,8 @@ const CHATBOT_WHATSAPP_STORE_PATH = String(
   process.env.CHATBOT_WHATSAPP_STORE_PATH || '/root/tv-assist-studio/server/data/whatsapp-store.json',
 );
 const CHATBOT_DEBUG = String(process.env.CHATBOT_DEBUG || '').toLowerCase() === 'true';
+const APPBARBER_DAILY_SYNC_ENABLED = String(process.env.APPBARBER_DAILY_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
+const APPBARBER_DAILY_SYNC_TIME = String(process.env.APPBARBER_DAILY_SYNC_TIME || '00:00').slice(0, 5);
 const WHATSAPP_API_BASE_URL = String(
   process.env.LOCAL_WHATSAPP_API_BASE_URL ||
     process.env.WHATSAPP_API_BASE_URL ||
@@ -199,6 +201,7 @@ const routineQueued = new Set();
 let routineDispatchQueue = Promise.resolve();
 let routineSchedulerRunning = false;
 let routineSchedulerTimer = null;
+let appBarberDailySyncTimer = null;
 let quickReplyScheduleRunning = false;
 let quickReplyScheduleTimer = null;
 const routineLogClients = new Set();
@@ -4198,6 +4201,64 @@ const buildCustomerSyncSummary = (customers) => {
 
 const appendCustomerSyncLog = (logs, entry) => [entry, ...logs].slice(0, CUSTOMER_SYNC_LOG_LIMIT);
 
+const CUSTOMER_PRONTUARIO_FIELDS = ['UltimoProfissional', 'UltimoAgendamento', 'ProntuarioTotal', 'ProntuarioCodigoCliente'];
+
+const hasUsefulValue = (value) => value !== undefined && value !== null && String(value).trim() !== '';
+
+const isRemovedPersistedCustomer = (customer) => {
+  const status = String(customer?.status || customer?.raw?.status || '').trim().toUpperCase();
+  const collection = String(customer?.raw?._appbarberCollection || customer?._appbarberCollection || '').trim().toLowerCase();
+  const id = String(customer?.id || '').trim().toLowerCase();
+  const removedFlag = String(customer?.is_removed ?? customer?.raw?.Removido ?? customer?.raw?.removido ?? '').trim().toLowerCase();
+  return status === 'REMOVED' || collection === 'removed' || id.startsWith('appbarber-removido') || ['true', '1', 'sim', 'yes'].includes(removedFlag);
+};
+
+const getCustomerMergeKey = (customer, fallbackIndex = 0) =>
+  String(customer?.sync_key || customer?.id || customer?.raw?.Codigo || customer?.raw?.UsuCodigo || `customer-${fallbackIndex + 1}`).trim();
+
+const mergeCustomerRows = (existingCustomers = [], incomingCustomers = []) => {
+  const mergedByKey = new Map();
+
+  (Array.isArray(existingCustomers) ? existingCustomers : []).forEach((customer, index) => {
+    if (!customer || typeof customer !== 'object' || isRemovedPersistedCustomer(customer)) return;
+    const key = getCustomerMergeKey(customer, index);
+    if (key) mergedByKey.set(key, customer);
+  });
+
+  (Array.isArray(incomingCustomers) ? incomingCustomers : []).forEach((customer, index) => {
+    if (!customer || typeof customer !== 'object' || isRemovedPersistedCustomer(customer)) return;
+
+    const key = getCustomerMergeKey(customer, index);
+    const existing = key ? mergedByKey.get(key) : null;
+    if (!existing) {
+      if (key) mergedByKey.set(key, customer);
+      return;
+    }
+
+    const raw = {
+      ...(existing.raw && typeof existing.raw === 'object' ? existing.raw : {}),
+      ...(customer.raw && typeof customer.raw === 'object' ? customer.raw : {}),
+    };
+
+    CUSTOMER_PRONTUARIO_FIELDS.forEach((field) => {
+      if (!hasUsefulValue(raw[field]) && hasUsefulValue(existing.raw?.[field])) {
+        raw[field] = existing.raw[field];
+      }
+      if (!hasUsefulValue(customer[field]) && hasUsefulValue(existing[field])) {
+        customer[field] = existing[field];
+      }
+    });
+
+    mergedByKey.set(key, {
+      ...existing,
+      ...customer,
+      raw,
+    });
+  });
+
+  return Array.from(mergedByKey.values());
+};
+
 const appendRoutineLog = (logs, entry) => [entry, ...(Array.isArray(logs) ? logs : [])].slice(0, ROUTINE_LOG_LIMIT);
 
 const normalizeRoutineLogEntry = (entry = {}) => ({
@@ -6780,14 +6841,17 @@ const isAppBarberSyncMode = (mode) => String(mode || '').toLowerCase().includes(
 
 const finishCustomerSyncSuccess = async (mode, startedAt, result) => {
   const finishedAt = nowIso();
-  const customers = result.rows.map((row, index) => normalizeCustomerRow(row, index, finishedAt));
-  const summary = buildCustomerSyncSummary(customers);
+  const incomingCustomers = result.rows.map((row, index) => normalizeCustomerRow(row, index, finishedAt));
   const source = String(result.source || (isAppBarberSyncMode(mode) ? 'appbarber' : 'newbr')).trim();
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   let autoSyncIntervalMs = CUSTOMER_SYNC_SETTINGS_DEFAULT.autoSyncIntervalMinutes * 60 * 1000;
+  let customers = incomingCustomers;
+  let summary = buildCustomerSyncSummary(customers);
 
   const store = await updateStore((current) => {
     autoSyncIntervalMs = getCustomerAutoSyncIntervalMs(current);
+    customers = mergeCustomerRows(current.customers, incomingCustomers);
+    summary = buildCustomerSyncSummary(customers);
     current.customers = customers;
     current.customerSync = {
       ...current.customerSync,
@@ -6878,8 +6942,9 @@ const finishCustomerSyncImportedSuccess = async (payload = {}) => {
   const startedAt = payload.startedAt || nowIso();
   const finishedAt = nowIso();
   const rows = Array.isArray(payload.rows) ? payload.rows : [];
-  const customers = rows.map((row, index) => normalizeCustomerRow(row, index, finishedAt));
-  const summary = buildCustomerSyncSummary(customers);
+  const incomingCustomers = rows.map((row, index) => normalizeCustomerRow(row, index, finishedAt));
+  let customers = incomingCustomers;
+  let summary = buildCustomerSyncSummary(customers);
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   const source = String(payload.source || 'browser-newbr').trim() || 'browser-newbr';
   const pagesLoaded = Number.parseInt(String(payload.pagesLoaded ?? ''), 10);
@@ -6891,6 +6956,8 @@ const finishCustomerSyncImportedSuccess = async (payload = {}) => {
 
   const store = await updateStore((current) => {
     autoSyncIntervalMs = getCustomerAutoSyncIntervalMs(current);
+    customers = mergeCustomerRows(current.customers, incomingCustomers);
+    summary = buildCustomerSyncSummary(customers);
     current.customers = customers;
     current.customerSyncContext = {
       ...current.customerSyncContext,
@@ -7009,7 +7076,7 @@ const executeAppBarberCustomerSync = async (mode, startedAt, overrides = {}) => 
   }
 };
 
-const startAppBarberCustomerSync = async (overrides = {}) => {
+const startAppBarberCustomerSync = async (overrides = {}, mode = 'appbarber_manual') => {
   if (customerSyncRunning) {
     const store = await readStore();
     return {
@@ -7019,7 +7086,6 @@ const startAppBarberCustomerSync = async (overrides = {}) => {
   }
 
   customerSyncRunning = true;
-  const mode = 'appbarber_manual';
   const { startedAt, sync } = await markCustomerSyncRunning(mode);
   void executeAppBarberCustomerSync(mode, startedAt, overrides).catch((error) => {
     log(`Falha na sincronizacao AppBarber: ${error?.message || error}`);
@@ -7030,6 +7096,23 @@ const startAppBarberCustomerSync = async (overrides = {}) => {
     sync,
   };
 };
+
+const startAppBarberManualCustomerSync = async (overrides = {}) =>
+  startAppBarberCustomerSync(
+    {
+      ...overrides,
+      fetchProntuario: false,
+    },
+    'appbarber_manual',
+  );
+
+const startAppBarberDailyProntuarioSync = async () =>
+  startAppBarberCustomerSync(
+    {
+      fetchProntuario: true,
+    },
+    'appbarber_daily_prontuario',
+  );
 
 const startCustomerSync = async (mode = 'manual', overrides = {}) => {
   if (customerSyncRunning) {
@@ -7147,6 +7230,48 @@ const initializeRoutineScheduler = () => {
     void runDueRoutines();
   }, Math.max(15000, ROUTINE_SCHEDULER_INTERVAL_MS));
   void runDueRoutines();
+};
+
+const normalizeAppBarberDailySyncTime = () => {
+  const match = String(APPBARBER_DAILY_SYNC_TIME || '00:00').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return '00:00';
+
+  const hour = Math.min(23, Math.max(0, Number.parseInt(match[1], 10) || 0));
+  const minute = Math.min(59, Math.max(0, Number.parseInt(match[2], 10) || 0));
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+};
+
+const getNextAppBarberDailySyncDelayMs = () => {
+  const dateParts = getSaoPauloDateParts();
+  const scheduledTime = normalizeAppBarberDailySyncTime();
+  let scheduledAtMs = getSaoPauloDateTimeMs(dateParts.dateKey, scheduledTime);
+
+  if (!Number.isFinite(scheduledAtMs) || scheduledAtMs <= Date.now()) {
+    scheduledAtMs = getSaoPauloDateTimeMs(addDaysToDateKey(dateParts.dateKey, 1), scheduledTime);
+  }
+
+  return Math.max(1000, scheduledAtMs - Date.now());
+};
+
+const scheduleNextAppBarberDailySync = () => {
+  if (!APPBARBER_DAILY_SYNC_ENABLED) return;
+  if (appBarberDailySyncTimer) {
+    clearTimeout(appBarberDailySyncTimer);
+  }
+
+  const delayMs = getNextAppBarberDailySyncDelayMs();
+  appBarberDailySyncTimer = setTimeout(() => {
+    appBarberDailySyncTimer = null;
+    void startAppBarberDailyProntuarioSync()
+      .catch((error) => {
+        log(`Falha na rotina diaria AppBarber: ${error?.message || error}`);
+      })
+      .finally(() => {
+        scheduleNextAppBarberDailySync();
+      });
+  }, delayMs);
+
+  log(`rotina diaria AppBarber agendada para ${new Date(Date.now() + delayMs).toISOString()}`);
 };
 
 const server = http.createServer(async (req, res) => {
@@ -7666,7 +7791,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/local/customers/sync/appbarber') {
       const payload = await readBody(req);
-      const result = await startAppBarberCustomerSync(payload);
+      const result = await startAppBarberManualCustomerSync(payload);
       if (!result.started) {
         return sendJson(res, 409, {
           error: 'Ja existe uma sincronizacao de clientes em andamento.',
@@ -8511,5 +8636,6 @@ server.listen(PORT, '127.0.0.1', async () => {
   scheduleChatbotBackendRuntime();
   initializeRoutineScheduler();
   initializeQuickReplyScheduleScheduler();
+  scheduleNextAppBarberDailySync();
   log(`listening on http://127.0.0.1:${PORT}`);
 });

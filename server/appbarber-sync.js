@@ -406,7 +406,8 @@ export async function fetchAllCustomersFromAppBarber(options = {}) {
   const maxPages = Number.parseInt(String(options.maxPages || process.env.APPBARBER_SYNC_MAX_PAGES || '0'), 10) || undefined;
   const headless = String(options.showBrowser || process.env.APPBARBER_SHOW_BROWSER || '').toLowerCase() !== 'true';
   const executablePath = resolveExecutablePath(options.chromePath);
-  const fetchProntuario = String(options.fetchProntuario || process.env.APPBARBER_FETCH_PRONTUARIO || 'true').toLowerCase() !== 'false';
+  const fetchProntuario =
+    String(options.fetchProntuario ?? process.env.APPBARBER_FETCH_PRONTUARIO ?? 'true').toLowerCase() !== 'false';
   const prontuarioConcurrency = toPositiveInteger(options.prontuarioConcurrency || process.env.APPBARBER_PRONTUARIO_CONCURRENCY, 4);
 
   const browser = await chromium.launch({
