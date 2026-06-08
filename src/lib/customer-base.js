@@ -238,6 +238,9 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const lastVisitDate = parseCustomerDate(getCustomerField(customer, ['UltimaVisita', 'ultimaVisita', 'last_visit_at', 'lastVisitAt']));
     const birthDate = parseCustomerDate(getCustomerField(customer, ['Nascimento', 'nascimento', 'birth_date', 'birthDate']));
     const dueDate = parseCustomerDate(customer?.expires_at);
+    const lastAppointmentDate = parseCustomerDate(
+      getCustomerField(customer, ['UltimoAgendamento', 'ultimoAgendamento', 'last_appointment_at', 'lastAppointmentAt']),
+    );
     const daysWithoutVisit = calculateDaysWithoutVisit(customer, lastVisitDate);
     const returnStatus = getReturnStatus(daysWithoutVisit, lastVisitDate);
     const appLogin = normalizeText(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || ''));
@@ -273,6 +276,12 @@ export function buildCustomerRows(customers = [], conversations = []) {
       daysWithoutVisit,
       daysWithoutVisitLabel: Number.isFinite(daysWithoutVisit) ? String(daysWithoutVisit) : '-',
       neighborhood: normalizeText(getCustomerField(customer, ['Bairro', 'bairro', 'neighborhood'], ''), '-'),
+      lastProfessional: normalizeText(
+        getCustomerField(customer, ['UltimoProfissional', 'ultimoProfissional', 'last_professional', 'lastProfessional'], ''),
+        '-',
+      ),
+      lastAppointmentDate,
+      lastAppointmentLabel: formatCustomerDate(lastAppointmentDate),
       appAccessStatus: isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
       reseller: customer?.reseller || '-',
       planName: customer?.package || '-',

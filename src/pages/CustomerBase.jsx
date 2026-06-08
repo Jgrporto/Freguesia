@@ -480,6 +480,7 @@ export default function CustomerBase() {
       'Dias sem vir',
       'Status',
       'Bairro',
+      'Ultimo profissional',
     ];
 
     const rows = filteredCustomers.map((customer) => [
@@ -491,6 +492,7 @@ export default function CustomerBase() {
       customer.daysWithoutVisitLabel,
       customer.statusLabel,
       customer.neighborhood,
+      customer.lastProfessional,
     ]);
 
     const csvContent = [header, ...rows]
@@ -946,13 +948,14 @@ export default function CustomerBase() {
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Dias sem vir</TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Status</TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Bairro</TableHead>
+              <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Ultimo profissional</TableHead>
               <TableHead className="w-[150px] text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Acoes</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {!isLoadingCustomers && paginatedCustomers.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9} className="px-5 py-16">
+                <TableCell colSpan={10} className="px-5 py-16">
                   <div className="flex flex-col items-center justify-center gap-3 text-center">
                     <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
                       <Users className="h-8 w-8" />
@@ -1003,6 +1006,14 @@ export default function CustomerBase() {
                   </Badge>
                 </TableCell>
                 <TableCell className="text-sm text-foreground">{customer.neighborhood}</TableCell>
+                <TableCell>
+                  <div className="space-y-1">
+                    <div className="text-sm text-foreground">{customer.lastProfessional}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {customer.lastAppointmentLabel !== '-' ? customer.lastAppointmentLabel : 'Sem agendamento'}
+                    </div>
+                  </div>
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
                     <Button variant="ghost" size="icon" title="Abrir conversa" onClick={() => handleActionClick('open-conversation', customer)}>
