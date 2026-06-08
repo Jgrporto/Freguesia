@@ -32,7 +32,6 @@ import { cn } from '@/lib/utils';
 import { fetchWhatsappConversations, sendWhatsappTextMessage } from '@/lib/whatsapp-api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import PageHeader from '@/components/layout/PageHeader';
 import PageSectionCard from '@/components/layout/PageSectionCard';
 import PageShell from '@/components/layout/PageShell';
@@ -72,7 +71,6 @@ const returnStatusOptions = [
   { value: 'inactive', label: 'Inativo' },
   { value: 'lost', label: 'Perdido' },
   { value: 'no_visit', label: 'Sem visita' },
-  { value: 'removed', label: 'Removido' },
 ];
 
 const daysWithoutVisitOptions = [
@@ -255,7 +253,6 @@ export default function CustomerBase() {
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [page, setPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState([]);
   const [dispatchTargets, setDispatchTargets] = useState([]);
   const [dispatchMessage, setDispatchMessage] = useState('');
   const [dispatchOpen, setDispatchOpen] = useState(false);
@@ -346,9 +343,6 @@ export default function CustomerBase() {
   const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / PAGE_SIZE));
   const pageStart = (page - 1) * PAGE_SIZE;
   const paginatedCustomers = filteredCustomers.slice(pageStart, pageStart + PAGE_SIZE);
-  const selectedCount = selectedIds.length;
-  const pageIds = paginatedCustomers.map((customer) => customer.id);
-  const pageAllSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
 
   const customerStats = useMemo(() => {
     const total = customers.length;
@@ -356,13 +350,13 @@ export default function CustomerBase() {
     const aboveThirtyDays = customers.filter(
       (customer) => Number.isFinite(customer.daysWithoutVisit) && customer.daysWithoutVisit >= 31,
     ).length;
-    const removed = customers.filter((customer) => customer.status === 'removed').length;
+    const birthdaysThisMonth = customers.filter((customer) => matchesBirthdayFilter(customer.birthDate, 'month')).length;
 
     return {
       total,
       noVisit,
       aboveThirtyDays,
-      removed,
+      birthdaysThisMonth,
     };
   }, [customers]);
 
@@ -400,7 +394,6 @@ export default function CustomerBase() {
   }, [filters]);
 
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => filteredCustomers.some((customer) => customer.id === id)));
     if (page > totalPages) {
       setPage(totalPages);
     }
@@ -445,29 +438,6 @@ export default function CustomerBase() {
   const clearSingleFilter = (key) => {
     setFilters((current) => ({ ...current, [key]: DEFAULT_FILTERS[key] }));
   };
-
-  const handleTogglePageSelection = (checked) => {
-    setSelectedIds((current) => {
-      if (checked) {
-        return Array.from(new Set([...current, ...pageIds]));
-      }
-      return current.filter((id) => !pageIds.includes(id));
-    });
-  };
-
-  const handleToggleSelection = (customerId, checked) => {
-    setSelectedIds((current) => {
-      if (checked) {
-        return Array.from(new Set([...current, customerId]));
-      }
-      return current.filter((id) => id !== customerId);
-    });
-  };
-
-  const selectedCustomers = useMemo(
-    () => filteredCustomers.filter((customer) => selectedIds.includes(customer.id)),
-    [filteredCustomers, selectedIds],
-  );
 
   const handleClearFilters = () => {
     setFilters(DEFAULT_FILTERS);
@@ -547,7 +517,7 @@ export default function CustomerBase() {
 
     const validTargets = targets.filter((customer) => customer.phoneDigits);
     if (!validTargets.length) {
-      toast.error('Nenhum dos clientes selecionados possui WhatsApp valido.');
+      toast.error('Cliente sem WhatsApp valido.');
       return;
     }
 
@@ -661,11 +631,11 @@ export default function CustomerBase() {
       iconClass: 'bg-violet-50 text-violet-600 ring-violet-100',
     },
     {
-      title: 'Removidos',
-      value: customerStats.removed,
-      description: 'Incluidos na base',
+      title: 'Aniversarios do mes',
+      value: customerStats.birthdaysThisMonth,
+      description: 'Este mes',
       icon: Gift,
-      iconClass: 'bg-zinc-50 text-zinc-600 ring-zinc-100',
+      iconClass: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
     },
   ];
 
@@ -898,7 +868,7 @@ export default function CustomerBase() {
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-2">
             <div className="text-sm text-muted-foreground">
-            {filteredCustomers.length} cliente(s) encontrados • {selectedCount} marcado(s)
+              {filteredCustomers.length} cliente(s) encontrados
             </div>
             {activeFilterBadges.length > 0 ? (
               <div className="flex flex-wrap gap-2">
@@ -927,10 +897,6 @@ export default function CustomerBase() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={handleClearFilters}>
               Limpar Filtros
-            </Button>
-            <Button onClick={() => openDispatchModal(selectedCustomers)} disabled={selectedCount === 0} className="gap-2">
-              <Send className="h-4 w-4" />
-              Disparo em Massa
             </Button>
           </div>
         </div>
@@ -972,9 +938,6 @@ export default function CustomerBase() {
         <Table>
           <TableHeader>
             <TableRow className="bg-secondary/60">
-              <TableHead className="w-12">
-                <Checkbox checked={pageAllSelected} onCheckedChange={(checked) => handleTogglePageSelection(Boolean(checked))} />
-              </TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Cliente</TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">WhatsApp</TableHead>
               <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Login/App</TableHead>
@@ -989,7 +952,7 @@ export default function CustomerBase() {
           <TableBody>
             {!isLoadingCustomers && paginatedCustomers.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="px-5 py-16">
+                <TableCell colSpan={9} className="px-5 py-16">
                   <div className="flex flex-col items-center justify-center gap-3 text-center">
                     <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
                       <Users className="h-8 w-8" />
@@ -1012,12 +975,6 @@ export default function CustomerBase() {
             )}
             {paginatedCustomers.map((customer) => (
               <TableRow key={customer.id} className="hover:bg-secondary/20">
-                <TableCell>
-                  <Checkbox
-                    checked={selectedIds.includes(customer.id)}
-                    onCheckedChange={(checked) => handleToggleSelection(customer.id, Boolean(checked))}
-                  />
-                </TableCell>
                 <TableCell>
                   <div className="space-y-1">
                     <div className="font-medium text-foreground">{customer.name}</div>
@@ -1162,14 +1119,14 @@ export default function CustomerBase() {
       <Dialog open={dispatchOpen} onOpenChange={(open) => !dispatchSending && setDispatchOpen(open)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Disparo em Massa</DialogTitle>
+            <DialogTitle>Enviar mensagem</DialogTitle>
             <DialogDescription>
-              Envie uma mensagem para os clientes marcados que possuem WhatsApp vinculado.
+              Envie uma mensagem para o cliente selecionado.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="rounded-lg border border-border bg-muted/20 p-4">
-              <div className="text-sm font-medium text-foreground">Selecionados: {dispatchTargets.length}</div>
+              <div className="text-sm font-medium text-foreground">Cliente</div>
               <div className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm text-muted-foreground">
                 {dispatchTargets.map((customer) => (
                   <div key={customer.id} className="flex items-center justify-between gap-3">
@@ -1184,7 +1141,7 @@ export default function CustomerBase() {
               <Textarea
                 value={dispatchMessage}
                 onChange={(event) => setDispatchMessage(event.target.value)}
-                placeholder="Digite a mensagem que sera disparada para os clientes selecionados"
+                placeholder="Digite a mensagem que sera enviada para o cliente"
                 className="min-h-[140px]"
               />
             </div>
@@ -1195,7 +1152,7 @@ export default function CustomerBase() {
             </Button>
             <Button onClick={handleSubmitDispatch} disabled={dispatchSending || dispatchTargets.length === 0} className="gap-2">
               {dispatchSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              {dispatchSending ? 'Disparando...' : 'Disparar'}
+              {dispatchSending ? 'Enviando...' : 'Enviar'}
             </Button>
           </DialogFooter>
         </DialogContent>

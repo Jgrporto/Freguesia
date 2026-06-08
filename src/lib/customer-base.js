@@ -4,6 +4,41 @@ function normalizePhone(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function normalizeText(value, fallback = '') {
+  const normalized = String(value ?? '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || fallback;
+}
+
+function formatCpf(value) {
+  const digits = normalizePhone(value);
+  if (digits.length !== 11) return normalizeText(value);
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+}
+
+function formatPhoneDisplay(value, ddi = '') {
+  const phoneDigits = normalizePhone(value);
+  const ddiDigits = normalizePhone(ddi);
+  if (!phoneDigits) return '';
+
+  const fullDigits = ddiDigits && !phoneDigits.startsWith(ddiDigits) ? `${ddiDigits}${phoneDigits}` : phoneDigits;
+  const localDigits = fullDigits.startsWith('55') && fullDigits.length > 11 ? fullDigits.slice(2) : fullDigits;
+  const prefix = fullDigits.startsWith('55') && fullDigits.length > 11 ? '+55 ' : ddiDigits ? `+${ddiDigits} ` : '';
+
+  if (localDigits.length === 11) {
+    return `${prefix}(${localDigits.slice(0, 2)}) ${localDigits.slice(2, 7)}-${localDigits.slice(7)}`.trim();
+  }
+
+  if (localDigits.length === 10) {
+    return `${prefix}(${localDigits.slice(0, 2)}) ${localDigits.slice(2, 6)}-${localDigits.slice(6)}`.trim();
+  }
+
+  return prefix ? `${prefix}${phoneDigits}`.trim() : normalizeText(value);
+}
+
 function parseCustomerDate(value) {
   if (typeof value === 'number' && Number.isFinite(value)) {
     const excelEpoch = Date.UTC(1899, 11, 30);
@@ -11,10 +46,38 @@ function parseCustomerDate(value) {
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  const raw = String(value || '').trim();
-  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const raw = normalizeText(value);
+  if (!raw || ['0000-00-00', '0000-00-00 00:00:00', '00/00/0000'].includes(raw)) {
+    return null;
+  }
+
+  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
   if (brDate) {
-    const date = new Date(Number(brDate[3]), Number(brDate[2]) - 1, Number(brDate[1]));
+    const day = Number(brDate[1]);
+    const month = Number(brDate[2]) - 1;
+    const year = Number(brDate[3]);
+    const hours = Number(brDate[4] || 0);
+    const minutes = Number(brDate[5] || 0);
+    const seconds = Number(brDate[6] || 0);
+    const date = new Date(year, month, day, hours, minutes, seconds);
+    if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) {
+      return null;
+    }
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const sqlDate = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (sqlDate) {
+    const year = Number(sqlDate[1]);
+    const month = Number(sqlDate[2]) - 1;
+    const day = Number(sqlDate[3]);
+    const hours = Number(sqlDate[4] || 0);
+    const minutes = Number(sqlDate[5] || 0);
+    const seconds = Number(sqlDate[6] || 0);
+    const date = new Date(year, month, day, hours, minutes, seconds);
+    if (date.getFullYear() !== year || date.getMonth() !== month || date.getDate() !== day) {
+      return null;
+    }
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
@@ -104,7 +167,6 @@ export function getCustomerStatusLabel(status, fallbackLabel = '') {
   if (normalized === 'INACTIVE') return 'Inativo';
   if (normalized === 'BLOCKED') return 'Bloqueado';
   if (normalized === 'SUSPENDED') return 'Suspenso';
-  if (normalized === 'REMOVED') return 'Removido';
   if (!normalized) return 'Sem status';
   return normalized;
 }
@@ -148,10 +210,6 @@ export function getCustomerStatusClasses(status) {
     return 'border-amber-500/20 bg-amber-500/10 text-amber-700';
   }
 
-  if (normalized === 'REMOVED') {
-    return 'border-zinc-500/20 bg-zinc-500/10 text-zinc-700';
-  }
-
   return 'border-border bg-secondary/60 text-foreground';
 }
 
@@ -172,8 +230,8 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const ddi = String(getCustomerField(customer, ['DDI', 'ddi', 'country_code', 'countryCode'])).trim();
     const mobile = String(getCustomerField(customer, ['Celular', 'celular', 'mobile', 'cellphone'])).trim();
     const phone = String(getCustomerField(customer, ['Telefone', 'telefone', 'phone'])).trim();
-    const combinedPhone = `${ddi ? `+${normalizePhone(ddi)}` : ''}${mobile || phone ? ` ${mobile || phone}` : ''}`.trim();
-    const whatsappValue = customer?.whatsapp || combinedPhone || phone || '-';
+    const primaryPhone = mobile || phone;
+    const whatsappValue = formatPhoneDisplay(customer?.whatsapp || primaryPhone, ddi) || '-';
     const phoneDigits = normalizePhone(customer?.phone_digits || whatsappValue);
     const matchingConversations = phoneDigits ? conversationsByPhone.get(phoneDigits) || [] : [];
     const registrationDate = parseCustomerDate(getCustomerField(customer, ['Cadastro', 'cadastro', 'created_at', 'createdAt']));
@@ -181,12 +239,14 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const birthDate = parseCustomerDate(getCustomerField(customer, ['Nascimento', 'nascimento', 'birth_date', 'birthDate']));
     const dueDate = parseCustomerDate(customer?.expires_at);
     const daysWithoutVisit = calculateDaysWithoutVisit(customer, lastVisitDate);
-    const isRemoved =
-      Boolean(customer?.is_removed) ||
-      String(getCustomerField(customer, ['Removido', 'removido', '_appbarberCollection'], '')).toLowerCase() === 'removed' ||
-      String(customer?.status || '').toUpperCase() === 'REMOVED';
-    const returnStatus = isRemoved ? { status: 'removed', label: 'Removido' } : getReturnStatus(daysWithoutVisit, lastVisitDate);
-    const appLogin = String(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || '')).trim();
+    const returnStatus = getReturnStatus(daysWithoutVisit, lastVisitDate);
+    const appLogin = normalizeText(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || ''));
+    const email = normalizeText(getCustomerField(customer, ['Email', 'email'], '')).toLowerCase();
+    const cpf = formatCpf(getCustomerField(customer, ['CPF', 'cpf', 'documento', 'document'], ''));
+    const name = normalizeText(
+      getCustomerField(customer, ['Nome', 'nome', 'display_name', 'displayName'], customer?.display_name || appLogin || `Cliente ${index + 1}`),
+      `Cliente ${index + 1}`,
+    );
     const isAppDisabled = ['desativado', 'disabled', 'inativo'].includes(
       String(getCustomerField(customer, ['AppStatus', 'appStatus', 'login_status', 'loginStatus', 'status_login'])).trim().toLowerCase(),
     );
@@ -197,13 +257,13 @@ export function buildCustomerRows(customers = [], conversations = []) {
       id: customer?.id || `customer-${index + 1}`,
       customerId: customer?.id || null,
       syncKey: customer?.sync_key || '',
-      name: String(getCustomerField(customer, ['Nome', 'nome', 'display_name', 'displayName'], customer?.display_name || appLogin || `Cliente ${index + 1}`)),
+      name,
       username: appLogin || customer?.username || `cliente-${index + 1}`,
       appLogin,
       whatsapp: whatsappValue,
       phoneDigits,
-      email: String(getCustomerField(customer, ['Email', 'email'], '')).trim(),
-      cpf: String(getCustomerField(customer, ['CPF', 'cpf', 'documento', 'document'], '')).trim(),
+      email,
+      cpf,
       birthDate,
       birthDateLabel: formatCustomerDate(birthDate),
       registrationDate,
@@ -212,8 +272,8 @@ export function buildCustomerRows(customers = [], conversations = []) {
       lastVisitLabel: formatCustomerDate(lastVisitDate),
       daysWithoutVisit,
       daysWithoutVisitLabel: Number.isFinite(daysWithoutVisit) ? String(daysWithoutVisit) : '-',
-      neighborhood: String(getCustomerField(customer, ['Bairro', 'bairro', 'neighborhood'], '')).trim() || '-',
-      appAccessStatus: isRemoved || isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
+      neighborhood: normalizeText(getCustomerField(customer, ['Bairro', 'bairro', 'neighborhood'], ''), '-'),
+      appAccessStatus: isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
       reseller: customer?.reseller || '-',
       planName: customer?.package || '-',
       isTest: Boolean(customer?.is_trial),
