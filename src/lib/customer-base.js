@@ -139,6 +139,20 @@ function calculateDaysWithoutVisit(customer, lastVisitDate) {
   return Math.max(0, Math.floor((today.getTime() - visit.getTime()) / (24 * 60 * 60 * 1000)));
 }
 
+function isRemovedCustomer(customer) {
+  const status = String(customer?.status || customer?.raw?.status || '').trim().toUpperCase();
+  const source = String(customer?._appbarberCollection || customer?.raw?._appbarberCollection || '').trim().toLowerCase();
+  const id = String(customer?.id || '').trim().toLowerCase();
+  const removedFlag = String(customer?.is_removed ?? customer?.Removido ?? customer?.removido ?? '').trim().toLowerCase();
+
+  return (
+    status === 'REMOVED' ||
+    source === 'removed' ||
+    id.startsWith('appbarber-removido') ||
+    ['true', '1', 'sim', 'yes'].includes(removedFlag)
+  );
+}
+
 function getReturnStatus(daysWithoutVisit, lastVisitDate) {
   if (!Number.isFinite(daysWithoutVisit) && !lastVisitDate) {
     return { status: 'no_visit', label: 'Sem visita' };
@@ -214,7 +228,7 @@ export function getCustomerStatusClasses(status) {
 }
 
 export function buildCustomerRows(customers = [], conversations = []) {
-  const safeCustomers = Array.isArray(customers) ? customers : [];
+  const safeCustomers = Array.isArray(customers) ? customers.filter((customer) => !isRemovedCustomer(customer)) : [];
   const safeConversations = Array.isArray(conversations) ? conversations : [];
   const conversationsByPhone = new Map();
 
