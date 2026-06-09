@@ -284,3 +284,58 @@
   }
 
 }
+
+@layer components {
+  .dashboard-tabs-shell {
+    @apply overflow-x-auto overflow-y-hidden pb-0;
+    scrollbar-width: none;
+  }
+
+  .dashboard-tabs-shell::-webkit-scrollbar {
+    display: none;
+  }
+
+  .dashboard-tabs-track {
+    @apply relative flex min-w-max items-end gap-0 border-b border-border/90 pl-0;
+  }
+
+  .dashboard-browser-tab {
+    @apply relative -mb-px flex min-h-[64px] min-w-[190px] items-center gap-3 border border-border/90 border-b-transparent bg-card/70 px-5 py-3 text-left transition-all duration-200;
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 100%, 0 100%);
+    box-shadow: inset 0 -1px 0 hsl(var(--border) / 0.6);
+  }
+
+  .dashboard-browser-tab + .dashboard-browser-tab {
+    margin-left: -8px;
+  }
+
+  .dashboard-browser-tab:hover {
+    @apply bg-white shadow-[0_-2px_18px_rgba(15,23,42,0.06)];
+    z-index: 2;
+  }
+
+  .dashboard-browser-tab-active {
+    @apply border-primary bg-primary shadow-[0_12px_24px_rgba(177,13,20,0.20)];
+    z-index: 4;
+    box-shadow: 0 14px 26px rgba(177, 13, 20, 0.24);
+  }
+
+  .dashboard-browser-tab-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors duration-200;
+  }
+
+  .dashboard-browser-tab-icon-active {
+    @apply text-white;
+    background-color: rgba(255, 255, 255, 0.14);
+  }
+
+  .dark .dashboard-browser-tab {
+    @apply bg-card/80;
+  }
+
+  .dark .dashboard-browser-tab:hover {
+    @apply bg-secondary;
+  }
+}
