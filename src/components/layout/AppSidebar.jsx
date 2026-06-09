@@ -128,44 +128,54 @@ export default function AppSidebar({ expanded, pinned, onPinToggle, onMouseEnter
         )}
         aria-expanded={expanded}
       >
-        <div className="relative border-b border-white/10 px-4 py-4">
-          <div className={cn('flex min-h-[58px] items-center transition-all duration-300', expanded ? 'gap-3' : 'justify-center')}>
-            <img
-              src="/freguesia_crest.png"
-              alt="Freguesia Barbearia"
-              className={cn(
-                'w-auto flex-shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)] transition-all duration-300',
-                expanded ? 'h-14' : 'h-11',
-              )}
-            />
-            <div
-              className={cn(
-                'min-w-0 overflow-hidden text-white transition-all duration-200 ease-out',
-                expanded ? 'max-w-[158px] opacity-100' : 'max-w-0 opacity-0',
-              )}
-            >
-              <div className="barber-brand-text text-[25px] font-bold uppercase leading-none tracking-[0.055em]">
-                Freguesia
-              </div>
-              <div className="barber-brand-text mt-0.5 text-[10px] font-bold uppercase leading-none tracking-[0.32em] text-white/90">
-                Barbearia
-              </div>
-            </div>
-          </div>
-
+        <div
+          className={cn(
+            'relative border-b border-white/10 px-3 transition-all duration-300 ease-out',
+            expanded ? 'py-6' : 'py-4',
+          )}
+        >
           <button
             type="button"
             onClick={onPinToggle}
             className={cn(
-              'absolute right-[-15px] top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-white text-[#8f080d] shadow-[0_12px_26px_rgba(0,0,0,0.22)] transition-all duration-200 hover:scale-105 hover:bg-white focus:outline-none focus:ring-2 focus:ring-white/80',
+              'absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-full border border-white/15 bg-white/95 text-[#8f080d] shadow-[0_8px_18px_rgba(0,0,0,0.20)] transition-all duration-200 hover:scale-105 hover:bg-white focus:outline-none focus:ring-2 focus:ring-white/70',
               pinned && 'bg-[#2a080a] text-white',
             )}
             title={pinned ? 'Voltar para abertura automática' : 'Manter sidebar aberta'}
             aria-label={pinned ? 'Voltar para abertura automática' : 'Manter sidebar aberta'}
             aria-pressed={pinned}
           >
-            {pinned ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {pinned ? <ChevronLeft className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           </button>
+
+          <div
+            className={cn(
+              'flex w-full flex-col items-center justify-center text-center text-white transition-all duration-300 ease-out',
+              expanded ? 'min-h-[128px]' : 'min-h-[64px]',
+            )}
+          >
+            <img
+              src="/freguesia_crest.png"
+              alt="Freguesia Barbearia"
+              className={cn(
+                'w-auto flex-shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)] transition-all duration-300 ease-out',
+                expanded ? 'h-[72px]' : 'h-12',
+              )}
+            />
+            <div
+              className={cn(
+                'overflow-hidden text-white transition-all duration-300 ease-out',
+                expanded ? 'mt-2 max-h-14 opacity-100' : 'mt-0 max-h-0 opacity-0',
+              )}
+            >
+              <div className="barber-brand-text text-[32px] font-bold uppercase leading-none tracking-[0.055em]">
+                Freguesia
+              </div>
+              <div className="barber-brand-text mt-1 text-[12px] font-bold uppercase leading-none tracking-[0.36em] text-white/90">
+                Barbearia
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4">
