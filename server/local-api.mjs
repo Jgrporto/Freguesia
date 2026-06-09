@@ -4141,6 +4141,13 @@ const buildCustomerStableKey = (customer, fallbackIndex) => {
 };
 
 const normalizeCustomerRow = (customer, index, syncedAt) => {
+  const raw = {
+    ...(customer && typeof customer === 'object' ? customer : {}),
+  };
+  if (hasUsefulValue(raw.UltimoAgendamento)) {
+    raw.UltimaVisita = raw.UltimoAgendamento;
+  }
+
   const sourcePrefix = customer?.Nome || customer?.Codigo || customer?.UsuCodigo ? 'appbarber' : 'newbr';
   const expiresAt = findExpiryDate(customer);
   const status = extractCustomerField(customer, ['status', 'situation', 'state']).trim().toUpperCase();
@@ -4174,7 +4181,7 @@ const normalizeCustomerRow = (customer, index, syncedAt) => {
     status_label: mapStatusLabel(status),
     is_trial: toBooleanFlag(trialRaw),
     synced_at: syncedAt,
-    raw: customer,
+    raw,
   };
 };
 
@@ -4248,6 +4255,10 @@ const mergeCustomerRows = (existingCustomers = [], incomingCustomers = []) => {
         customer[field] = existing[field];
       }
     });
+
+    if (hasUsefulValue(raw.UltimoAgendamento)) {
+      raw.UltimaVisita = raw.UltimoAgendamento;
+    }
 
     mergedByKey.set(key, {
       ...existing,

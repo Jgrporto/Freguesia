@@ -249,12 +249,14 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const phoneDigits = normalizePhone(customer?.phone_digits || whatsappValue);
     const matchingConversations = phoneDigits ? conversationsByPhone.get(phoneDigits) || [] : [];
     const registrationDate = parseCustomerDate(getCustomerField(customer, ['Cadastro', 'cadastro', 'created_at', 'createdAt']));
-    const lastVisitDate = parseCustomerDate(getCustomerField(customer, ['UltimaVisita', 'ultimaVisita', 'last_visit_at', 'lastVisitAt']));
-    const birthDate = parseCustomerDate(getCustomerField(customer, ['Nascimento', 'nascimento', 'birth_date', 'birthDate']));
-    const dueDate = parseCustomerDate(customer?.expires_at);
     const lastAppointmentDate = parseCustomerDate(
       getCustomerField(customer, ['UltimoAgendamento', 'ultimoAgendamento', 'last_appointment_at', 'lastAppointmentAt']),
     );
+    const lastVisitDate =
+      lastAppointmentDate ||
+      parseCustomerDate(getCustomerField(customer, ['UltimaVisita', 'ultimaVisita', 'last_visit_at', 'lastVisitAt']));
+    const birthDate = parseCustomerDate(getCustomerField(customer, ['Nascimento', 'nascimento', 'birth_date', 'birthDate']));
+    const dueDate = parseCustomerDate(customer?.expires_at);
     const daysWithoutVisit = calculateDaysWithoutVisit(customer, lastVisitDate);
     const returnStatus = getReturnStatus(daysWithoutVisit, lastVisitDate);
     const appLogin = normalizeText(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || ''));
