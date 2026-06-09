@@ -124,7 +124,7 @@ export default function Dashboard() {
 
         <DashboardBrowserTabs activeTab={activeDashboard} onChange={setActiveDashboard} />
 
-        <div className="mt-5 flex flex-col gap-3 border-t border-border/80 pt-5 xl:flex-row xl:items-center xl:justify-between">
+        <div className="mt-5 flex flex-col gap-3 pt-1 xl:flex-row xl:items-center xl:justify-between">
           <p className="max-w-3xl text-sm text-muted-foreground">
             Acompanhe os principais números do atendimento, filas, evolução dos contatos e distribuição entre departamentos.
           </p>

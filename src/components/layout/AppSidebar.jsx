@@ -138,8 +138,8 @@ export default function AppSidebar({ expanded, pinned, onPinToggle, onMouseEnter
             type="button"
             onClick={onPinToggle}
             className={cn(
-              'absolute right-3 top-3 z-10 grid h-6 w-6 place-items-center rounded-full border border-white/15 bg-white/95 text-[#8f080d] shadow-[0_8px_18px_rgba(0,0,0,0.20)] transition-all duration-200 hover:scale-105 hover:bg-white focus:outline-none focus:ring-2 focus:ring-white/70',
-              pinned && 'bg-[#2a080a] text-white',
+              'absolute right-3 top-3 z-10 grid h-7 w-7 place-items-center rounded-full border border-transparent bg-transparent text-white transition-all duration-200 hover:bg-white/14 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40',
+              pinned && 'bg-white/10',
             )}
             title={pinned ? 'Voltar para abertura automática' : 'Manter sidebar aberta'}
             aria-label={pinned ? 'Voltar para abertura automática' : 'Manter sidebar aberta'}
