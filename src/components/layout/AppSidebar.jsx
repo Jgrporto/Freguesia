@@ -43,7 +43,7 @@ const primaryNavItems = [
 
 const settingsItem = { icon: Settings, label: 'Configurações', path: '/settings' };
 
-export default function AppSidebar({ collapsed, onToggle }) {
+export default function AppSidebar({ expanded, pinned, onPinToggle, onMouseEnter, onMouseLeave }) {
   const location = useLocation();
   const { logout } = useAuth();
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -58,95 +58,133 @@ export default function AppSidebar({ collapsed, onToggle }) {
         key={path}
         to={path}
         className={cn(
-          'group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200',
-          collapsed && 'justify-center px-2',
+          'group relative flex min-h-11 items-center rounded-2xl px-3 text-white/90 transition-all duration-200 ease-out',
+          expanded ? 'justify-start gap-3' : 'justify-center gap-0 px-0',
           isActive
-            ? 'bg-white/10 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
-            : 'text-white/90 hover:bg-white/10 hover:text-white'
+            ? 'bg-white/[0.14] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.10),0_10px_28px_rgba(0,0,0,0.14)]'
+            : 'hover:bg-white/10 hover:text-white'
         )}
-        title={collapsed ? label : undefined}
+        title={!expanded ? label : undefined}
+        aria-label={label}
       >
-        <Icon className={cn('h-5 w-5 flex-shrink-0 transition-colors', isActive ? 'text-white' : 'text-white/80')} />
-        {!collapsed && <span className="font-inter whitespace-nowrap text-sm font-semibold tracking-[-0.01em]">{label}</span>}
+        <span
+          className={cn(
+            'grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl transition-colors',
+            isActive ? 'bg-white/10 text-white' : 'text-white/80 group-hover:bg-white/[0.08] group-hover:text-white',
+          )}
+        >
+          <Icon className="h-5 w-5" />
+        </span>
+        <span
+          className={cn(
+            'overflow-hidden whitespace-nowrap text-sm font-semibold tracking-[-0.01em] transition-all duration-200 ease-out',
+            expanded ? 'max-w-[190px] opacity-100' : 'max-w-0 opacity-0',
+          )}
+        >
+          {label}
+        </span>
       </Link>
     );
   };
 
+  const renderActionButton = ({ icon: Icon, label, onClick, badge }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group flex min-h-11 w-full items-center rounded-2xl px-3 text-white/90 transition-all duration-200 ease-out hover:bg-white/10 hover:text-white',
+        expanded ? 'justify-start gap-3' : 'justify-center gap-0 px-0',
+      )}
+      title={!expanded ? label : undefined}
+      aria-label={label}
+    >
+      <span className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl text-white/80 transition-colors group-hover:bg-white/[0.08] group-hover:text-white">
+        <Icon className="h-5 w-5" />
+      </span>
+      <span
+        className={cn(
+          'flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden transition-all duration-200 ease-out',
+          expanded ? 'max-w-[190px] opacity-100' : 'max-w-0 opacity-0',
+        )}
+      >
+        <span className="whitespace-nowrap text-sm font-semibold">{label}</span>
+        {badge ? (
+          <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white">
+            {badge}
+          </span>
+        ) : null}
+      </span>
+    </button>
+  );
+
   return (
     <>
       <aside
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
         className={cn(
-          'barber-sidebar fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/10 text-sidebar-foreground shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)] transition-all duration-300',
-          collapsed ? 'w-[76px]' : 'w-[280px]'
+          'barber-sidebar fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/10 text-sidebar-foreground shadow-[inset_-1px_0_0_rgba(255,255,255,0.06)] transition-[width,box-shadow] duration-300 ease-out',
+          expanded ? 'w-[280px] shadow-2xl' : 'w-[84px]',
         )}
+        aria-expanded={expanded}
       >
-        <div className={cn('border-b border-white/10 transition-all duration-300', collapsed ? 'flex h-[92px] items-center justify-center px-3' : 'px-5 py-6')}>
-          {collapsed ? (
-            <img src="/freguesia_crest.png" alt="Freguesia Barbearia" className="h-12 w-auto object-contain drop-shadow-[0_8px_18px_rgba(0,0,0,0.28)]" />
-          ) : (
-            <div className="flex w-full flex-col items-center text-center text-white">
-              <img src="/freguesia_crest.png" alt="Freguesia Barbearia" className="h-[72px] w-auto object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)]" />
-              <div className="barber-brand-text mt-2 text-[32px] font-bold uppercase leading-none tracking-[0.055em]">
+        <div className="relative border-b border-white/10 px-4 py-4">
+          <div className={cn('flex min-h-[58px] items-center transition-all duration-300', expanded ? 'gap-3' : 'justify-center')}>
+            <img
+              src="/freguesia_crest.png"
+              alt="Freguesia Barbearia"
+              className={cn(
+                'w-auto flex-shrink-0 object-contain drop-shadow-[0_12px_24px_rgba(0,0,0,0.28)] transition-all duration-300',
+                expanded ? 'h-14' : 'h-11',
+              )}
+            />
+            <div
+              className={cn(
+                'min-w-0 overflow-hidden text-white transition-all duration-200 ease-out',
+                expanded ? 'max-w-[158px] opacity-100' : 'max-w-0 opacity-0',
+              )}
+            >
+              <div className="barber-brand-text text-[25px] font-bold uppercase leading-none tracking-[0.055em]">
                 Freguesia
               </div>
-              <div className="barber-brand-text mt-1 text-[12px] font-bold uppercase leading-none tracking-[0.36em] text-white/90">
+              <div className="barber-brand-text mt-0.5 text-[10px] font-bold uppercase leading-none tracking-[0.32em] text-white/90">
                 Barbearia
               </div>
             </div>
-          )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onPinToggle}
+            className={cn(
+              'absolute right-[-15px] top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-white text-[#8f080d] shadow-[0_12px_26px_rgba(0,0,0,0.22)] transition-all duration-200 hover:scale-105 hover:bg-white focus:outline-none focus:ring-2 focus:ring-white/80',
+              pinned && 'bg-[#2a080a] text-white',
+            )}
+            title={pinned ? 'Voltar para abertura automática' : 'Manter sidebar aberta'}
+            aria-label={pinned ? 'Voltar para abertura automática' : 'Manter sidebar aberta'}
+            aria-pressed={pinned}
+          >
+            {pinned ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <nav className={cn('space-y-1.5 px-4 py-4', collapsed && 'px-3')}>{primaryNavItems.map(renderNavLink)}</nav>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4">
+          <nav className="space-y-1.5">{primaryNavItems.map(renderNavLink)}</nav>
 
-          <div className={cn('mt-auto space-y-1.5 px-4 py-3', collapsed && 'px-3')}>
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/90 transition-all hover:bg-white/10 hover:text-white',
-                collapsed && 'justify-center px-2'
-              )}
-              title={collapsed ? 'Novidades' : undefined}
-            >
-              <History className="h-5 w-5 flex-shrink-0" />
-              {!collapsed && (
-                <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                  <span className="font-inter text-sm font-semibold">Novidades</span>
-                  <span className="rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-white">
-                    {currentBuildLabel}
-                  </span>
-                </div>
-              )}
-            </button>
+          <div className="mt-auto space-y-1.5 pt-4">
+            {renderActionButton({
+              icon: History,
+              label: 'Novidades',
+              onClick: () => setHistoryOpen(true),
+              badge: currentBuildLabel,
+            })}
 
             {renderNavLink(settingsItem)}
           </div>
         </div>
 
-        <div className={cn('space-y-1.5 border-t border-white/10 p-4', collapsed && 'px-3')}>
-          <button
-            onClick={() => onToggle()}
-            className={cn(
-              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/90 transition-all hover:bg-white/10 hover:text-white',
-              collapsed && 'justify-center px-2'
-            )}
-            title={collapsed ? 'Expandir' : undefined}
-          >
-            {collapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
-            {!collapsed && <span className="font-inter text-sm font-semibold">Recolher</span>}
-          </button>
-          <button
-            onClick={() => logout()}
-            className={cn(
-              'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-white/90 transition-all hover:bg-white/10 hover:text-white',
-              collapsed && 'justify-center px-2'
-            )}
-            title={collapsed ? 'Sair' : undefined}
-          >
-            <LogOut className="h-5 w-5 flex-shrink-0" />
-            {!collapsed && <span className="font-inter text-sm font-semibold">Sair</span>}
-          </button>
+        <div className="border-t border-white/10 px-3 py-3">
+          {renderActionButton({ icon: LogOut, label: 'Sair', onClick: () => logout() })}
         </div>
       </aside>
 
