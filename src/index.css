@@ -300,7 +300,7 @@
   }
 
   .dashboard-browser-tab {
-    @apply relative -mb-px flex min-h-[64px] min-w-[188px] items-center gap-3 border border-border/90 border-b-transparent bg-[hsl(var(--card))] px-5 py-3 text-left transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out;
+    @apply relative -mb-px flex min-h-[64px] min-w-[232px] items-center gap-3 border border-border/90 border-b-transparent bg-[hsl(var(--card))] px-5 py-3 text-left transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-out;
     border-top-left-radius: 18px;
     border-top-right-radius: 18px;
     clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 100%, 0 100%);
