@@ -6,6 +6,7 @@ export const SETTINGS_SECTION_OPTIONS = [
   ['team', 'Equipe', 'Usuários, sessões e permissões operacionais.'],
   ['roles', 'Funções', 'Perfis, departamentos e acessos da plataforma.'],
   ['services', 'Serviços', 'Filas, números e etiquetas por serviço.'],
+  ['audit', 'Auditoria', 'Registro local das ações administrativas.'],
 ];
 
 export const SETTINGS_ACCESS_LEVELS = [
@@ -22,6 +23,7 @@ export const DEFAULT_ROLE_SETTINGS_ACCESS = {
   team: 'edit',
   roles: 'edit',
   services: 'edit',
+  audit: 'edit',
 };
 
 export const HIDDEN_ROLE_SETTINGS_ACCESS = {
@@ -32,6 +34,7 @@ export const HIDDEN_ROLE_SETTINGS_ACCESS = {
   team: 'hidden',
   roles: 'hidden',
   services: 'hidden',
+  audit: 'hidden',
 };
 
 export const normalizeRoleSettingsAccess = (value, fallback = DEFAULT_ROLE_SETTINGS_ACCESS) =>

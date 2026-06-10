@@ -28,6 +28,16 @@ import PageSectionCard from '@/components/layout/PageSectionCard';
 import PageShell from '@/components/layout/PageShell';
 import ServiceFormDialog from '@/components/settings/ServiceFormDialog';
 import ServiceIconBadge from '@/components/services/ServiceIconBadge';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -45,11 +55,11 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { SYSTEM_LABELS, useLabelCatalog } from '@/lib/labels';
-import { normalizeRolePermissions, ROLE_PERMISSION_OPTIONS } from '@/lib/role-permissions';
 import { useAuth } from '@/lib/AuthContext';
 import { resolveEffectiveUser } from '@/lib/current-user';
 import { disconnectLocalUserSessions } from '@/lib/local-auth';
 import { requestLocalApiJson } from '@/lib/local-api';
+import { DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, ROLE_PERMISSION_OPTIONS } from '@/lib/role-permissions';
 import { deleteService, fetchAvailableWhatsappNumbers, fetchServices, saveService } from '@/lib/services-api';
 import { normalizeService } from '@/lib/services';
 import { cn } from '@/lib/utils';
@@ -227,6 +237,16 @@ export default function Settings() {
   const [notificationSettings, setNotificationSettings] = useState(DEFAULT_NOTIFICATION_SETTINGS);
   const [customerSyncSettings, setCustomerSyncSettings] = useState(DEFAULT_CUSTOMER_SYNC_SETTINGS);
   const [settingsAudit, setSettingsAudit] = useState(() => readJsonStorage(SETTINGS_AUDIT_STORAGE_KEY, []));
+  const [activeSettingsTab, setActiveSettingsTab] = useState('profile');
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: '',
+    description: '',
+    confirmLabel: 'Confirmar',
+    destructive: false,
+    isRunning: false,
+    onConfirm: null,
+  });
   const [disconnectingUserId, setDisconnectingUserId] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingRole, setIsSavingRole] = useState(false);
@@ -413,22 +433,70 @@ export default function Settings() {
   const canOpenSettingsRoute =
     String(user?.role || '').trim().toLowerCase() === 'admin' ||
     String(user?.role_name || '').trim().toLowerCase() === 'administrador' ||
-    Boolean(currentUserRole?.permissions?.settings || user?.permissions?.settings || user?.role_permissions?.settings);
+    Boolean(currentUserRole?.permissions?.settings || user?.role_permissions?.settings || user?.permissions?.settings);
   const currentSettingsAccess = useMemo(() => {
     if (!canOpenSettingsRoute) {
       return HIDDEN_ROLE_SETTINGS_ACCESS;
     }
 
     return normalizeRoleSettingsAccess(
-      currentUserRole?.settings_access ||
-        currentUserRole?.settingsAccess ||
-        user?.settings_access ||
-        user?.settingsAccess,
+      currentUserRole?.settings_access || currentUserRole?.settingsAccess || user?.settings_access || user?.settingsAccess,
     );
   }, [canOpenSettingsRoute, currentUserRole?.settings_access, currentUserRole?.settingsAccess, user?.settings_access, user?.settingsAccess]);
   const canEditTeamSection = canEditSettingsSection(currentSettingsAccess, 'team');
   const canEditRolesSection = canEditSettingsSection(currentSettingsAccess, 'roles');
   const canEditServicesSection = canEditSettingsSection(currentSettingsAccess, 'services');
+  const visibleSettingsTabs = useMemo(
+    () => SETTINGS_SECTION_OPTIONS.filter(([sectionKey]) => canViewSettingsSection(currentSettingsAccess, sectionKey)),
+    [currentSettingsAccess],
+  );
+
+
+  useEffect(() => {
+    if (!visibleSettingsTabs.length) {
+      return;
+    }
+
+    if (!visibleSettingsTabs.some(([sectionKey]) => sectionKey === activeSettingsTab)) {
+      setActiveSettingsTab(visibleSettingsTabs[0][0]);
+    }
+  }, [activeSettingsTab, visibleSettingsTabs]);
+
+  const openConfirmDialog = ({ title, description, confirmLabel = 'Confirmar', destructive = false, onConfirm }) => {
+    setConfirmDialog({
+      open: true,
+      title,
+      description,
+      confirmLabel,
+      destructive,
+      isRunning: false,
+      onConfirm,
+    });
+  };
+
+  const handleConfirmDialogOpenChange = (open) => {
+    if (!open && !confirmDialog.isRunning) {
+      setConfirmDialog((current) => ({ ...current, open: false, onConfirm: null }));
+    }
+  };
+
+  const handleConfirmDialogAction = async (event) => {
+    event?.preventDefault?.();
+
+    if (typeof confirmDialog.onConfirm !== 'function') {
+      setConfirmDialog((current) => ({ ...current, open: false, onConfirm: null }));
+      return;
+    }
+
+    setConfirmDialog((current) => ({ ...current, isRunning: true }));
+
+    try {
+      await confirmDialog.onConfirm();
+      setConfirmDialog((current) => ({ ...current, open: false, isRunning: false, onConfirm: null }));
+    } catch {
+      setConfirmDialog((current) => ({ ...current, isRunning: false }));
+    }
+  };
 
   const appendAuditEntry = ({ entityType, entityId, label, action, detail }) => {
     setSettingsAudit((current) => [
@@ -497,7 +565,7 @@ export default function Settings() {
       name: role.name || '',
       description: role.description || '',
       department_key: role.department_key || '',
-      permissions: normalizeRolePermissions(role.permissions),
+      permissions: normalizeRolePermissions(role.permissions, DEFAULT_ROLE_PERMISSIONS),
       settings_access: normalizeRoleSettingsAccess(role.settings_access || role.settingsAccess),
     });
     setRoleDialogOpen(true);
@@ -533,13 +601,18 @@ export default function Settings() {
   };
 
   const handleRolePermissionChange = (permissionKey, checked) => {
-    setRoleForm((current) => ({
-      ...current,
-      permissions: normalizeRolePermissions({
-        ...current.permissions,
+    setRoleForm((current) => {
+      const nextPermissions = {
+        ...normalizeRolePermissions(current.permissions, DEFAULT_ROLE_PERMISSIONS),
         [permissionKey]: Boolean(checked),
-      }),
-    }));
+      };
+
+      return {
+        ...current,
+        permissions: nextPermissions,
+        settings_access: nextPermissions.settings ? current.settings_access : HIDDEN_ROLE_SETTINGS_ACCESS,
+      };
+    });
   };
 
   const handleRoleSettingsAccessChange = (sectionKey, value) => {
@@ -707,50 +780,63 @@ export default function Settings() {
     }
   };
 
-  const handleDeleteUser = async (teamUser) => {
-    const confirmed = window.confirm(`Deseja apagar o usuario ${teamUser.full_name || 'selecionado'}?`);
-    if (!confirmed) {
+  const handleDeleteUser = (teamUser) => {
+    if (!canEditTeamSection) {
       return;
     }
 
-    try {
-      await requestLocalEntity('User', { method: 'DELETE', id: teamUser.id });
-      appendAuditEntry({
-        entityType: 'user',
-        entityId: teamUser.id,
-        label: teamUser.full_name,
-        action: 'deleted',
-        detail: 'Usuario removido da equipe local.',
-      });
-      await invalidateSettingsQueries();
-      toast.success('Usuario removido da equipe.');
-    } catch (error) {
-      toast.error(error?.message || 'Não foi possível apagar o usuario.');
-    }
+    openConfirmDialog({
+      title: 'Apagar usuário',
+      description: `Deseja apagar ${teamUser.full_name || 'este usuário'}? Esta ação remove o cadastro local e encerra sessões ativas desse usuário.`,
+      confirmLabel: 'Apagar usuário',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await requestLocalEntity('User', { method: 'DELETE', id: teamUser.id });
+          appendAuditEntry({
+            entityType: 'user',
+            entityId: teamUser.id,
+            label: teamUser.full_name,
+            action: 'deleted',
+            detail: 'Usuario removido da equipe local.',
+          });
+          await invalidateSettingsQueries();
+          toast.success('Usuario removido da equipe.');
+        } catch (error) {
+          toast.error(error?.message || 'Não foi possível apagar o usuario.');
+        }
+      },
+    });
   };
 
-  const handleAdminLogoutUser = async (teamUser) => {
-    const confirmed = window.confirm(`Deseja desconectar ${teamUser.full_name || 'este usuario'} agora?`);
-    if (!confirmed) {
+  const handleAdminLogoutUser = (teamUser) => {
+    if (!canEditTeamSection) {
       return;
     }
 
-    try {
-      setDisconnectingUserId(teamUser.id);
-      const result = await disconnectLocalUserSessions(teamUser.id);
-      appendAuditEntry({
-        entityType: 'user',
-        entityId: teamUser.id,
-        label: teamUser.full_name,
-        action: 'updated',
-        detail: `Sessões administrativas encerradas (${result?.removedSessions || 0} sessão(ões) invalidadas).`,
-      });
-      toast.success('Usuário desconectado com sucesso.');
-    } catch (error) {
-      toast.error(error?.message || 'Não foi possível desconectar o usuário.');
-    } finally {
-      setDisconnectingUserId('');
-    }
+    openConfirmDialog({
+      title: 'Desconectar usuário',
+      description: `Deseja desconectar ${teamUser.full_name || 'este usuário'} agora? As sessões abertas serão invalidadas e ele precisará entrar novamente.`,
+      confirmLabel: 'Desconectar',
+      onConfirm: async () => {
+        try {
+          setDisconnectingUserId(teamUser.id);
+          const result = await disconnectLocalUserSessions(teamUser.id);
+          appendAuditEntry({
+            entityType: 'user',
+            entityId: teamUser.id,
+            label: teamUser.full_name,
+            action: 'updated',
+            detail: `Sessões administrativas encerradas (${result?.removedSessions || 0} sessão(ões) invalidadas).`,
+          });
+          toast.success('Usuário desconectado com sucesso.');
+        } catch (error) {
+          toast.error(error?.message || 'Não foi possível desconectar o usuário.');
+        } finally {
+          setDisconnectingUserId('');
+        }
+      },
+    });
   };
 
   const handleSaveRole = async () => {
@@ -766,8 +852,8 @@ export default function Settings() {
       name: normalizedName,
       description: roleForm.description.trim(),
       department_key: departmentKey,
-      permissions: normalizeRolePermissions(roleForm.permissions),
-      settings_access: normalizeRolePermissions(roleForm.permissions).settings
+      permissions: normalizeRolePermissions(roleForm.permissions, DEFAULT_ROLE_PERMISSIONS),
+      settings_access: roleForm.permissions.settings
         ? normalizeRoleSettingsAccess(roleForm.settings_access)
         : HIDDEN_ROLE_SETTINGS_ACCESS,
     };
@@ -800,32 +886,39 @@ export default function Settings() {
     }
   };
 
-  const handleDeleteRole = async (role) => {
+  const handleDeleteRole = (role) => {
+    if (!canEditRolesSection) {
+      return;
+    }
+
     const members = roleMembersCount[role.id] || 0;
     if (members > 0) {
       toast.error('Remaneje os usuários desta função antes de apagar o departamento.');
       return;
     }
 
-    const confirmed = window.confirm(`Deseja apagar a função ${role.name}?`);
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      await requestLocalEntity('Role', { method: 'DELETE', id: role.id });
-      appendAuditEntry({
-        entityType: 'role',
-        entityId: role.id,
-        label: role.name,
-        action: 'deleted',
-        detail: 'Função removida da configuração local.',
-      });
-      await invalidateSettingsQueries();
-      toast.success('Função removida com sucesso.');
-    } catch (error) {
-      toast.error(error?.message || 'Não foi possível apagar a funcao.');
-    }
+    openConfirmDialog({
+      title: 'Apagar função',
+      description: `Deseja apagar a função ${role.name}? Esta ação remove o perfil de acesso da configuração local.`,
+      confirmLabel: 'Apagar função',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await requestLocalEntity('Role', { method: 'DELETE', id: role.id });
+          appendAuditEntry({
+            entityType: 'role',
+            entityId: role.id,
+            label: role.name,
+            action: 'deleted',
+            detail: 'Função removida da configuração local.',
+          });
+          await invalidateSettingsQueries();
+          toast.success('Função removida com sucesso.');
+        } catch (error) {
+          toast.error(error?.message || 'Não foi possível apagar a funcao.');
+        }
+      },
+    });
   };
 
   const handleSaveService = async (payload) => {
@@ -853,35 +946,38 @@ export default function Settings() {
     }
   };
 
-  const handleDeleteService = async (service) => {
+  const handleDeleteService = (service) => {
     if (!canEditServicesSection) {
       return;
     }
 
     const normalized = normalizeService(service);
-    const confirmed = window.confirm(`Deseja apagar o servico ${normalized.name || 'selecionado'}?`);
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      await deleteService(normalized.id);
-      appendAuditEntry({
-        entityType: 'service',
-        entityId: normalized.id,
-        label: normalized.name,
-        action: 'deleted',
-        detail: 'Serviço removido da configuracao local.',
-      });
-      await invalidateSettingsQueries();
-      if (selectedService?.id === normalized.id) {
-        setSelectedService(null);
-        setServiceDialogOpen(false);
-      }
-      toast.success('Serviço removido com sucesso.');
-    } catch (error) {
-      toast.error(error?.message || 'Não foi possível apagar o servico.');
-    }
+    openConfirmDialog({
+      title: 'Apagar serviço',
+      description: `Deseja apagar o serviço ${normalized.name || 'selecionado'}? As filas e vínculos desta configuração serão removidos.`,
+      confirmLabel: 'Apagar serviço',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await deleteService(normalized.id);
+          appendAuditEntry({
+            entityType: 'service',
+            entityId: normalized.id,
+            label: normalized.name,
+            action: 'deleted',
+            detail: 'Serviço removido da configuracao local.',
+          });
+          await invalidateSettingsQueries();
+          if (selectedService?.id === normalized.id) {
+            setSelectedService(null);
+            setServiceDialogOpen(false);
+          }
+          toast.success('Serviço removido com sucesso.');
+        } catch (error) {
+          toast.error(error?.message || 'Não foi possível apagar o servico.');
+        }
+      },
+    });
   };
 
   const renderServiceUsers = (service) => {
@@ -931,8 +1027,34 @@ export default function Settings() {
         description="Gerencie perfil, equipe, departamentos e alertas operacionais da plataforma."
       />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        {canViewSettingsSection(currentSettingsAccess, 'profile') ? (
+      {visibleSettingsTabs.length === 0 ? (
+        <PageSectionCard className="p-6">
+          <p className="text-sm text-muted-foreground">
+            Sua função pode acessar a página de configurações, mas nenhum bloco foi liberado para visualização.
+          </p>
+        </PageSectionCard>
+      ) : (
+        <>
+          <div className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-lg bg-secondary/60 p-2">
+            {visibleSettingsTabs.map(([sectionKey, title]) => (
+              <button
+                key={sectionKey}
+                type="button"
+                onClick={() => setActiveSettingsTab(sectionKey)}
+                className={cn(
+                  'rounded-md px-3 py-1.5 text-sm font-medium transition-all',
+                  activeSettingsTab === sectionKey
+                    ? 'bg-background text-foreground shadow'
+                    : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'
+                )}
+              >
+                {title}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-4">
+        {canViewSettingsSection(currentSettingsAccess, 'profile') && activeSettingsTab === 'profile' ? (
         <PageSectionCard className="p-5">
           <SectionHeading
             icon={User}
@@ -964,7 +1086,7 @@ export default function Settings() {
         </PageSectionCard>
         ) : null}
 
-        {canViewSettingsSection(currentSettingsAccess, 'notifications') ? (
+        {canViewSettingsSection(currentSettingsAccess, 'notifications') && activeSettingsTab === 'notifications' ? (
         <PageSectionCard className="p-5">
           <SectionHeading
             icon={Bell}
@@ -1117,7 +1239,7 @@ export default function Settings() {
         </PageSectionCard>
         ) : null}
 
-        {canViewSettingsSection(currentSettingsAccess, 'appearance') ? (
+        {canViewSettingsSection(currentSettingsAccess, 'appearance') && activeSettingsTab === 'appearance' ? (
         <PageSectionCard className="p-5">
           <SectionHeading
             icon={Palette}
@@ -1195,7 +1317,7 @@ export default function Settings() {
         </PageSectionCard>
         ) : null}
 
-        {canViewSettingsSection(currentSettingsAccess, 'customerSync') ? (
+        {canViewSettingsSection(currentSettingsAccess, 'customerSync') && activeSettingsTab === 'customerSync' ? (
         <PageSectionCard className="p-5">
           <SectionHeading
             icon={RefreshCw}
@@ -1245,7 +1367,7 @@ export default function Settings() {
         ) : null}
       </div>
 
-      {canViewSettingsSection(currentSettingsAccess, 'team') ? (
+      {canViewSettingsSection(currentSettingsAccess, 'team') && activeSettingsTab === 'team' ? (
       <PageSectionCard className="p-5">
         <SectionHeading
           icon={Users}
@@ -1363,7 +1485,7 @@ export default function Settings() {
       </PageSectionCard>
       ) : null}
 
-      {canViewSettingsSection(currentSettingsAccess, 'roles') ? (
+      {canViewSettingsSection(currentSettingsAccess, 'roles') && activeSettingsTab === 'roles' ? (
       <PageSectionCard className="p-5">
         <SectionHeading
           icon={BriefcaseBusiness}
@@ -1465,7 +1587,7 @@ export default function Settings() {
       </PageSectionCard>
       ) : null}
 
-      {canViewSettingsSection(currentSettingsAccess, 'services') ? (
+      {canViewSettingsSection(currentSettingsAccess, 'services') && activeSettingsTab === 'services' ? (
       <PageSectionCard className="p-5">
         <SectionHeading
           icon={Megaphone}
@@ -1601,6 +1723,59 @@ export default function Settings() {
       </PageSectionCard>
       ) : null}
 
+      {canViewSettingsSection(currentSettingsAccess, 'audit') && activeSettingsTab === 'audit' ? (
+        <PageSectionCard className="p-5">
+          <SectionHeading
+            icon={History}
+            title="Auditoria"
+            description="Acompanhe as últimas ações administrativas registradas nesta instância local."
+          />
+
+          <div className="overflow-hidden rounded-lg border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-secondary/60">
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Data</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Usuário</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Área</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Ação</TableHead>
+                  <TableHead className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground">Detalhe</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {settingsAudit.length ? (
+                  settingsAudit.slice(0, 80).map((entry) => (
+                    <TableRow key={entry.id} className="hover:bg-secondary/20">
+                      <TableCell className="py-3 text-sm text-muted-foreground">{formatDateTime(entry.createdAt)}</TableCell>
+                      <TableCell className="py-3 text-sm text-foreground">{entry.actor || 'Operador local'}</TableCell>
+                      <TableCell className="py-3">
+                        <Badge variant="outline" className="rounded-full bg-secondary text-muted-foreground">
+                          {entry.entityType === 'user' ? 'Equipe' : entry.entityType === 'role' ? 'Funções' : entry.entityType === 'service' ? 'Serviços' : entry.entityType}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <Badge variant="outline" className="rounded-full bg-primary/10 text-primary">
+                          {getAuditActionLabel(entry.action)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-3 text-sm text-muted-foreground">{entry.detail || entry.label || 'Sem detalhe registrado.'}</TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
+                      Ainda não há eventos administrativos registrados nesta instância.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </PageSectionCard>
+      ) : null}
+        </>
+      )}
+
       <Dialog open={userDialogOpen} onOpenChange={setUserDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
@@ -1679,16 +1854,17 @@ export default function Settings() {
       </Dialog>
 
       <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden">
           <DialogHeader>
             <DialogTitle>
               {roleDialogMode === 'create' ? 'Criar função' : roleDialogMode === 'edit' ? 'Editar função' : 'Visualizar função'}
             </DialogTitle>
             <DialogDescription>
-              Defina a descrição do departamento e quais módulos da plataforma ficam acessíveis para essa função.
+              Defina a descrição do departamento, os menus visíveis na sidebar e os blocos de configuração liberados para essa função.
             </DialogDescription>
           </DialogHeader>
 
+          <div className="space-y-4 overflow-y-auto pr-2">
           <div className="grid gap-4 py-2 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Nome da função</label>
@@ -1720,8 +1896,8 @@ export default function Settings() {
 
           <div className="rounded-lg border border-border bg-secondary/20 p-4">
             <div className="mb-3">
-              <h3 className="text-sm font-semibold text-foreground">Menus da sidebar</h3>
-              <p className="text-xs text-muted-foreground">Marque os menus da sidebar que esta função pode visualizar. Menus desmarcados ficam ocultos e a rota também fica bloqueada.</p>
+              <h3 className="text-sm font-semibold text-foreground">Definição de acessos</h3>
+              <p className="text-xs text-muted-foreground">Marque apenas os menus que esta função pode visualizar na sidebar e acessar por rota direta.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {ROLE_PERMISSION_OPTIONS.map(([key, title, description]) => (
@@ -1759,7 +1935,7 @@ export default function Settings() {
                   <Select
                     value={normalizeRoleSettingsAccess(roleForm.settings_access)[key]}
                     onValueChange={(value) => handleRoleSettingsAccessChange(key, value)}
-                    disabled={isRoleReadOnly || isSavingRole || !Boolean(normalizeRolePermissions(roleForm.permissions).settings)}
+                    disabled={isRoleReadOnly || isSavingRole || !Boolean(roleForm.permissions?.settings)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecione o nivel" />
@@ -1777,7 +1953,9 @@ export default function Settings() {
             </div>
           </div>
 
-          <DialogFooter>
+          </div>
+
+          <DialogFooter className="border-t border-border pt-4">
             <Button variant="outline" onClick={() => setRoleDialogOpen(false)} disabled={isSavingRole}>
               Fechar
             </Button>
@@ -1796,6 +1974,25 @@ export default function Settings() {
         labelOptions={labelOptions}
         availableNumbers={availableNumbers}
       />
+
+      <AlertDialog open={confirmDialog.open} onOpenChange={handleConfirmDialogOpenChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmDialog.isRunning}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDialogAction}
+              disabled={confirmDialog.isRunning}
+              className={cn(confirmDialog.destructive && 'bg-destructive text-destructive-foreground hover:bg-destructive/90')}
+            >
+              {confirmDialog.isRunning ? 'Processando...' : confirmDialog.confirmLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog
         open={historyDialog.open}
