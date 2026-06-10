@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
   Award,
+  Calendar,
   CalendarDays,
-  Clock,
+  Clock3,
   Gift,
   HeartHandshake,
   LineChart,
@@ -11,12 +12,12 @@ import {
   MessageSquare,
   PiggyBank,
   Repeat2,
-  Send,
   Scissors,
+  Send,
   Sparkles,
   Star,
   Target,
-  Timer,
+  TimerReset,
   TrendingUp,
   UserCheck,
   Users,
@@ -71,51 +72,26 @@ const dashboards = {
     subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em agendamentos.',
     cards: [
       { title: 'Conversas recebidas', value: '0', subtitle: 'Volume total no período', icon: MessageSquare },
-      { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: Timer },
-      { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock },
+      { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
+      { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock3 },
       { title: 'Agendamentos realizados', value: '0', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
       { title: 'Taxa de conversão', value: '0%', subtitle: 'Cortes / conversas', icon: Target },
     ],
-    funnel: [
-      {
-        id: 'conversas',
-        title: 'Conversas',
-        value: '0',
-        caption: '100% do total',
-        icon: MessageSquare,
-        loss: { label: 'Perda', value: '0', caption: 'Não agendaram' },
-      },
-      {
-        id: 'agendamentos',
-        title: 'Agendamentos',
-        value: '0',
-        caption: '0% do total',
-        icon: CalendarDays,
-        loss: { label: 'Perda', value: '0', caption: 'Não foram cortar' },
-      },
-      {
-        id: 'conversao',
-        title: 'Conversão (foi cortar)',
-        value: '0',
-        caption: '0% do total',
-        icon: Scissors,
-      },
-    ],
     main: {
       title: 'Funil de conversão',
-      description: 'Conversas > agendamentos > conversão real de clientes que foram cortar.',
-      type: 'funnel',
-      metrics: [
-        { label: 'Taxa conversa > agendamento', value: '0%' },
-        { label: 'Taxa agendamento > conversão', value: '0%' },
-        { label: 'Taxa final conversa > corte', value: '0%' },
-      ],
+      description: 'Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.',
+      type: 'atendimentoFunnel',
+      values: {
+        conversations: 0,
+        bookings: 0,
+        conversions: 0,
+      },
     },
     sideCharts: [
       {
         title: 'Conversão por atendente',
         type: 'bars',
-        labels: ['Atendente 1', 'Atendente 2'],
+        labels: ['Juliana A.', 'Atendente 2'],
         helper: 'Agendamentos e taxa por responsável.',
       },
       {
@@ -137,11 +113,11 @@ const dashboards = {
       { title: 'CAC por cliente novo', value: 'R$ 0,00', subtitle: 'Investimento / clientes', icon: UserCheck },
       { title: 'Anúncio → agendamento', value: '0%', subtitle: 'Conversão do tráfego', icon: TrendingUp },
     ],
-    funnel: ['Cliques', 'Conversas', 'Agendamentos', 'Clientes novos', 'Retornaram'],
     main: {
       title: 'Funil de aquisição',
       description: 'Do clique no anúncio ao cliente novo e retorno para o próximo corte.',
       type: 'funnel',
+      labels: ['Cliques', 'Conversas', 'Agendamentos', 'Clientes novos'],
     },
     sideCharts: [],
   },
@@ -192,7 +168,7 @@ const dashboards = {
       { title: 'Recorrentes', value: '0', subtitle: '2 a 4 cortes', icon: Repeat2 },
       { title: 'Fiéis', value: '0', subtitle: 'Acima de 4 cortes', icon: Award },
       { title: 'Taxa de retorno', value: '0%', subtitle: 'Voltaram no período', icon: TrendingUp },
-      { title: 'Tempo entre cortes', value: '00 dias', subtitle: 'Ciclo médio de recompra', icon: Clock },
+      { title: 'Tempo entre cortes', value: '00 dias', subtitle: 'Ciclo médio de recompra', icon: Clock3 },
     ],
     main: {
       title: 'Distribuição da base de clientes',
@@ -205,7 +181,7 @@ const dashboards = {
         title: 'Clientes parados por período',
         type: 'horizontalBars',
         labels: ['D+20', 'D+30', 'D+40', 'D+50'],
-        helper: 'Clientes parados conforme os marcos da régua de recuperação.',
+        helper: 'Onde está o maior risco de perda de clientes.',
       },
       {
         title: 'Taxa de retorno por mês',
@@ -234,7 +210,7 @@ const dashboards = {
     ],
     main: {
       title: 'Distribuição das notas NPS',
-      description: 'Notas de 0 a 10 para entender a percepção geral do cliente.',
+      description: 'Notas de 0 a 10 para entender a percepção imediata do cliente.',
       type: 'scoreBars',
       labels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
@@ -260,6 +236,15 @@ const dashboards = {
     ],
   },
 };
+
+function formatPercent(value) {
+  return `${value.toFixed(1).replace('.', ',')}%`;
+}
+
+function safeRate(part, total) {
+  if (!total) return 0;
+  return (part / total) * 100;
+}
 
 function DashboardBrowserTabs({ activeTab, onChange }) {
   return (
@@ -313,12 +298,17 @@ function DashboardStatCard({ title, value, subtitle, icon: Icon }) {
 function EmptyLineChart({ labels = days, secondLine = false }) {
   return (
     <div className="relative h-[220px] rounded-xl bg-gradient-to-b from-transparent to-muted/30 px-4 pb-7 pt-4">
-      <div className="absolute inset-x-4 top-6 h-px border-t border-dashed border-border" />
-      <div className="absolute inset-x-4 top-[34%] h-px border-t border-dashed border-border" />
-      <div className="absolute inset-x-4 top-[58%] h-px border-t border-dashed border-border" />
+      <div className="mb-3 flex items-center gap-5 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary" />1ª resposta média</span>
+        {secondLine ? <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary/20" />TMR</span> : null}
+      </div>
+      <div className="absolute inset-x-4 top-11 h-px border-t border-dashed border-border" />
+      <div className="absolute inset-x-4 top-[38%] h-px border-t border-dashed border-border" />
+      <div className="absolute inset-x-4 top-[62%] h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 bottom-10 h-px border-t border-dashed border-border" />
-      <div className="absolute bottom-10 left-4 right-4 h-[2px] rounded-full bg-primary" />
-      {secondLine ? <div className="absolute bottom-16 left-4 right-4 h-[2px] rounded-full bg-primary/30" /> : null}
+      <div className="absolute bottom-10 left-4 right-4 h-[2px] rounded-full bg-primary/15" />
+      <div className="absolute bottom-16 left-4 right-4 h-[2px] rounded-full bg-primary/40" />
+      {secondLine ? <div className="absolute bottom-[88px] left-4 right-4 h-[2px] rounded-full bg-primary/15" /> : null}
       <div className="absolute bottom-2 left-4 right-4 flex justify-between text-[11px] text-muted-foreground">
         {labels.map((label) => <span key={label}>{label}</span>)}
       </div>
@@ -334,7 +324,7 @@ function EmptyBars({ labels = [], horizontal = false }) {
           <div key={label} className="grid grid-cols-[64px_minmax(0,1fr)_28px] items-center gap-3 text-xs">
             <span className="font-medium text-muted-foreground">{label}</span>
             <div className="h-4 rounded-full bg-primary/10">
-              <div className="h-4 w-[2%] rounded-full bg-primary/50" />
+              <div className="h-4 w-[6%] rounded-full bg-primary/50" />
             </div>
             <span className="text-right font-semibold text-foreground">0</span>
           </div>
@@ -344,7 +334,7 @@ function EmptyBars({ labels = [], horizontal = false }) {
   }
 
   return (
-    <div className="flex h-[180px] items-end gap-3 rounded-xl bg-muted/20 px-4 pb-7 pt-4">
+    <div className="flex h-[200px] items-end gap-3 rounded-xl bg-muted/20 px-4 pb-7 pt-4">
       {labels.map((label) => (
         <div key={label} className="flex flex-1 flex-col items-center gap-2">
           <div className="h-4 w-full rounded-t-lg bg-primary/20" />
@@ -379,106 +369,9 @@ function EmptyDonut({ labels = [], large = false }) {
   );
 }
 
-const conversionFunnelStageStyles = [
-  {
-    wrapper: 'z-30 w-full lg:w-[46%]',
-    body: 'bg-gradient-to-br from-primary via-primary to-[#8f0711] text-primary-foreground shadow-[0_18px_40px_rgba(188,12,25,0.22)]',
-    icon: 'bg-white/15 text-white',
-    value: 'text-white',
-    caption: 'text-white/85',
-    clipPath: 'polygon(0 0, 92% 0, 100% 50%, 92% 100%, 0 100%)',
-  },
-  {
-    wrapper: 'z-20 w-full lg:-ml-8 lg:w-[36%]',
-    body: 'bg-gradient-to-br from-primary/75 via-primary/55 to-primary/35 text-white shadow-[0_18px_36px_rgba(188,12,25,0.14)]',
-    icon: 'bg-white/20 text-white',
-    value: 'text-white',
-    caption: 'text-white/85',
-    clipPath: 'polygon(0 0, 90% 0, 100% 50%, 90% 100%, 0 100%, 10% 50%)',
-  },
-  {
-    wrapper: 'z-10 w-full lg:-ml-8 lg:w-[28%]',
-    body: 'border border-primary/10 bg-gradient-to-br from-primary/16 via-primary/10 to-card text-foreground',
-    icon: 'bg-primary/10 text-primary',
-    value: 'text-foreground',
-    caption: 'text-muted-foreground',
-    clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 100%, 12% 50%)',
-  },
-];
-
-function ConversionFunnel({ stages = [], metrics = [] }) {
-  const lossPositions = ['left-[44%]', 'left-[70%]'];
-
+function EmptyFunnel({ labels = [] }) {
   return (
-    <div className="space-y-3">
-      <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card via-card to-primary/5 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
-        <div className="relative flex min-h-[168px] flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-0">
-          {stages.map((stage, index) => {
-            const Icon = stage.icon || Target;
-            const styles = conversionFunnelStageStyles[index] || conversionFunnelStageStyles[conversionFunnelStageStyles.length - 1];
-
-            return (
-              <div key={stage.id || stage.title} className={cn('relative', styles.wrapper)}>
-                <div
-                  className={cn(
-                    'flex h-full min-h-[148px] items-center gap-4 rounded-2xl px-6 py-5 lg:rounded-none',
-                    index > 0 && 'lg:pl-12',
-                    styles.body,
-                  )}
-                  style={{ clipPath: styles.clipPath }}
-                >
-                  <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl', styles.icon)}>
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold">{stage.title}</p>
-                    <div className={cn('mt-1 text-4xl font-black tracking-[-0.05em]', styles.value)}>{stage.value}</div>
-                    <p className={cn('mt-1 text-xs font-medium', styles.caption)}>{stage.caption}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {stages.slice(0, -1).map((stage, index) => (
-            <div
-              key={`${stage.id || stage.title}-loss`}
-              className={cn(
-                'absolute top-1/2 z-40 hidden h-[76px] w-[76px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-card text-center shadow-[0_12px_30px_rgba(15,23,42,0.14)] lg:flex lg:flex-col lg:items-center lg:justify-center',
-                lossPositions[index],
-              )}
-            >
-              <span className="text-[10px] font-semibold text-muted-foreground">{stage.loss?.label || 'Perda'}</span>
-              <strong className="text-lg leading-tight text-foreground">{stage.loss?.value || '0'}</strong>
-              <span className="max-w-[58px] text-[9px] leading-tight text-muted-foreground">{stage.loss?.caption || 'Sem avanço'}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {metrics.length > 0 ? (
-        <div className="grid gap-2 rounded-xl border border-border bg-card px-3 py-3 md:grid-cols-3">
-          {metrics.map((metric, index) => (
-            <div key={metric.label} className={cn('px-3 text-center', index > 0 && 'md:border-l md:border-border')}>
-              <p className="text-xs text-muted-foreground">{metric.label}</p>
-              <div className="mt-1 text-lg font-bold text-foreground">{metric.value}</div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function EmptyFunnel({ labels = [], metrics = [] }) {
-  const isCustomConversionFunnel = labels.length > 0 && typeof labels[0] === 'object';
-
-  if (isCustomConversionFunnel) {
-    return <ConversionFunnel stages={labels} metrics={metrics} />;
-  }
-
-  return (
-    <div className="grid gap-3 md:grid-cols-5">
+    <div className="grid gap-3 md:grid-cols-4">
       {labels.map((label, index) => (
         <div key={label} className="relative rounded-xl border border-border bg-card p-4 text-center">
           <div className="text-xs font-medium text-muted-foreground">{label}</div>
@@ -506,7 +399,153 @@ function EmptyGauge() {
   );
 }
 
-function ChartCard({ title, description, type, labels = [], helper, className, metrics = [] }) {
+function FunnelMetric({ title, value }) {
+  return (
+    <div className="px-6 py-3 text-center">
+      <div className="text-sm text-muted-foreground">{title}</div>
+      <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-foreground">{value}</div>
+    </div>
+  );
+}
+
+function LossBubble({ title, value, detail, className }) {
+  return (
+    <div className={cn('absolute top-1/2 z-10 hidden h-[88px] w-[88px] -translate-y-1/2 place-items-center rounded-full bg-white text-center shadow-[0_12px_24px_rgba(15,23,42,0.14)] ring-1 ring-border lg:grid', className)}>
+      <div className="px-2 leading-tight">
+        <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
+        <div className="text-[18px] font-bold tracking-[-0.03em] text-foreground">{value}</div>
+        <div className="text-[11px] text-muted-foreground">{detail}</div>
+      </div>
+    </div>
+  );
+}
+
+function FunnelStage({ title, value, percentText, icon: Icon, iconBg, className, style }) {
+  return (
+    <div className={cn('relative flex min-h-[164px] items-center overflow-hidden px-7 py-6 text-white', className)} style={style}>
+      <div className={cn('mr-5 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-white/90', iconBg)}>
+        <Icon className="h-7 w-7" />
+      </div>
+      <div>
+        <div className="text-[15px] font-bold">{title}</div>
+        <div className="mt-1 text-5xl font-bold tracking-[-0.05em] leading-none">{value}</div>
+        <div className="mt-2 text-[15px] font-semibold text-white/90">{percentText}</div>
+      </div>
+    </div>
+  );
+}
+
+function AtendimentoConversionFunnel({ values }) {
+  const conversations = Number(values?.conversations ?? 0);
+  const bookings = Number(values?.bookings ?? 0);
+  const conversions = Number(values?.conversions ?? 0);
+
+  const loss1 = Math.max(conversations - bookings, 0);
+  const loss2 = Math.max(bookings - conversions, 0);
+
+  const rateConversationToBooking = safeRate(bookings, conversations);
+  const rateBookingToConversion = safeRate(conversions, bookings);
+  const rateFinal = safeRate(conversions, conversations);
+  const loss1Rate = safeRate(loss1, conversations);
+  const loss2Rate = safeRate(loss2, bookings);
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-5">
+      <div className="mb-4">
+        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">Funil de conversão</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.</p>
+      </div>
+
+      <div className="rounded-2xl border border-border/80 bg-background/70 p-3 lg:p-4">
+        <div className="relative hidden items-stretch overflow-visible rounded-2xl lg:flex">
+          <div className="relative z-[1] w-[42%]">
+            <FunnelStage
+              title="Conversas"
+              value={conversations}
+              percentText="100% do total"
+              icon={MessageSquare}
+              iconBg="bg-white/12"
+              className="rounded-l-2xl"
+              style={{
+                background: 'linear-gradient(135deg, #c40013 0%, #d9041a 60%, #a70014 100%)',
+                clipPath: 'polygon(0 0, 89% 0, 98% 50%, 89% 100%, 0 100%)',
+              }}
+            />
+          </div>
+
+          <LossBubble
+            title="Perda"
+            value={loss1}
+            detail={conversations ? formatPercent(loss1Rate) : 'Não agendaram'}
+            className="left-[39%]"
+          />
+
+          <div className="relative z-[2] -ml-7 w-[36%]">
+            <FunnelStage
+              title="Agendamentos"
+              value={bookings}
+              percentText={`${formatPercent(rateConversationToBooking)} do total`}
+              icon={CalendarDays}
+              iconBg="bg-white/12"
+              style={{
+                background: 'linear-gradient(90deg, #ef8f92 0%, #e46f76 45%, #d06168 100%)',
+                clipPath: 'polygon(6% 0, 89% 0, 98% 50%, 89% 100%, 6% 100%, 0 50%)',
+              }}
+            />
+          </div>
+
+          <LossBubble
+            title="Perda"
+            value={loss2}
+            detail={bookings ? formatPercent(loss2Rate) : 'Não foram cortar'}
+            className="left-[72%]"
+          />
+
+          <div className="relative z-[3] -ml-7 w-[28%]">
+            <FunnelStage
+              title="Conversão (foi cortar)"
+              value={conversions}
+              percentText={`${formatPercent(rateFinal)} do total`}
+              icon={Scissors}
+              iconBg="bg-[#e9c8cb]"
+              className="rounded-r-2xl text-foreground"
+              style={{
+                background: 'linear-gradient(90deg, #f2dfe1 0%, #ecdfe0 100%)',
+                clipPath: 'polygon(8% 0, 100% 0, 100% 100%, 8% 100%, 0 50%)',
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-3 lg:hidden">
+          <div className="rounded-xl bg-primary p-4 text-white">
+            <div className="text-sm font-bold">Conversas</div>
+            <div className="mt-1 text-4xl font-bold">{conversations}</div>
+            <div className="mt-1 text-sm text-white/85">100% do total</div>
+          </div>
+          <div className="rounded-xl bg-primary/70 p-4 text-white">
+            <div className="text-sm font-bold">Agendamentos</div>
+            <div className="mt-1 text-4xl font-bold">{bookings}</div>
+            <div className="mt-1 text-sm text-white/85">{formatPercent(rateConversationToBooking)} do total</div>
+          </div>
+          <div className="rounded-xl bg-primary/10 p-4 text-foreground">
+            <div className="text-sm font-bold">Conversão (foi cortar)</div>
+            <div className="mt-1 text-4xl font-bold">{conversions}</div>
+            <div className="mt-1 text-sm text-muted-foreground">{formatPercent(rateFinal)} do total</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid divide-y divide-border rounded-xl border border-border/90 bg-card lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+        <FunnelMetric title="Taxa conversa > agendamento" value={formatPercent(rateConversationToBooking)} />
+        <FunnelMetric title="Taxa agendamento > conversão" value={formatPercent(rateBookingToConversion)} />
+        <FunnelMetric title="Taxa final conversa > corte" value={formatPercent(rateFinal)} />
+      </div>
+    </section>
+  );
+}
+
+function ChartCard({ title, description, type, labels = [], helper, className }) {
   return (
     <section className={cn('rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]', className)}>
       <div className="mb-4">
@@ -514,7 +553,7 @@ function ChartCard({ title, description, type, labels = [], helper, className, m
         {description || helper ? <p className="mt-1 text-xs text-muted-foreground">{description || helper}</p> : null}
       </div>
 
-      {type === 'funnel' ? <EmptyFunnel labels={labels} metrics={metrics} /> : null}
+      {type === 'funnel' ? <EmptyFunnel labels={labels} /> : null}
       {type === 'line' ? <EmptyLineChart labels={labels} secondLine /> : null}
       {type === 'combo' ? <EmptyLineChart labels={labels} secondLine /> : null}
       {type === 'bars' ? <EmptyBars labels={labels} /> : null}
@@ -529,17 +568,28 @@ function ChartCard({ title, description, type, labels = [], helper, className, m
   );
 }
 
+function DateFilter() {
+  return (
+    <div className="flex flex-wrap items-center gap-3 xl:justify-end">
+      <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
+        <Calendar className="h-4 w-4 text-muted-foreground" />
+        <span className="font-medium">Início</span>
+        <input type="text" placeholder="dd/mm/aaaa" className="w-28 border-0 bg-transparent p-0 font-semibold text-foreground outline-none placeholder:text-foreground" />
+      </label>
+      <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
+        <span className="font-medium">Fim</span>
+        <input type="text" placeholder="dd/mm/aaaa" className="w-28 border-0 bg-transparent p-0 font-semibold text-foreground outline-none placeholder:text-foreground" />
+        <Calendar className="h-4 w-4 text-muted-foreground" />
+      </label>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
-  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const current = dashboards[activeDashboard];
 
-  const currentMain = useMemo(() => {
-    if (current.main.type === 'funnel') {
-      return { ...current.main, labels: current.funnel, metrics: current.main.metrics || [] };
-    }
-    return current.main;
-  }, [current]);
+  const currentMain = useMemo(() => current.main, [current]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">
@@ -550,63 +600,40 @@ export default function Dashboard() {
 
         <DashboardBrowserTabs activeTab={activeDashboard} onChange={setActiveDashboard} />
 
-        <div className="mt-5 flex flex-col gap-3 pt-1 xl:flex-row xl:items-center xl:justify-between">
+        <div className="mt-5 flex flex-col gap-4 pt-1 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h2 className="text-lg font-bold text-foreground">{current.title}</h2>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{current.subtitle}</p>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-            <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
-              <CalendarDays className="h-4 w-4 text-muted-foreground" />
-              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                Início
-                <input
-                  type="date"
-                  value={dateRange.start}
-                  onChange={(event) => setDateRange((currentRange) => ({ ...currentRange, start: event.target.value }))}
-                  className="h-8 rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition-colors focus:border-primary"
-                />
-              </label>
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
-              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                Fim
-                <input
-                  type="date"
-                  value={dateRange.end}
-                  onChange={(event) => setDateRange((currentRange) => ({ ...currentRange, end: event.target.value }))}
-                  className="h-8 rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition-colors focus:border-primary"
-                />
-              </label>
-            </div>
-          </div>
+          <DateFilter />
         </div>
       </section>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3', current.cards.length >= 5 ? '2xl:grid-cols-5' : '2xl:grid-cols-6')}>
         {current.cards.map((card) => (
           <DashboardStatCard key={card.title} {...card} />
         ))}
       </div>
 
-      <ChartCard
-        title={currentMain.title}
-        description={currentMain.description}
-        type={currentMain.type}
-        labels={currentMain.labels}
-        metrics={currentMain.metrics}
-        className="min-h-[260px]"
-      />
+      {currentMain.type === 'atendimentoFunnel' ? (
+        <AtendimentoConversionFunnel values={currentMain.values} />
+      ) : (
+        <ChartCard
+          title={currentMain.title}
+          description={currentMain.description}
+          type={currentMain.type}
+          labels={currentMain.labels}
+          className="min-h-[260px]"
+        />
+      )}
 
-      {current.sideCharts.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      {current.sideCharts.length ? (
+        <div className={cn('grid grid-cols-1 gap-4', current.sideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
           {current.sideCharts.map((chart) => (
             <ChartCard key={chart.title} {...chart} />
           ))}
         </div>
       ) : null}
-
     </PageShell>
   );
 }
