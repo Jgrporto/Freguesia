@@ -1540,10 +1540,9 @@ const scheduleChatbotBackendRuntime = () => {
   }, Math.max(5000, CHATBOT_BACKEND_POLL_INTERVAL_MS));
 };
 
-
 const ROLE_PERMISSION_KEYS = [
-  'attendance',
   'dashboard',
+  'attendance',
   'kanban',
   'quickReplies',
   'customerBase',
@@ -1552,95 +1551,105 @@ const ROLE_PERMISSION_KEYS = [
   'routines',
   'hsms',
   'settings',
-  'updates',
 ];
 
-const DEFAULT_ROLE_PERMISSIONS = {
-  attendance: true,
-  dashboard: false,
-  kanban: false,
-  quickReplies: false,
-  customerBase: false,
-  labels: true,
-  chatbot: false,
-  routines: false,
-  hsms: false,
-  settings: false,
-  updates: true,
-};
+const DEFAULT_ROLE_PERMISSIONS = ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
+  accumulator[key] = ['attendance', 'labels'].includes(key);
+  return accumulator;
+}, {});
 
 const ADMIN_ROLE_PERMISSIONS = ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
   accumulator[key] = true;
   return accumulator;
 }, {});
 
-const normalizeRolePermissions = (permissions = {}, fallback = DEFAULT_ROLE_PERMISSIONS) =>
-  ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
-    accumulator[key] = Boolean(permissions?.[key] ?? fallback?.[key] ?? false);
+const DEFAULT_ROLE_SETTINGS_ACCESS = {
+  profile: 'edit',
+  notifications: 'edit',
+  appearance: 'edit',
+  customerSync: 'edit',
+  team: 'edit',
+  roles: 'edit',
+  services: 'edit',
+  audit: 'edit',
+};
+
+const HIDDEN_ROLE_SETTINGS_ACCESS = Object.keys(DEFAULT_ROLE_SETTINGS_ACCESS).reduce((accumulator, key) => {
+  accumulator[key] = 'hidden';
+  return accumulator;
+}, {});
+
+const normalizeRolePermissions = (permissions = {}, fallback = DEFAULT_ROLE_PERMISSIONS) => {
+  const source = permissions && typeof permissions === 'object' ? permissions : {};
+  return ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
+    accumulator[key] = Boolean(source[key] ?? fallback?.[key] ?? false);
     return accumulator;
   }, {});
+};
 
-const isAdminRoleRecord = (role = {}) =>
-  String(role?.id || '').trim() === 'role-admin' ||
-  String(role?.name || '').trim().toLowerCase() === 'administrador' ||
-  String(role?.department_key || role?.departmentKey || '').trim().toLowerCase() === 'administracao';
+const normalizeRoleSettingsAccess = (settingsAccess = {}, fallback = DEFAULT_ROLE_SETTINGS_ACCESS) => {
+  const source = settingsAccess && typeof settingsAccess === 'object' ? settingsAccess : {};
+  return Object.keys(DEFAULT_ROLE_SETTINGS_ACCESS).reduce((accumulator, key) => {
+    const candidate = String(source[key] || fallback?.[key] || 'hidden').trim().toLowerCase();
+    accumulator[key] = ['hidden', 'view', 'edit'].includes(candidate) ? candidate : 'hidden';
+    return accumulator;
+  }, {});
+};
+
+const isAdminRoleLike = (role = {}) => {
+  const roleName = String(role?.name || role?.role_name || role?.role || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  const department = String(role?.department_key || role?.departmentKey || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+  return roleName === 'admin' || roleName === 'administrador' || department === 'administracao';
+};
 
 const normalizeRoleRecord = (role = {}, index = 0, fallbackCreatedAt = nowIso()) => {
-  const createdAt = String(role.created_date || role.createdAt || fallbackCreatedAt || nowIso());
-  const updatedAt = String(role.updated_date || role.updatedAt || createdAt);
-  const adminRole = isAdminRoleRecord(role);
+  const timestamp = nowIso();
+  const createdAt = String(role.created_date || role.createdAt || fallbackCreatedAt || timestamp);
+  const adminRole = isAdminRoleLike(role) || String(role.id || '').trim() === 'role-admin';
+  const permissions = normalizeRolePermissions(role.permissions, adminRole ? ADMIN_ROLE_PERMISSIONS : DEFAULT_ROLE_PERMISSIONS);
+  const settingsFallback = permissions.settings ? DEFAULT_ROLE_SETTINGS_ACCESS : HIDDEN_ROLE_SETTINGS_ACCESS;
 
   return {
-    id: String(role.id || `role-${index + 1}`).trim(),
-    name: String(role.name || `Função ${index + 1}`).trim(),
+    id: String(role.id || `role-${index + 1}`),
+    name: String(role.name || '').trim() || `Função ${index + 1}`,
     description: String(role.description || '').trim(),
     department_key: String(role.department_key || role.departmentKey || '').trim(),
-    permissions: normalizeRolePermissions(role.permissions, adminRole ? ADMIN_ROLE_PERMISSIONS : DEFAULT_ROLE_PERMISSIONS),
-    settings_access: role.settings_access || role.settingsAccess,
+    permissions,
+    settings_access: normalizeRoleSettingsAccess(role.settings_access || role.settingsAccess, adminRole ? DEFAULT_ROLE_SETTINGS_ACCESS : settingsFallback),
     created_date: createdAt,
-    updated_date: updatedAt,
+    updated_date: String(role.updated_date || role.updatedAt || createdAt),
   };
 };
 
 const buildDefaultRoles = (createdAt = nowIso()) => [
-  {
+  normalizeRoleRecord({
     id: 'role-admin',
     name: 'Administrador',
     description: 'Acesso completo a toda a plataforma e configuracoes do sistema.',
     department_key: 'administracao',
     permissions: { ...ADMIN_ROLE_PERMISSIONS },
+    settings_access: { ...DEFAULT_ROLE_SETTINGS_ACCESS },
     created_date: createdAt,
     updated_date: createdAt,
-  },
-  {
+  }),
+  normalizeRoleRecord({
     id: 'role-sales',
     name: 'Comercial',
     description: 'Responsavel por leads, etiquetas e acompanhamento do funil.',
     department_key: 'comercial',
-    permissions: normalizeRolePermissions({
-      attendance: true,
+    permissions: {
+      ...DEFAULT_ROLE_PERMISSIONS,
       dashboard: true,
-      kanban: true,
-      quickReplies: true,
-      customerBase: false,
-      labels: true,
-      chatbot: false,
-      routines: true,
-      hsms: false,
-      settings: false,
-      updates: true,
-    }),
-    created_date: createdAt,
-    updated_date: createdAt,
-  },
-  {
-    id: 'role-support',
-    name: 'Suporte',
-    description: 'Atua no atendimento e no acompanhamento operacional das conversas.',
-    department_key: 'suporte',
-    permissions: normalizeRolePermissions({
       attendance: true,
-      dashboard: true,
       kanban: true,
       quickReplies: true,
       customerBase: false,
@@ -1649,11 +1658,33 @@ const buildDefaultRoles = (createdAt = nowIso()) => [
       routines: false,
       hsms: false,
       settings: false,
-      updates: true,
-    }),
+    },
+    settings_access: { ...HIDDEN_ROLE_SETTINGS_ACCESS },
     created_date: createdAt,
     updated_date: createdAt,
-  },
+  }),
+  normalizeRoleRecord({
+    id: 'role-support',
+    name: 'Suporte',
+    description: 'Atua no atendimento e no acompanhamento operacional das conversas.',
+    department_key: 'suporte',
+    permissions: {
+      ...DEFAULT_ROLE_PERMISSIONS,
+      dashboard: true,
+      attendance: true,
+      kanban: true,
+      quickReplies: true,
+      customerBase: false,
+      labels: true,
+      chatbot: false,
+      routines: false,
+      hsms: false,
+      settings: false,
+    },
+    settings_access: { ...HIDDEN_ROLE_SETTINGS_ACCESS },
+    created_date: createdAt,
+    updated_date: createdAt,
+  }),
 ];
 
 const normalizeService = (service = {}, index = 0) => {
@@ -1772,32 +1803,53 @@ const normalizeUserRecord = (user = {}, index = 0, fallbackCreatedAt = nowIso())
   };
 };
 
-const sanitizeUserForClient = (user = {}, store = null) => {
-  const role = store ? findUserRole(store, user) : null;
-  const adminUser =
-    String(user?.role || '').trim().toLowerCase() === 'admin' ||
-    String(user?.role_name || '').trim().toLowerCase() === 'administrador' ||
-    isAdminRoleRecord(role);
-  const rolePermissions = adminUser
-    ? ADMIN_ROLE_PERMISSIONS
-    : normalizeRolePermissions(role?.permissions || user?.permissions || {}, {});
+const sanitizeUserForClient = (user = {}) => ({
+  id: String(user.id || '').trim(),
+  full_name: String(user.full_name || '').trim(),
+  email: String(user.email || '').trim(),
+  role: String(user.role || '').trim(),
+  role_id: String(user.role_id || '').trim(),
+  role_name: String(user.role_name || '').trim(),
+  username: String(user.username || '').trim(),
+  description: String(user.description || '').trim(),
+  created_date: String(user.created_date || '').trim(),
+  updated_date: String(user.updated_date || '').trim(),
+  has_password: Boolean(String(user.password_hash || '').trim()),
+});
+
+const resolveRoleForUserRecord = (store, user = {}) => {
+  const roles = Array.isArray(store?.roles) ? store.roles.map((role, index) => normalizeRoleRecord(role, index)) : [];
+  return (
+    roles.find((role) => String(role.id || '') === String(user.role_id || '')) ||
+    roles.find((role) => String(role.name || '') === String(user.role_name || '')) ||
+    roles.find((role) => String(role.name || '') === String(user.role || '')) ||
+    null
+  );
+};
+
+const sanitizeAuthenticatedUserForClient = (store, user = {}) => {
+  const baseUser = sanitizeUserForClient(user);
+  const role = resolveRoleForUserRecord(store, user);
+  const adminLike =
+    isAdminRoleLike(role || user) ||
+    String(baseUser.role || '').trim().toLowerCase() === 'admin' ||
+    String(baseUser.role_name || '').trim().toLowerCase() === 'administrador';
+  const permissions = normalizeRolePermissions(
+    role?.permissions || user?.role_permissions || user?.rolePermissions || user?.permissions,
+    adminLike ? ADMIN_ROLE_PERMISSIONS : DEFAULT_ROLE_PERMISSIONS,
+  );
 
   return {
-    id: String(user.id || '').trim(),
-    full_name: String(user.full_name || '').trim(),
-    email: String(user.email || '').trim(),
-    role: String(user.role || '').trim(),
-    role_id: String(user.role_id || '').trim(),
-    role_name: String(user.role_name || '').trim(),
-    username: String(user.username || '').trim(),
-    description: String(user.description || '').trim(),
-    permissions: rolePermissions,
-    role_permissions: rolePermissions,
-    settings_access: role?.settings_access || role?.settingsAccess || null,
+    ...baseUser,
+    role_id: String(role?.id || baseUser.role_id || '').trim(),
+    role_name: String(role?.name || baseUser.role_name || '').trim(),
     department_key: String(role?.department_key || '').trim(),
-    created_date: String(user.created_date || '').trim(),
-    updated_date: String(user.updated_date || '').trim(),
-    has_password: Boolean(String(user.password_hash || '').trim()),
+    role_permissions: permissions,
+    permissions,
+    settings_access: normalizeRoleSettingsAccess(
+      role?.settings_access || user?.settings_access || user?.settingsAccess,
+      adminLike || permissions.settings ? DEFAULT_ROLE_SETTINGS_ACCESS : HIDDEN_ROLE_SETTINGS_ACCESS,
+    ),
   };
 };
 
@@ -2288,9 +2340,7 @@ const normalizeStore = (store) => {
   const base = store && typeof store === 'object' ? store : {};
   const users = (Array.isArray(base.users) ? base.users : []).map((user, index) => normalizeUserRecord(user, index));
   const createdAt = users?.[0]?.created_date || nowIso();
-  const roles = Array.isArray(base.roles)
-    ? base.roles.map((role, index) => normalizeRoleRecord(role, index, createdAt))
-    : buildDefaultRoles(createdAt).map((role, index) => normalizeRoleRecord(role, index, createdAt));
+  const roles = (Array.isArray(base.roles) ? base.roles : buildDefaultRoles(createdAt)).map((role, index) => normalizeRoleRecord(role, index, createdAt));
   const services = Array.isArray(base.services)
     ? sortServices(base.services.map((service, index) => normalizeService(service, index)).filter((service) => service.name))
     : buildDefaultServices(users, createdAt);
@@ -7473,7 +7523,7 @@ const server = http.createServer(async (req, res) => {
         200,
         {
           ok: true,
-          user: sanitizeUserForClient(matchedUser, store),
+          user: sanitizeAuthenticatedUserForClient(store, matchedUser),
           session: {
             remember,
             expiresAt: record.expires_at,
@@ -7508,7 +7558,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/local/auth/me' && req.method === 'GET') {
         const authContext = await requireAuthenticatedSession(req);
         void updateUserLastSeenSession(authContext.session.id);
-        return sendJson(res, 200, sanitizeUserForClient(authContext.user, authContext.store));
+        return sendJson(res, 200, sanitizeAuthenticatedUserForClient(authContext.store, authContext.user));
       }
 
       const authContext = await requireAuthenticatedSession(req);
@@ -8566,6 +8616,17 @@ const server = http.createServer(async (req, res) => {
                   },
                   items.length,
                 )
+              : entityName === 'Role'
+                ? normalizeRoleRecord(
+                    {
+                      ...payload,
+                      id: createId(entityName, payload),
+                      created_date: payload?.created_date || timestamp,
+                      updated_date: timestamp,
+                    },
+                    items.length,
+                    timestamp,
+                  )
               : entityName === 'User'
                 ? prepareUserForStorage(
                     {
@@ -8635,6 +8696,17 @@ const server = http.createServer(async (req, res) => {
                   },
                   index,
                 )
+              : entityName === 'Role'
+                ? normalizeRoleRecord(
+                    {
+                      ...mergeEntity(items[index], payload || {}),
+                      id: items[index]?.id || itemId,
+                      created_date: items[index]?.created_date || payload?.created_date || nowIso(),
+                      updated_date: nowIso(),
+                    },
+                    index,
+                    items[index]?.created_date || nowIso(),
+                  )
               : entityName === 'User'
                 ? prepareUserForStorage(
                     {

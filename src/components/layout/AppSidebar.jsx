@@ -26,23 +26,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/lib/AuthContext';
-import { hasRolePermission } from '@/lib/role-permissions';
+import { canViewNavigationPermission } from '@/lib/navigation-permissions';
 import { currentBuildLabel, updateHistory } from '@/lib/update-history';
 import { cn } from '@/lib/utils';
 
 const primaryNavItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permissionKey: 'dashboard' },
-  { icon: MessageSquare, label: 'Atendimento', path: '/', permissionKey: 'attendance' },
-  { icon: Columns3, label: 'Visão Kanban', path: '/kanban', permissionKey: 'kanban' },
-  { icon: Zap, label: 'Respostas Rápidas', path: '/quick-replies', permissionKey: 'quickReplies' },
-  { icon: Users, label: 'Base de Clientes', path: '/customers', permissionKey: 'customerBase' },
-  { icon: Tags, label: 'Etiquetas', path: '/labels', permissionKey: 'labels' },
-  { icon: Bot, label: 'Chatbot', path: '/chatbot', permissionKey: 'chatbot' },
-  { icon: CalendarClock, label: 'Rotinas', path: '/rotinas', permissionKey: 'routines' },
-  { icon: FileText, label: 'HSMs', path: '/hsms', permissionKey: 'hsms' },
+  { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', permission: 'dashboard' },
+  { icon: MessageSquare, label: 'Atendimento', path: '/', permission: 'attendance' },
+  { icon: Columns3, label: 'Visão Kanban', path: '/kanban', permission: 'kanban' },
+  { icon: Zap, label: 'Respostas Rápidas', path: '/quick-replies', permission: 'quickReplies' },
+  { icon: Users, label: 'Base de Clientes', path: '/customers', permission: 'customerBase' },
+  { icon: Tags, label: 'Etiquetas', path: '/labels', permission: 'labels' },
+  { icon: Bot, label: 'Chatbot', path: '/chatbot', permission: 'chatbot' },
+  { icon: CalendarClock, label: 'Rotinas', path: '/rotinas', permission: 'routines' },
+  { icon: FileText, label: 'HSMs', path: '/hsms', permission: 'hsms' },
 ];
 
-const settingsItem = { icon: Settings, label: 'Configurações', path: '/settings', permissionKey: 'settings' };
+const settingsItem = { icon: Settings, label: 'Configurações', path: '/settings', permission: 'settings' };
 
 export default function AppSidebar({ expanded, pinned, onPinToggle, onMouseEnter, onMouseLeave }) {
   const location = useLocation();
@@ -50,12 +50,11 @@ export default function AppSidebar({ expanded, pinned, onPinToggle, onMouseEnter
   const [historyOpen, setHistoryOpen] = useState(false);
   const latestUpdate = updateHistory[0];
   const formattedUpdates = useMemo(() => updateHistory, []);
-  const visiblePrimaryNavItems = useMemo(
-    () => primaryNavItems.filter((item) => hasRolePermission(effectiveUser, item.permissionKey)),
+  const visibleNavItems = useMemo(
+    () => primaryNavItems.filter((item) => canViewNavigationPermission(effectiveUser, item.permission)),
     [effectiveUser],
   );
-  const canViewUpdates = hasRolePermission(effectiveUser, 'updates');
-  const canViewSettings = hasRolePermission(effectiveUser, settingsItem.permissionKey);
+  const canViewSettings = canViewNavigationPermission(effectiveUser, settingsItem.permission);
 
   const renderNavLink = ({ icon: Icon, label, path }) => {
     const isActive = path === '/chatbot' ? location.pathname.startsWith('/chatbot') : location.pathname === path;
@@ -186,17 +185,15 @@ export default function AppSidebar({ expanded, pinned, onPinToggle, onMouseEnter
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4">
-          <nav className="space-y-1.5">{visiblePrimaryNavItems.map(renderNavLink)}</nav>
+          <nav className="space-y-1.5">{visibleNavItems.map(renderNavLink)}</nav>
 
           <div className="mt-auto space-y-1.5 pt-4">
-            {canViewUpdates
-              ? renderActionButton({
-                  icon: History,
-                  label: 'Novidades',
-                  onClick: () => setHistoryOpen(true),
-                  badge: currentBuildLabel,
-                })
-              : null}
+            {renderActionButton({
+              icon: History,
+              label: 'Novidades',
+              onClick: () => setHistoryOpen(true),
+              badge: currentBuildLabel,
+            })}
 
             {canViewSettings ? renderNavLink(settingsItem) : null}
           </div>

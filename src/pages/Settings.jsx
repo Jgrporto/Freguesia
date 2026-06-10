@@ -59,7 +59,11 @@ import { useAuth } from '@/lib/AuthContext';
 import { resolveEffectiveUser } from '@/lib/current-user';
 import { disconnectLocalUserSessions } from '@/lib/local-auth';
 import { requestLocalApiJson } from '@/lib/local-api';
-import { DEFAULT_ROLE_PERMISSIONS, normalizeRolePermissions, ROLE_PERMISSION_OPTIONS } from '@/lib/role-permissions';
+import {
+  DEFAULT_NAVIGATION_PERMISSIONS,
+  NAVIGATION_PERMISSION_OPTIONS,
+  normalizeNavigationPermissions,
+} from '@/lib/navigation-permissions';
 import { deleteService, fetchAvailableWhatsappNumbers, fetchServices, saveService } from '@/lib/services-api';
 import { normalizeService } from '@/lib/services';
 import { cn } from '@/lib/utils';
@@ -91,6 +95,9 @@ import {
 
 const SETTINGS_AUDIT_STORAGE_KEY = 'freguesia:settings:audit:v1';
 
+const DEFAULT_ROLE_PERMISSIONS = { ...DEFAULT_NAVIGATION_PERMISSIONS };
+const ROLE_PERMISSION_OPTIONS = NAVIGATION_PERMISSION_OPTIONS;
+
 const createEmptyUserForm = (roleId = '') => ({
   id: '',
   full_name: '',
@@ -105,7 +112,7 @@ const createEmptyRoleForm = () => ({
   name: '',
   description: '',
   department_key: '',
-  permissions: normalizeRolePermissions(),
+  permissions: { ...DEFAULT_ROLE_PERMISSIONS },
   settings_access: { ...DEFAULT_ROLE_SETTINGS_ACCESS },
 });
 
@@ -565,7 +572,7 @@ export default function Settings() {
       name: role.name || '',
       description: role.description || '',
       department_key: role.department_key || '',
-      permissions: normalizeRolePermissions(role.permissions, DEFAULT_ROLE_PERMISSIONS),
+      permissions: normalizeNavigationPermissions(role.permissions, DEFAULT_ROLE_PERMISSIONS),
       settings_access: normalizeRoleSettingsAccess(role.settings_access || role.settingsAccess),
     });
     setRoleDialogOpen(true);
@@ -603,7 +610,7 @@ export default function Settings() {
   const handleRolePermissionChange = (permissionKey, checked) => {
     setRoleForm((current) => {
       const nextPermissions = {
-        ...normalizeRolePermissions(current.permissions, DEFAULT_ROLE_PERMISSIONS),
+        ...normalizeNavigationPermissions(current.permissions, DEFAULT_ROLE_PERMISSIONS),
         [permissionKey]: Boolean(checked),
       };
 
@@ -740,7 +747,7 @@ export default function Settings() {
     }
 
     const existingUser = users.find((teamUser) => teamUser.id === userForm.id) || null;
-    const emailFallback = `${toSlug(userForm.username)}@freguesia.local`;
+    const emailFallback = `${toSlug(userForm.username)}@saastv.local`;
     const payload = {
       full_name: userForm.full_name.trim(),
       username: userForm.username.trim(),
@@ -852,7 +859,7 @@ export default function Settings() {
       name: normalizedName,
       description: roleForm.description.trim(),
       department_key: departmentKey,
-      permissions: normalizeRolePermissions(roleForm.permissions, DEFAULT_ROLE_PERMISSIONS),
+      permissions: normalizeNavigationPermissions(roleForm.permissions, DEFAULT_ROLE_PERMISSIONS),
       settings_access: roleForm.permissions.settings
         ? normalizeRoleSettingsAccess(roleForm.settings_access)
         : HIDDEN_ROLE_SETTINGS_ACCESS,

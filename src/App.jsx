@@ -8,8 +8,8 @@ import AppLayout from '@/components/layout/AppLayout';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import PageNotFound from '@/lib/PageNotFound';
 import { buildLoginUrl } from '@/lib/local-auth';
+import { canAccessPathname, getFirstAllowedNavigationPath } from '@/lib/navigation-permissions';
 import { queryClientInstance } from '@/lib/query-client';
-import { getFirstAccessiblePath, hasRolePermission } from '@/lib/role-permissions';
 import Attendance from '@/pages/Attendance';
 import Chatbot from '@/pages/Chatbot';
 import ChatbotFlowEditor from '@/pages/ChatbotFlowEditor';
@@ -30,7 +30,7 @@ const LoadingScreen = () => (
 );
 
 const ProtectedShell = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authChecked, authError, isAuthenticated } = useAuth();
+  const { effectiveUser, isLoadingAuth, isLoadingPublicSettings, authChecked, authError, isAuthenticated } = useAuth();
   const location = useLocation();
 
   if (isLoadingPublicSettings || isLoadingAuth || !authChecked) {
@@ -46,24 +46,12 @@ const ProtectedShell = () => {
     return <Navigate to={buildLoginUrl(redirectTo)} replace />;
   }
 
+  if (!canAccessPathname(effectiveUser, location.pathname)) {
+    const fallbackPath = getFirstAllowedNavigationPath(effectiveUser);
+    return <Navigate to={fallbackPath === location.pathname ? '/login' : fallbackPath} replace />;
+  }
+
   return <AppLayout />;
-};
-
-
-const RequirePermission = ({ permissionKey, children }) => {
-  const { effectiveUser } = useAuth();
-  const location = useLocation();
-
-  if (hasRolePermission(effectiveUser, permissionKey)) {
-    return children;
-  }
-
-  const fallbackPath = getFirstAccessiblePath(effectiveUser);
-  if (fallbackPath && fallbackPath !== location.pathname) {
-    return <Navigate to={fallbackPath} replace />;
-  }
-
-  return <PageNotFound />;
 };
 
 const AppRoutes = () => {
@@ -77,18 +65,18 @@ const AppRoutes = () => {
     <Routes>
       <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
       <Route element={<ProtectedShell />}>
-        <Route path="/" element={<RequirePermission permissionKey="attendance"><Attendance /></RequirePermission>} />
-        <Route path="/customers" element={<RequirePermission permissionKey="customerBase"><CustomerBase /></RequirePermission>} />
-        <Route path="/dashboard" element={<RequirePermission permissionKey="dashboard"><Dashboard /></RequirePermission>} />
-        <Route path="/kanban" element={<RequirePermission permissionKey="kanban"><KanbanView /></RequirePermission>} />
-        <Route path="/labels" element={<RequirePermission permissionKey="labels"><Labels /></RequirePermission>} />
-        <Route path="/chatbot" element={<RequirePermission permissionKey="chatbot"><Chatbot /></RequirePermission>} />
-        <Route path="/chatbotv" element={<RequirePermission permissionKey="chatbot"><Navigate to="/chatbot" replace /></RequirePermission>} />
-        <Route path="/chatbot/editar/:flowRef" element={<RequirePermission permissionKey="chatbot"><ChatbotFlowEditor /></RequirePermission>} />
-        <Route path="/rotinas" element={<RequirePermission permissionKey="routines"><Rotinas /></RequirePermission>} />
-        <Route path="/quick-replies" element={<RequirePermission permissionKey="quickReplies"><QuickReplies /></RequirePermission>} />
-        <Route path="/hsms" element={<RequirePermission permissionKey="hsms"><Hsms /></RequirePermission>} />
-        <Route path="/settings" element={<RequirePermission permissionKey="settings"><Settings /></RequirePermission>} />
+        <Route path="/" element={<Attendance />} />
+        <Route path="/customers" element={<CustomerBase />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/kanban" element={<KanbanView />} />
+        <Route path="/labels" element={<Labels />} />
+        <Route path="/chatbot" element={<Chatbot />} />
+        <Route path="/chatbotv" element={<Navigate to="/chatbot" replace />} />
+        <Route path="/chatbot/editar/:flowRef" element={<ChatbotFlowEditor />} />
+        <Route path="/rotinas" element={<Rotinas />} />
+        <Route path="/quick-replies" element={<QuickReplies />} />
+        <Route path="/hsms" element={<Hsms />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<PageNotFound />} />
       </Route>
     </Routes>
