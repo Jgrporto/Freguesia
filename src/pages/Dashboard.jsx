@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Award,
-  BarChart3,
   CalendarDays,
-  CheckCircle2,
   Clock,
   Gift,
   HeartHandshake,
@@ -70,7 +68,6 @@ const dashboards = {
   atendimento: {
     title: 'Atendimento e Conversão',
     subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em agendamentos.',
-    summary: 'Mostra se o atendimento está vendendo, respondendo rápido e evitando que clientes escapem.',
     cards: [
       { title: 'Conversas recebidas', value: '0', subtitle: 'Volume total no período', icon: MessageSquare },
       { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: Timer },
@@ -98,19 +95,10 @@ const dashboards = {
         helper: '1ª resposta e TMR ao longo da semana.',
       },
     ],
-    table: {
-      title: 'Performance por atendente',
-      columns: ['Atendente', 'Conversas', 'Agendamentos', 'Conversão', 'TMR'],
-      rows: [
-        ['Atendente 1', '0', '0', '0%', '00:00'],
-        ['Atendente 2', '0', '0', '0%', '00:00'],
-      ],
-    },
   },
   aquisicao: {
     title: 'Aquisição / Anúncios',
     subtitle: 'Mostra se o investimento em tráfego está trazendo clientes reais ou apenas conversas.',
-    summary: 'Mostra se o anúncio está pagando a conta ou apenas gerando conversa sem conversão.',
     cards: [
       { title: 'Clientes vindos do anúncio', value: '0', subtitle: 'Novos clientes identificados', icon: Users },
       { title: 'Conversas iniciadas', value: '0', subtitle: 'Cliques que abriram WhatsApp', icon: MessageCircle },
@@ -125,44 +113,13 @@ const dashboards = {
       description: 'Do clique no anúncio ao cliente novo e retorno para o próximo corte.',
       type: 'funnel',
     },
-    sideCharts: [
-      {
-        title: 'Investimento x agendamentos',
-        type: 'combo',
-        labels: days,
-        helper: 'Comparação entre verba, conversas e agendas geradas.',
-      },
-      {
-        title: 'Origem dos clientes',
-        type: 'donut',
-        labels: ['Meta Ads', 'WhatsApp orgânico', 'Indicação', 'Google', 'Instagram orgânico'],
-        helper: 'De onde vêm os clientes da barbearia.',
-      },
-      {
-        title: 'CAC por período',
-        type: 'line',
-        labels: days,
-        helper: 'Evolução do CAC por agendamento e por cliente novo.',
-      },
-    ],
-    table: {
-      title: 'Desempenho por origem',
-      columns: ['Origem', 'Clientes', 'Conversas', 'Agendamentos', 'CAC agenda', 'CAC cliente', 'Taxa'],
-      rows: [
-        ['Meta Ads', '0', '0', '0', 'R$ 0,00', 'R$ 0,00', '0%'],
-        ['WhatsApp orgânico', '0', '0', '0', 'R$ 0,00', 'R$ 0,00', '0%'],
-        ['Indicação', '0', '0', '0', 'R$ 0,00', 'R$ 0,00', '0%'],
-        ['Google', '0', '0', '0', 'R$ 0,00', 'R$ 0,00', '0%'],
-        ['Instagram orgânico', '0', '0', '0', 'R$ 0,00', 'R$ 0,00', '0%'],
-      ],
-    },
+    sideCharts: [],
   },
   followup: {
     title: 'Follow-up e Recuperação',
     subtitle: 'Avalia quais disparos e automações estão trazendo clientes de volta.',
-    summary: 'Mostra quais automações recuperam clientes, quais templates funcionam melhor e onde vale insistir.',
     cards: [
-      { title: 'Disparos enviados', value: '0', subtitle: 'D+20 a D+90', icon: Send },
+      { title: 'Disparos enviados', value: '0', subtitle: 'D+20 a D+50', icon: Send },
       { title: 'Respostas recebidas', value: '0', subtitle: 'Retornos dos clientes', icon: MessageCircle },
       { title: 'Agendamentos gerados', value: '0', subtitle: 'Após disparos', icon: CalendarDays },
       { title: 'Clientes recuperados', value: '0', subtitle: 'Voltaram a cortar', icon: HeartHandshake },
@@ -171,9 +128,9 @@ const dashboards = {
     ],
     main: {
       title: 'Performance por régua de follow-up',
-      description: 'Agendamentos e clientes recuperados por D+20, D+25, D+30, D+45, D+60 e D+90.',
+      description: 'Agendamentos e clientes recuperados por D+20, D+30, D+40 e D+50.',
       type: 'horizontalBars',
-      labels: ['D+20', 'D+25', 'D+30', 'D+45', 'D+60', 'D+90'],
+      labels: ['D+20', 'D+30', 'D+40', 'D+50'],
     },
     sideCharts: [
       {
@@ -185,7 +142,7 @@ const dashboards = {
       {
         title: 'Taxa de resposta por template',
         type: 'ranking',
-        labels: ['Template D+20', 'Template D+30', 'Template D+45', 'Template D+60'],
+        labels: ['Template D+20', 'Template D+30', 'Template D+40', 'Template D+50'],
         helper: 'Mensagens com maior resposta e recuperação.',
       },
       {
@@ -195,16 +152,10 @@ const dashboards = {
         helper: 'Disparos, respostas, agendas e recuperados.',
       },
     ],
-    table: {
-      title: 'Desempenho por campanha',
-      columns: ['Campanha', 'Disparos', 'Respostas', 'Agendamentos', 'Recuperados', 'CRC'],
-      rows: ['D+20', 'D+25', 'D+30', 'D+45', 'D+60', 'D+90'].map((item) => [item, '0', '0', '0', '0', 'R$ 0,00']),
-    },
   },
   base: {
     title: 'Base e Recorrência',
     subtitle: 'Entende se a barbearia está criando base forte ou dependendo sempre de cliente novo.',
-    summary: 'Mostra se a barbearia está criando recorrência, aumentando fidelidade e reduzindo clientes parados.',
     cards: [
       { title: 'Clientes ativos', value: '0', subtitle: 'Base com potencial de retorno', icon: Users },
       { title: 'Primeiro corte', value: '0', subtitle: 'Clientes com 1 corte', icon: Sparkles },
@@ -223,8 +174,8 @@ const dashboards = {
       {
         title: 'Clientes parados por período',
         type: 'horizontalBars',
-        labels: ['20 dias', '30 dias', '45 dias', '60 dias', '90 dias'],
-        helper: 'Onde está o maior risco de perda de clientes.',
+        labels: ['D+20', 'D+30', 'D+40', 'D+50'],
+        helper: 'Clientes parados conforme os marcos da régua de recuperação.',
       },
       {
         title: 'Taxa de retorno por mês',
@@ -239,22 +190,12 @@ const dashboards = {
         helper: 'Ciclo real de recompra da barbearia.',
       },
     ],
-    table: {
-      title: 'Ranking de clientes fiéis',
-      columns: ['Cliente', 'Cortes', 'Último corte', 'Barbeiro', 'Próximo follow-up'],
-      rows: [
-        ['—', '0', '—', '—', '—'],
-        ['—', '0', '—', '—', '—'],
-        ['—', '0', '—', '—', '—'],
-      ],
-    },
   },
   experiencia: {
     title: 'Experiência, NPS e Indicação',
     subtitle: 'Mede satisfação, problemas reportados, indicações e aniversários.',
-    summary: 'Mostra a qualidade da experiência, o potencial de indicação e pontos que precisam ser corrigidos rapidamente.',
     cards: [
-      { title: 'Nota média D+1', value: '0,0', subtitle: 'Percepção pós-atendimento', icon: Star },
+      { title: 'NPS Médio', value: '0,0', subtitle: 'Percepção pós-atendimento', icon: Star },
       { title: 'Notas 9 e 10', value: '0', subtitle: 'Promotores imediatos', icon: Award },
       { title: 'Notas abaixo de 6', value: '0', subtitle: 'Atenção operacional', icon: Target },
       { title: 'Enviados para relatório', value: '0', subtitle: 'Casos críticos', icon: LineChart },
@@ -262,8 +203,8 @@ const dashboards = {
       { title: 'Agendas por aniversário', value: '0', subtitle: 'Recompras por data', icon: Gift },
     ],
     main: {
-      title: 'Distribuição das notas D+1',
-      description: 'Notas de 0 a 10 para entender a percepção imediata do cliente.',
+      title: 'Distribuição das notas NPS',
+      description: 'Notas de 0 a 10 para entender a percepção geral do cliente.',
       type: 'scoreBars',
       labels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'],
     },
@@ -287,15 +228,6 @@ const dashboards = {
         helper: 'Indicações, aniversários enviados e agendas por aniversário.',
       },
     ],
-    table: {
-      title: 'Problemas reportados',
-      columns: ['Cliente', 'Nota', 'Motivo', 'Responsável', 'Status'],
-      rows: [
-        ['—', '0', '—', '—', 'Sem tratativa'],
-        ['—', '0', '—', '—', 'Sem tratativa'],
-        ['—', '0', '—', '—', 'Sem tratativa'],
-      ],
-    },
   },
 };
 
@@ -470,40 +402,9 @@ function ChartCard({ title, description, type, labels = [], helper, className })
   );
 }
 
-function DataTable({ title, columns, rows }) {
-  return (
-    <section className="rounded-xl border border-border bg-card shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">{title}</h3>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left text-sm">
-          <thead className="bg-muted/40 text-xs uppercase tracking-[0.08em] text-muted-foreground">
-            <tr>
-              {columns.map((column) => (
-                <th key={column} className="px-4 py-3 font-bold">{column}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={`${title}-${rowIndex}`} className="border-t border-border/70">
-                {row.map((cell, cellIndex) => (
-                  <td key={`${title}-${rowIndex}-${cellIndex}`} className={cn('px-4 py-3', cellIndex === 0 ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const current = dashboards[activeDashboard];
 
   const currentMain = useMemo(() => {
@@ -529,18 +430,29 @@ export default function Dashboard() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-            <div className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              <span>0 em atendimento agora</span>
-            </div>
-            <button
-              type="button"
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-semibold text-foreground shadow-[0_2px_8px_rgba(15,23,42,0.06)] transition-colors hover:bg-secondary"
-            >
+            <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
               <CalendarDays className="h-4 w-4 text-muted-foreground" />
-              Últimos 7 dias
-              <span className="ml-3 text-muted-foreground">⌄</span>
-            </button>
+              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                Início
+                <input
+                  type="date"
+                  value={dateRange.start}
+                  onChange={(event) => setDateRange((currentRange) => ({ ...currentRange, start: event.target.value }))}
+                  className="h-8 rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition-colors focus:border-primary"
+                />
+              </label>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-[0_2px_8px_rgba(15,23,42,0.06)]">
+              <label className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                Fim
+                <input
+                  type="date"
+                  value={dateRange.end}
+                  onChange={(event) => setDateRange((currentRange) => ({ ...currentRange, end: event.target.value }))}
+                  className="h-8 rounded-md border border-border bg-background px-2 text-sm font-semibold text-foreground outline-none transition-colors focus:border-primary"
+                />
+              </label>
+            </div>
           </div>
         </div>
       </section>
@@ -559,25 +471,14 @@ export default function Dashboard() {
         className="min-h-[260px]"
       />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        {current.sideCharts.map((chart) => (
-          <ChartCard key={chart.title} {...chart} />
-        ))}
-      </div>
-
-      <section className="rounded-xl border border-primary/15 bg-primary/[0.03] px-4 py-3">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <CheckCircle2 className="h-4 w-4" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-foreground">Resumo da dashboard</h3>
-            <p className="mt-1 text-sm text-muted-foreground">{current.summary}</p>
-          </div>
+      {current.sideCharts.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {current.sideCharts.map((chart) => (
+            <ChartCard key={chart.title} {...chart} />
+          ))}
         </div>
-      </section>
+      ) : null}
 
-      <DataTable {...current.table} />
     </PageShell>
   );
 }
