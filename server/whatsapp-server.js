@@ -10510,14 +10510,16 @@ const normalizeStringArray = (value) =>
   );
 
 const LABEL_ID_ALIASES = Object.freeze({
-  "label-lead": ["system-lead"],
-  "system-lead": ["label-lead"],
-  "label-sql": ["system-sql"],
-  "system-sql": ["label-sql"],
-  "label-customer": ["system-cliente"],
-  "system-cliente": ["label-customer"],
-  "label-churn": ["system-cancelados"],
-  "system-cancelados": ["label-churn"],
+  "label-lead": ["system-new-customer"],
+  "system-lead": ["system-new-customer", "label-lead"],
+  "system-new-customer": ["label-lead", "system-lead"],
+  "label-customer": ["system-customer"],
+  "system-cliente": ["system-customer", "label-customer"],
+  "system-customer": ["label-customer", "system-cliente"],
+  "label-churn": ["system-recovery"],
+  "system-cancelados": ["system-recovery", "label-churn"],
+  "system-pos-venda": ["system-customer"],
+  "system-recovery": ["label-churn", "system-cancelados"],
 });
 
 const expandServiceLabelIds = (value) =>

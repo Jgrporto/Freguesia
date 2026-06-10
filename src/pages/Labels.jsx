@@ -57,6 +57,7 @@ export default function Labels() {
   const [viewMode, setViewMode] = useState('cards');
   const [selectedLabelId, setSelectedLabelId] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editingLabel, setEditingLabel] = useState(null);
   const { customLabels, assignments, stageAssignments } = useLabelCatalog();
 
   const { data: conversationsResponse = [], isLoading: isLoadingConversations } = useQuery({
@@ -125,6 +126,19 @@ export default function Labels() {
       throw error;
     }
   }, []);
+
+
+  const handleUpdateLabel = useCallback(async (payload) => {
+    if (!editingLabel?.id) return;
+    try {
+      await saveCustomLabel(payload, editingLabel.id);
+      toast.success('Etiqueta atualizada com sucesso.');
+      setEditingLabel(null);
+    } catch (error) {
+      toast.error(error?.message || 'Nao foi possivel atualizar a etiqueta.');
+      throw error;
+    }
+  }, [editingLabel]);
 
   const handleStageChange = useCallback(async (conversationId, labelId) => {
     try {
@@ -301,12 +315,14 @@ export default function Labels() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-                            onClick={() =>
-                              label.kind === 'custom'
-                                ? showFutureAction('Edicao detalhada da etiqueta personalizada sera ligada na proxima etapa.')
-                                : showFutureAction('As etiquetas de sistema continuam controladas pela regra automatica.')
-                            }
-                            title="Configurar etiqueta"
+                            onClick={() => {
+                              if (label.kind === 'custom') {
+                                setEditingLabel(label);
+                                return;
+                              }
+                              showFutureAction('As etiquetas de sistema continuam controladas pela regra automatica. A saudacao fica na tela de Chatbot.');
+                            }}
+                            title={label.kind === 'custom' ? 'Editar etiqueta' : 'Etiqueta automática do sistema'}
                           >
                             <Settings2 className="h-4 w-4" />
                           </Button>
@@ -424,6 +440,18 @@ export default function Labels() {
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         onSubmit={handleCreateLabel}
+      />
+
+      <LabelFormDialog
+        open={Boolean(editingLabel)}
+        onOpenChange={(open) => {
+          if (!open) setEditingLabel(null);
+        }}
+        initialValue={editingLabel}
+        onSubmit={handleUpdateLabel}
+        title="Editar etiqueta"
+        description="Atualize nome, descricao e cor da etiqueta personalizada."
+        submitLabel="Salvar alteracoes"
       />
     </PageShell>
   );

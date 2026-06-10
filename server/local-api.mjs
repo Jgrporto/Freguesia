@@ -116,7 +116,53 @@ const LABELS_DEFAULT_STATE = {
   customLabels: [],
   assignments: {},
   stageAssignments: {},
+  greetings: {},
   updatedAt: null,
+};
+
+const SYSTEM_LABEL_IDS = ['system-new-customer', 'system-customer', 'system-recovery'];
+const SYSTEM_LABELS = [
+  {
+    id: 'system-new-customer',
+    name: 'Novo cliente',
+    description: 'Todo numero que ainda nao esta na base de clientes da barbearia.',
+    color: '#F59E0B',
+    kind: 'system',
+    systemKey: 'new_customer',
+  },
+  {
+    id: 'system-customer',
+    name: 'Cliente',
+    description: 'Numero presente na base com ultimo corte em ate 30 dias ou sem data de ultimo corte.',
+    color: '#16A34A',
+    kind: 'system',
+    systemKey: 'customer',
+  },
+  {
+    id: 'system-recovery',
+    name: 'Recuperacao',
+    description: 'Numero presente na base com ultimo corte ha mais de 30 dias.',
+    color: '#F97316',
+    kind: 'system',
+    systemKey: 'recovery',
+  },
+];
+const DEFAULT_LABEL_GREETINGS = {
+  'system-new-customer': {
+    enabled: true,
+    message: 'Olá! Seja bem-vindo à Barbearia Freguesia. Quer agendar seu corte?',
+    repeatMode: 'once_per_open_conversation',
+  },
+  'system-customer': {
+    enabled: true,
+    message: 'Fala! Bom te ver por aqui de novo. Quer agendar seu próximo corte?',
+    repeatMode: 'once_per_open_conversation',
+  },
+  'system-recovery': {
+    enabled: true,
+    message: 'Fala! Já tem um tempinho desde seu último corte. Quer reservar um horário essa semana?',
+    repeatMode: 'once_per_open_conversation',
+  },
 };
 
 const CHATBOT_FLOW_DEFAULT_STATE = {
@@ -348,14 +394,16 @@ const sameStringArrayValues = (left = [], right = []) => {
 };
 
 const LABEL_ID_ALIASES = Object.freeze({
-  'label-lead': ['system-lead'],
-  'system-lead': ['label-lead'],
-  'label-sql': ['system-sql'],
-  'system-sql': ['label-sql'],
-  'label-customer': ['system-cliente'],
-  'system-cliente': ['label-customer'],
-  'label-churn': ['system-cancelados'],
-  'system-cancelados': ['label-churn'],
+  'label-lead': ['system-new-customer'],
+  'system-lead': ['system-new-customer', 'label-lead'],
+  'system-new-customer': ['label-lead', 'system-lead'],
+  'label-customer': ['system-customer'],
+  'system-cliente': ['system-customer', 'label-customer'],
+  'system-customer': ['label-customer', 'system-cliente'],
+  'label-churn': ['system-recovery'],
+  'system-cancelados': ['system-recovery', 'label-churn'],
+  'system-pos-venda': ['system-customer'],
+  'system-recovery': ['label-churn', 'system-cancelados'],
 });
 
 const expandServiceLabelIds = (value) =>
@@ -456,6 +504,38 @@ const normalizeStageAssignments = (assignments, customLabels = []) => {
   }, {});
 };
 
+const normalizeLabelGreeting = (value = {}, fallback = {}) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const base = fallback && typeof fallback === 'object' ? fallback : {};
+  return {
+    enabled: Boolean(source.enabled ?? base.enabled ?? false),
+    message: String(source.message ?? base.message ?? '').trim(),
+    repeatMode: String(source.repeatMode || source.mode || base.repeatMode || 'once_per_open_conversation').trim() || 'once_per_open_conversation',
+    updatedAt: source.updatedAt || source.updated_at || base.updatedAt || null,
+  };
+};
+
+const normalizeLabelGreetings = (greetings = {}, customLabels = []) => {
+  const allowedIds = new Set([...SYSTEM_LABEL_IDS, ...customLabels.map((label) => String(label?.id || '').trim()).filter(Boolean)]);
+  if (!greetings || typeof greetings !== 'object' || Array.isArray(greetings)) {
+    return {};
+  }
+
+  return Object.entries(greetings).reduce((accumulator, [labelId, config]) => {
+    const safeLabelId = String(labelId || '').trim();
+    if (!safeLabelId || !allowedIds.has(safeLabelId)) {
+      return accumulator;
+    }
+    accumulator[safeLabelId] = normalizeLabelGreeting(config, DEFAULT_LABEL_GREETINGS[safeLabelId] || {});
+    return accumulator;
+  }, {});
+};
+
+const getLabelGreetingConfig = (labelsState = LABELS_DEFAULT_STATE, labelId = '') => {
+  const safeLabelId = String(labelId || '').trim();
+  return normalizeLabelGreeting(labelsState?.greetings?.[safeLabelId], DEFAULT_LABEL_GREETINGS[safeLabelId] || {});
+};
+
 const normalizeLabelsState = (value) => {
   const base = value && typeof value === 'object' ? value : {};
   const customLabels = sortLabels(
@@ -469,6 +549,7 @@ const normalizeLabelsState = (value) => {
     customLabels,
     assignments: normalizeLabelAssignments(base.assignments, customLabels),
     stageAssignments: normalizeStageAssignments(base.stageAssignments, customLabels),
+    greetings: normalizeLabelGreetings(base.greetings, customLabels),
     updatedAt: base.updatedAt ? String(base.updatedAt) : null,
   };
 };
@@ -665,6 +746,226 @@ const resolveMessageKey = (conversation = {}) =>
 
 const resolveChatbotProcessCacheKey = (conversation = {}) =>
   `${conversation.id || ''}|${resolveMessageKey(conversation)}`;
+
+const parseFallbackDate = (value) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    const asExcelDate = new Date(excelEpoch + value * 24 * 60 * 60 * 1000);
+    if (!Number.isNaN(asExcelDate.getTime()) && value > 20000 && value < 80000) return asExcelDate;
+  }
+  const raw = String(value || '').trim();
+  if (!raw || ['0000-00-00', '0000-00-00 00:00:00', '00/00/0000'].includes(raw)) return null;
+  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (brDate) {
+    const [, day, month, year, hour = '0', minute = '0', second = '0'] = brDate;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return null;
+  const parsed = new Date(timestamp);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const differenceInCalendarDays = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  return Math.floor((today.getTime() - target.getTime()) / (24 * 60 * 60 * 1000));
+};
+
+const getObjectField = (source, keys = []) => {
+  const pools = [source, source?.raw, source?.source, source?.profile, source?.sourceCustomer, source?.customer].filter(
+    (item) => item && typeof item === 'object',
+  );
+  for (const pool of pools) {
+    for (const key of keys) {
+      if (pool?.[key] !== undefined && pool?.[key] !== null && String(pool[key]).trim() !== '') {
+        return pool[key];
+      }
+    }
+  }
+  return '';
+};
+
+const parseIntegerValue = (value) => {
+  const parsed = Number.parseInt(String(value ?? '').replace(/[^\d-]/g, ''), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildPhoneLookupKeys = (value) => {
+  const digits = normalizePhone(value);
+  if (!digits) return [];
+  const keys = new Set([digits]);
+  if (digits.startsWith('55') && digits.length > 11) keys.add(digits.slice(2));
+  if (digits.length >= 11) keys.add(digits.slice(-11));
+  if (digits.length >= 10) keys.add(digits.slice(-10));
+  return Array.from(keys).filter(Boolean);
+};
+
+const findCustomerForConversation = (store = {}, conversation = {}) => {
+  const phoneKeys = buildPhoneLookupKeys(resolveConversationPhone(conversation));
+  if (!phoneKeys.length) return null;
+  const candidates = Array.isArray(store.customers)
+    ? store.customers
+    : store.customers && typeof store.customers === 'object'
+      ? Object.values(store.customers)
+      : [];
+  return candidates.find((customer) => {
+    const phone =
+      customer?.phone_digits ||
+      customer?.phoneDigits ||
+      customer?.whatsapp ||
+      customer?.telefone ||
+      customer?.phone ||
+      getObjectField(customer, ['Celular', 'Telefone', 'celular', 'telefone', 'mobile', 'cellphone']);
+    const candidateKeys = buildPhoneLookupKeys(phone);
+    return candidateKeys.some((key) => phoneKeys.includes(key));
+  }) || null;
+};
+
+const resolveLastCutDateFromCustomer = (customer) => {
+  if (!customer) return null;
+  const explicit = getObjectField(customer, [
+    'UltimoCorte',
+    'ultimoCorte',
+    'last_cut_at',
+    'lastCutAt',
+    'UltimoAgendamento',
+    'ultimoAgendamento',
+    'last_appointment_at',
+    'lastAppointmentAt',
+    'UltimaVisita',
+    'ultimaVisita',
+    'last_visit_at',
+    'lastVisitAt',
+  ]);
+  return parseFallbackDate(explicit);
+};
+
+const resolveAutomaticSystemLabelId = (store = {}, conversation = {}) => {
+  const customer = findCustomerForConversation(store, conversation);
+  if (!customer) return 'system-new-customer';
+  const explicitDays = parseIntegerValue(
+    getObjectField(customer, ['DiasSemVir', 'diasSemVir', 'days_without_visit', 'daysWithoutVisit']),
+  );
+  const lastCutDate = resolveLastCutDateFromCustomer(customer);
+  const daysWithoutVisit = Number.isFinite(explicitDays) ? explicitDays : differenceInCalendarDays(lastCutDate);
+  return Number.isFinite(daysWithoutVisit) && daysWithoutVisit > 30 ? 'system-recovery' : 'system-customer';
+};
+
+const isOpenConversationForGreeting = (conversation = {}) => {
+  const status = String(conversation.status || conversation.queue_status || '').trim().toLowerCase();
+  return !['resolved', 'closed', 'fechada', 'encerrada'].includes(status);
+};
+
+const getLabelCatalogForGreeting = (labelsState = LABELS_DEFAULT_STATE) => [
+  ...SYSTEM_LABELS,
+  ...(Array.isArray(labelsState.customLabels) ? labelsState.customLabels : []),
+];
+
+const resolveGreetingLabelId = (store = {}, conversation = {}) => {
+  const labelsState = normalizeLabelsState(store.labels);
+  const conversationId = String(conversation.id || '').trim();
+  const catalog = getLabelCatalogForGreeting(labelsState);
+  const catalogIds = new Set(catalog.map((label) => String(label.id)));
+
+  const stageLabelId = String(labelsState.stageAssignments?.[conversationId] || '').trim();
+  if (stageLabelId && catalogIds.has(stageLabelId)) return stageLabelId;
+
+  const manualIds = Array.isArray(labelsState.assignments?.[conversationId]) ? labelsState.assignments[conversationId] : [];
+  const manualWithGreeting = manualIds.find((labelId) => {
+    const safeLabelId = String(labelId || '').trim();
+    if (!catalogIds.has(safeLabelId)) return false;
+    const config = getLabelGreetingConfig(labelsState, safeLabelId);
+    return config.enabled && config.message;
+  });
+  if (manualWithGreeting) return String(manualWithGreeting);
+
+  const conversationLabelIds = [
+    conversation.stage_label_id,
+    conversation.primary_label?.id,
+    ...(Array.isArray(conversation.label_ids) ? conversation.label_ids : []),
+  ]
+    .map((labelId) => String(labelId || '').trim())
+    .filter(Boolean);
+  const conversationKnownLabel = conversationLabelIds.find((labelId) => catalogIds.has(labelId));
+  if (conversationKnownLabel) return conversationKnownLabel;
+
+  return resolveAutomaticSystemLabelId(store, conversation);
+};
+
+const hasGreetingAlreadySent = (store = {}, conversationId = '', labelId = '') => {
+  const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
+  const sent = greetings.sent && typeof greetings.sent === 'object' ? greetings.sent : {};
+  return Boolean(sent?.[conversationId]?.[labelId]?.sentAt);
+};
+
+const markGreetingSent = (store = {}, { conversationId, labelId, messageKey, message }) => {
+  const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
+  const sent = greetings.sent && typeof greetings.sent === 'object' ? greetings.sent : {};
+  store.chatbotGreetings = {
+    ...greetings,
+    sent: {
+      ...sent,
+      [conversationId]: {
+        ...(sent[conversationId] || {}),
+        [labelId]: {
+          sentAt: nowIso(),
+          messageKey,
+          message,
+        },
+      },
+    },
+  };
+};
+
+const runChatbotGreetingFallback = async (store, conversation = {}, options = {}) => {
+  const conversationId = String(conversation.id || '').trim();
+  const messageKey = String(options.messageKey || '').trim() || resolveMessageKey(conversation);
+  if (!conversationId || !resolveConversationPhone(conversation) || !isOpenConversationForGreeting(conversation)) {
+    return { ok: true, skipped: true, reason: 'fallback_greeting_not_eligible' };
+  }
+
+  const labelsState = normalizeLabelsState(store.labels);
+  const labelId = resolveGreetingLabelId(store, conversation);
+  const label = getLabelCatalogForGreeting(labelsState).find((item) => String(item.id) === String(labelId)) || null;
+  const greeting = getLabelGreetingConfig(labelsState, labelId);
+
+  if (!label || !greeting.enabled || !greeting.message) {
+    chatbotDebugLog(`skipped fallback_greeting_disabled conversationId=${conversationId} labelId=${labelId || 'missing'}`);
+    return { ok: true, skipped: true, reason: 'fallback_greeting_disabled', labelId };
+  }
+
+  if (greeting.repeatMode === 'once_per_open_conversation' && hasGreetingAlreadySent(store, conversationId, labelId)) {
+    chatbotDebugLog(`skipped fallback_greeting_already_sent conversationId=${conversationId} labelId=${labelId}`);
+    return { ok: true, skipped: true, reason: 'fallback_greeting_already_sent', labelId };
+  }
+
+  if (options.dryRun) {
+    return { ok: true, mutated: true, reason: 'fallback_greeting_ready', labelId };
+  }
+
+  try {
+    await sendChatbotText(conversation, greeting.message);
+    markGreetingSent(store, { conversationId, labelId, messageKey, message: greeting.message });
+    appendChatbotEvent(store, {
+      conversationId,
+      flowId: `greeting:${labelId}`,
+      flowName: `Saudacao - ${label.name}`,
+      type: 'fallback_greeting_sent',
+      metadata: { labelId, labelName: label.name },
+    });
+    chatbotDebugLog(`fallback greeting sent conversationId=${conversationId} labelId=${labelId}`);
+    return { ok: true, mutated: true, reason: 'fallback_greeting_sent', labelId };
+  } catch (error) {
+    chatbotDebugLog(`fallback greeting failed conversationId=${conversationId} labelId=${labelId} message=${error?.message || 'error'}`);
+    return { ok: true, skipped: true, reason: 'fallback_greeting_send_failed', labelId, error: error?.message || 'error' };
+  }
+};
 
 const pruneChatbotProcessCache = () => {
   const timestamp = Date.now();
@@ -1345,8 +1646,8 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
     return evaluateChatbotRule(startNode?.data?.rule || 'contains', lastMessage, startNode?.data?.triggerValue || '');
   });
   if (!matchedFlow) {
-    chatbotDebugLog(`skipped no_trigger conversationId=${conversationId}`);
-    return { ok: true, skipped: true, reason: 'no_trigger' };
+    chatbotDebugLog(`no trigger matched conversationId=${conversationId}; checking fallback greeting`);
+    return await runChatbotGreetingFallback(store, conversation, { ...options, messageKey });
   }
   chatbotDebugLog(`trigger matched conversationId=${conversationId} flowId=${matchedFlow.id}`);
   if (options.dryRun) {
@@ -1540,151 +1841,52 @@ const scheduleChatbotBackendRuntime = () => {
   }, Math.max(5000, CHATBOT_BACKEND_POLL_INTERVAL_MS));
 };
 
-const ROLE_PERMISSION_KEYS = [
-  'dashboard',
-  'attendance',
-  'kanban',
-  'quickReplies',
-  'customerBase',
-  'labels',
-  'chatbot',
-  'routines',
-  'hsms',
-  'settings',
-];
-
-const DEFAULT_ROLE_PERMISSIONS = ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
-  accumulator[key] = ['attendance', 'labels'].includes(key);
-  return accumulator;
-}, {});
-
-const ADMIN_ROLE_PERMISSIONS = ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
-  accumulator[key] = true;
-  return accumulator;
-}, {});
-
-const DEFAULT_ROLE_SETTINGS_ACCESS = {
-  profile: 'edit',
-  notifications: 'edit',
-  appearance: 'edit',
-  customerSync: 'edit',
-  team: 'edit',
-  roles: 'edit',
-  services: 'edit',
-  audit: 'edit',
-};
-
-const HIDDEN_ROLE_SETTINGS_ACCESS = Object.keys(DEFAULT_ROLE_SETTINGS_ACCESS).reduce((accumulator, key) => {
-  accumulator[key] = 'hidden';
-  return accumulator;
-}, {});
-
-const normalizeRolePermissions = (permissions = {}, fallback = DEFAULT_ROLE_PERMISSIONS) => {
-  const source = permissions && typeof permissions === 'object' ? permissions : {};
-  return ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
-    accumulator[key] = Boolean(source[key] ?? fallback?.[key] ?? false);
-    return accumulator;
-  }, {});
-};
-
-const normalizeRoleSettingsAccess = (settingsAccess = {}, fallback = DEFAULT_ROLE_SETTINGS_ACCESS) => {
-  const source = settingsAccess && typeof settingsAccess === 'object' ? settingsAccess : {};
-  return Object.keys(DEFAULT_ROLE_SETTINGS_ACCESS).reduce((accumulator, key) => {
-    const candidate = String(source[key] || fallback?.[key] || 'hidden').trim().toLowerCase();
-    accumulator[key] = ['hidden', 'view', 'edit'].includes(candidate) ? candidate : 'hidden';
-    return accumulator;
-  }, {});
-};
-
-const isAdminRoleLike = (role = {}) => {
-  const roleName = String(role?.name || role?.role_name || role?.role || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-  const department = String(role?.department_key || role?.departmentKey || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-
-  return roleName === 'admin' || roleName === 'administrador' || department === 'administracao';
-};
-
-const normalizeRoleRecord = (role = {}, index = 0, fallbackCreatedAt = nowIso()) => {
-  const timestamp = nowIso();
-  const createdAt = String(role.created_date || role.createdAt || fallbackCreatedAt || timestamp);
-  const adminRole = isAdminRoleLike(role) || String(role.id || '').trim() === 'role-admin';
-  const permissions = normalizeRolePermissions(role.permissions, adminRole ? ADMIN_ROLE_PERMISSIONS : DEFAULT_ROLE_PERMISSIONS);
-  const settingsFallback = permissions.settings ? DEFAULT_ROLE_SETTINGS_ACCESS : HIDDEN_ROLE_SETTINGS_ACCESS;
-
-  return {
-    id: String(role.id || `role-${index + 1}`),
-    name: String(role.name || '').trim() || `Função ${index + 1}`,
-    description: String(role.description || '').trim(),
-    department_key: String(role.department_key || role.departmentKey || '').trim(),
-    permissions,
-    settings_access: normalizeRoleSettingsAccess(role.settings_access || role.settingsAccess, adminRole ? DEFAULT_ROLE_SETTINGS_ACCESS : settingsFallback),
-    created_date: createdAt,
-    updated_date: String(role.updated_date || role.updatedAt || createdAt),
-  };
-};
-
 const buildDefaultRoles = (createdAt = nowIso()) => [
-  normalizeRoleRecord({
+  {
     id: 'role-admin',
     name: 'Administrador',
     description: 'Acesso completo a toda a plataforma e configuracoes do sistema.',
     department_key: 'administracao',
-    permissions: { ...ADMIN_ROLE_PERMISSIONS },
-    settings_access: { ...DEFAULT_ROLE_SETTINGS_ACCESS },
+    permissions: {
+      attendance: true,
+      dashboard: true,
+      labels: true,
+      customerBase: true,
+      settings: true,
+    },
     created_date: createdAt,
     updated_date: createdAt,
-  }),
-  normalizeRoleRecord({
+  },
+  {
     id: 'role-sales',
     name: 'Comercial',
     description: 'Responsavel por leads, etiquetas e acompanhamento do funil.',
     department_key: 'comercial',
     permissions: {
-      ...DEFAULT_ROLE_PERMISSIONS,
-      dashboard: true,
       attendance: true,
-      kanban: true,
-      quickReplies: true,
-      customerBase: false,
+      dashboard: true,
       labels: true,
-      chatbot: false,
-      routines: false,
-      hsms: false,
+      customerBase: false,
       settings: false,
     },
-    settings_access: { ...HIDDEN_ROLE_SETTINGS_ACCESS },
     created_date: createdAt,
     updated_date: createdAt,
-  }),
-  normalizeRoleRecord({
+  },
+  {
     id: 'role-support',
     name: 'Suporte',
     description: 'Atua no atendimento e no acompanhamento operacional das conversas.',
     department_key: 'suporte',
     permissions: {
-      ...DEFAULT_ROLE_PERMISSIONS,
-      dashboard: true,
       attendance: true,
-      kanban: true,
-      quickReplies: true,
-      customerBase: false,
+      dashboard: true,
       labels: true,
-      chatbot: false,
-      routines: false,
-      hsms: false,
+      customerBase: false,
       settings: false,
     },
-    settings_access: { ...HIDDEN_ROLE_SETTINGS_ACCESS },
     created_date: createdAt,
     updated_date: createdAt,
-  }),
+  },
 ];
 
 const normalizeService = (service = {}, index = 0) => {
@@ -1697,11 +1899,18 @@ const normalizeService = (service = {}, index = 0) => {
     phone_numbers: normalizeStringArray(service.phone_numbers || service.phoneNumbers).map(normalizePhoneDisplay).filter(Boolean),
     user_ids: normalizeStringArray(service.user_ids || service.userIds),
     user_emails: normalizeStringArray(service.user_emails || service.userEmails).map((email) => email.toLowerCase()),
-    label_ids: normalizeStringArray(service.label_ids || service.labelIds).map((labelId) =>
-      ['system-cancelado-10', 'system-cancelado-20', 'system-cancelado-30'].includes(labelId)
-        ? 'system-cancelados'
-        : labelId
-    ),
+    label_ids: normalizeStringArray(service.label_ids || service.labelIds).map((labelId) => {
+      if (['system-cancelado-10', 'system-cancelado-20', 'system-cancelado-30', 'system-cancelados', 'label-churn'].includes(labelId)) {
+        return 'system-recovery';
+      }
+      if (['system-pos-venda', 'system-cliente', 'label-customer'].includes(labelId)) {
+        return 'system-customer';
+      }
+      if (['system-lead', 'label-lead'].includes(labelId)) {
+        return 'system-new-customer';
+      }
+      return labelId;
+    }),
     icon_key: String(service.icon_key || service.iconKey || DEFAULT_SERVICE_ICON_KEY).trim() || DEFAULT_SERVICE_ICON_KEY,
     created_date: String(service.created_date || service.createdAt || timestamp),
     updated_date: String(service.updated_date || service.updatedAt || timestamp),
@@ -1734,7 +1943,7 @@ const buildDefaultServices = (users = [], createdAt = nowIso()) => {
         id: 'service-support',
         name: 'Suporte',
         description: 'Servico Padrao da Aplicacao a respeito de Suporte.',
-        label_ids: ['system-cliente'],
+        label_ids: ['system-customer'],
         icon_key: 'headphones',
       },
       0,
@@ -1745,7 +1954,7 @@ const buildDefaultServices = (users = [], createdAt = nowIso()) => {
         id: 'service-onboarding',
         name: 'Onboarding',
         description: 'Servico Padrao da Aplicacao a respeito de Onboarding.',
-        label_ids: ['system-pos-venda', 'system-cancelados'],
+        label_ids: ['system-customer', 'system-recovery'],
         icon_key: 'briefcase',
       },
       1,
@@ -1756,7 +1965,7 @@ const buildDefaultServices = (users = [], createdAt = nowIso()) => {
         id: 'service-sales',
         name: 'Vendas',
         description: 'Servico Padrao da Aplicacao a respeito de Vendas.',
-        label_ids: ['system-lead'],
+        label_ids: ['system-new-customer'],
         icon_key: 'megaphone',
       },
       2,
@@ -1767,7 +1976,7 @@ const buildDefaultServices = (users = [], createdAt = nowIso()) => {
         id: 'service-sales-2',
         name: 'Vendas2',
         description: 'Servico Padrao da Aplicacao a respeito de Vendas2.',
-        label_ids: ['system-lead'],
+        label_ids: ['system-new-customer'],
         icon_key: 'megaphone',
       },
       3,
@@ -1816,42 +2025,6 @@ const sanitizeUserForClient = (user = {}) => ({
   updated_date: String(user.updated_date || '').trim(),
   has_password: Boolean(String(user.password_hash || '').trim()),
 });
-
-const resolveRoleForUserRecord = (store, user = {}) => {
-  const roles = Array.isArray(store?.roles) ? store.roles.map((role, index) => normalizeRoleRecord(role, index)) : [];
-  return (
-    roles.find((role) => String(role.id || '') === String(user.role_id || '')) ||
-    roles.find((role) => String(role.name || '') === String(user.role_name || '')) ||
-    roles.find((role) => String(role.name || '') === String(user.role || '')) ||
-    null
-  );
-};
-
-const sanitizeAuthenticatedUserForClient = (store, user = {}) => {
-  const baseUser = sanitizeUserForClient(user);
-  const role = resolveRoleForUserRecord(store, user);
-  const adminLike =
-    isAdminRoleLike(role || user) ||
-    String(baseUser.role || '').trim().toLowerCase() === 'admin' ||
-    String(baseUser.role_name || '').trim().toLowerCase() === 'administrador';
-  const permissions = normalizeRolePermissions(
-    role?.permissions || user?.role_permissions || user?.rolePermissions || user?.permissions,
-    adminLike ? ADMIN_ROLE_PERMISSIONS : DEFAULT_ROLE_PERMISSIONS,
-  );
-
-  return {
-    ...baseUser,
-    role_id: String(role?.id || baseUser.role_id || '').trim(),
-    role_name: String(role?.name || baseUser.role_name || '').trim(),
-    department_key: String(role?.department_key || '').trim(),
-    role_permissions: permissions,
-    permissions,
-    settings_access: normalizeRoleSettingsAccess(
-      role?.settings_access || user?.settings_access || user?.settingsAccess,
-      adminLike || permissions.settings ? DEFAULT_ROLE_SETTINGS_ACCESS : HIDDEN_ROLE_SETTINGS_ACCESS,
-    ),
-  };
-};
 
 const normalizeSessionRecord = (session = {}) => ({
   id: String(session.id || '').trim(),
@@ -2120,8 +2293,8 @@ const createDefaultFollowUpModelConfig = () =>
 const normalizeFollowUpConfig = (value = {}) => {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   const models = source.models && typeof source.models === 'object' ? source.models : {};
-  const targetLabelId = String(source.targetLabelId || 'system-lead').trim() || 'system-lead';
-  const targetLabelName = String(source.targetLabelName || (targetLabelId === 'system-sql' ? 'SQL' : 'LEAD')).trim() || 'LEAD';
+  const targetLabelId = String(source.targetLabelId || 'system-new-customer').trim() || 'system-new-customer';
+  const targetLabelName = String(source.targetLabelName || 'Novo cliente').trim() || 'Novo cliente';
   const defaultTimes = normalizeRoutineText(`${targetLabelId} ${targetLabelName}`).includes('sql')
     ? FOLLOW_UP_SQL_DEFAULT_TIMES
     : FOLLOW_UP_LEAD_DEFAULT_TIMES;
@@ -2340,7 +2513,7 @@ const normalizeStore = (store) => {
   const base = store && typeof store === 'object' ? store : {};
   const users = (Array.isArray(base.users) ? base.users : []).map((user, index) => normalizeUserRecord(user, index));
   const createdAt = users?.[0]?.created_date || nowIso();
-  const roles = (Array.isArray(base.roles) ? base.roles : buildDefaultRoles(createdAt)).map((role, index) => normalizeRoleRecord(role, index, createdAt));
+  const roles = Array.isArray(base.roles) ? base.roles : buildDefaultRoles(createdAt);
   const services = Array.isArray(base.services)
     ? sortServices(base.services.map((service, index) => normalizeService(service, index)).filter((service) => service.name))
     : buildDefaultServices(users, createdAt);
@@ -7523,7 +7696,7 @@ const server = http.createServer(async (req, res) => {
         200,
         {
           ok: true,
-          user: sanitizeAuthenticatedUserForClient(store, matchedUser),
+          user: sanitizeUserForClient(matchedUser),
           session: {
             remember,
             expiresAt: record.expires_at,
@@ -7558,7 +7731,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/local/auth/me' && req.method === 'GET') {
         const authContext = await requireAuthenticatedSession(req);
         void updateUserLastSeenSession(authContext.session.id);
-        return sendJson(res, 200, sanitizeAuthenticatedUserForClient(authContext.store, authContext.user));
+        return sendJson(res, 200, sanitizeUserForClient(authContext.user));
       }
 
       const authContext = await requireAuthenticatedSession(req);
@@ -7829,6 +8002,16 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: 'Informe um titulo para a etiqueta.' });
       }
 
+      const existingState = getLabelsState(req.authContext.store);
+      const normalizedName = nextLabel.name.trim().toLowerCase();
+      const duplicated = [
+        ...SYSTEM_LABELS,
+        ...existingState.customLabels,
+      ].some((label) => String(label?.name || '').trim().toLowerCase() === normalizedName);
+      if (duplicated) {
+        return sendJson(res, 409, { error: 'Ja existe uma etiqueta com este nome.' });
+      }
+
       const labelsState = await persistLabelsState((currentState) => ({
         ...currentState,
         customLabels: [...currentState.customLabels, nextLabel],
@@ -7836,6 +8019,38 @@ const server = http.createServer(async (req, res) => {
 
       const createdLabel = labelsState.customLabels.find((label) => label.id === nextLabel.id) || nextLabel;
       return sendJson(res, 201, createdLabel);
+    }
+
+    const labelGreetingMatch = url.pathname.match(/^\/api\/local\/labels\/greetings\/([^/]+)$/);
+    if (req.method === 'PUT' && labelGreetingMatch) {
+      const labelId = String(labelGreetingMatch[1] || '').trim();
+      const payload = await readBody(req);
+
+      let savedState = LABELS_DEFAULT_STATE;
+      const labelsState = getLabelsState(req.authContext.store);
+      const customLabelIds = new Set(labelsState.customLabels.map((label) => label.id));
+      const isKnownLabel = SYSTEM_LABEL_IDS.includes(labelId) || customLabelIds.has(labelId);
+      if (!labelId || !isKnownLabel) {
+        return sendJson(res, 404, { error: 'Etiqueta nao encontrada para configurar saudacao.' });
+      }
+
+      savedState = await persistLabelsState((currentState) => ({
+        ...currentState,
+        greetings: {
+          ...(currentState.greetings || {}),
+          [labelId]: normalizeLabelGreeting(
+            {
+              enabled: Boolean(payload?.enabled),
+              message: payload?.message,
+              repeatMode: payload?.repeatMode || payload?.mode || 'once_per_open_conversation',
+              updatedAt: nowIso(),
+            },
+            DEFAULT_LABEL_GREETINGS[labelId] || {},
+          ),
+        },
+      }));
+
+      return sendJson(res, 200, savedState);
     }
 
     const labelItemMatch = url.pathname.match(/^\/api\/local\/labels\/([^/]+)$/);
@@ -7862,6 +8077,15 @@ const server = http.createServer(async (req, res) => {
 
           if (!updatedLabel.name) {
             throw new SyncError('Informe um titulo para a etiqueta.', 400, 'invalid_label');
+          }
+
+          const normalizedName = updatedLabel.name.trim().toLowerCase();
+          const duplicated = [
+            ...SYSTEM_LABELS,
+            ...currentState.customLabels.filter((label) => label.id !== labelId),
+          ].some((label) => String(label?.name || '').trim().toLowerCase() === normalizedName);
+          if (duplicated) {
+            throw new SyncError('Ja existe uma etiqueta com este nome.', 409, 'duplicated_label');
           }
 
           return {
@@ -8616,17 +8840,6 @@ const server = http.createServer(async (req, res) => {
                   },
                   items.length,
                 )
-              : entityName === 'Role'
-                ? normalizeRoleRecord(
-                    {
-                      ...payload,
-                      id: createId(entityName, payload),
-                      created_date: payload?.created_date || timestamp,
-                      updated_date: timestamp,
-                    },
-                    items.length,
-                    timestamp,
-                  )
               : entityName === 'User'
                 ? prepareUserForStorage(
                     {
@@ -8696,17 +8909,6 @@ const server = http.createServer(async (req, res) => {
                   },
                   index,
                 )
-              : entityName === 'Role'
-                ? normalizeRoleRecord(
-                    {
-                      ...mergeEntity(items[index], payload || {}),
-                      id: items[index]?.id || itemId,
-                      created_date: items[index]?.created_date || payload?.created_date || nowIso(),
-                      updated_date: nowIso(),
-                    },
-                    index,
-                    items[index]?.created_date || nowIso(),
-                  )
               : entityName === 'User'
                 ? prepareUserForStorage(
                     {

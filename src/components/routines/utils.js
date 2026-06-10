@@ -169,8 +169,8 @@ export const createDefaultWeeklySchedule = (time = '08:00') =>
   }, {});
 
 export const createDefaultFollowUpConfig = () => ({
-  targetLabelId: 'system-lead',
-  targetLabelName: 'Lead',
+  targetLabelId: 'system-new-customer',
+  targetLabelName: 'Novo cliente',
   minHoursWithoutInteraction: 1,
   maxHoursWithoutInteraction: 0,
   maxSendsPerCustomer: 5,

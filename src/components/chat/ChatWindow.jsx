@@ -75,11 +75,6 @@ const NEWER_MESSAGES_POLL_INTERVAL_MS = 6000;
 const OUTGOING_RECONCILE_WINDOW_MS = 2 * 60 * 1000;
 const MESSAGE_CACHE_LIMIT = 160;
 const VISIBLE_MESSAGE_DAY_LIMIT = 2;
-const quickTestOptions = [
-  { id: 'teste-1', label: 'TESTE 1' },
-  { id: 'teste-2', label: 'TESTE 2' },
-  { id: 'teste-3', label: 'TESTE 3' },
-];
 
 function getMessageTimestamp(message) {
   return new Date(message?.created_date || message?.timestamp || 0).getTime();
@@ -2325,16 +2320,6 @@ export default function ChatWindow({
     toast.message(`Mensagem ${message?.status || 'sem status'} enviada às ${createdAt}.`);
   };
 
-  const handleQuickTestSelect = (option) => {
-    toast.message(`${option.label} selecionado. Integração de criação automática será conectada na próxima etapa.`);
-    console.log('[quick-test:selected]', {
-      option,
-      conversationId: conversation?.id,
-      customerName: conversation?.customer_name || conversation?.name || conversation?.contact_name,
-      phone: conversation?.phone || conversation?.contact_phone || conversation?.customer?.phone,
-    });
-  };
-
   useEffect(() => {
     if (!searchMode && stickToBottomRef.current && !isLoadingOlder) {
       messagesEndRef.current?.scrollIntoView({
@@ -2608,8 +2593,6 @@ export default function ChatWindow({
             onEscapeToConversationList={onClearConversation}
             onOpenQuickReplies={() => setQuickReplyPanelOpen(true)}
             onOpenStartConversation={() => onOpenStartConversation?.(conversation.contact_phone || conversation.phone || '')}
-            quickTestOptions={quickTestOptions}
-            onQuickTestSelect={handleQuickTestSelect}
             />
           </div>
 

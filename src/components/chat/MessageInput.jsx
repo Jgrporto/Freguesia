@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import '@fortawesome/fontawesome-free/css/all.min.css';
 import {
   FileText,
   Headphones,
@@ -8,7 +7,6 @@ import {
   Paperclip,
   Pause,
   Plus,
-  Rocket,
   Send,
   Smile,
   Trash2,
@@ -135,14 +133,11 @@ export default function MessageInput({
   onEscapeToConversationList,
   onOpenQuickReplies,
   onOpenStartConversation,
-  quickTestOptions = [],
-  onQuickTestSelect,
 }) {
   const [quickReplyCommand, setQuickReplyCommand] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
-  const [showQuickTests, setShowQuickTests] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [micSupported, setMicSupported] = useState(true);
   const [audioPreview, setAudioPreview] = useState(null);
@@ -152,7 +147,6 @@ export default function MessageInput({
   const textareaRef = useRef(null);
   const composerRef = useRef(null);
   const attachmentMenuRef = useRef(null);
-  const quickTestMenuRef = useRef(null);
   const mediaInputRef = useRef(null);
   const documentInputRef = useRef(null);
   const audioInputRef = useRef(null);
@@ -308,13 +302,11 @@ export default function MessageInput({
   }, [value]);
 
   useEffect(() => {
-    if (!showAttachmentMenu && !showQuickTests) return undefined;
+    if (!showAttachmentMenu) return undefined;
 
     const handlePointerDown = (event) => {
       if (attachmentMenuRef.current?.contains(event.target)) return;
-      if (quickTestMenuRef.current?.contains(event.target)) return;
       setShowAttachmentMenu(false);
-      setShowQuickTests(false);
     };
 
     document.addEventListener('mousedown', handlePointerDown);
@@ -323,7 +315,7 @@ export default function MessageInput({
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('touchstart', handlePointerDown);
     };
-  }, [showAttachmentMenu, showQuickTests]);
+  }, [showAttachmentMenu]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (event) => {
@@ -340,10 +332,9 @@ export default function MessageInput({
           return;
         }
 
-        if (showAttachmentMenu || showQuickTests || isQuickReplyPickerOpen || showEmojiPicker || replyTo) {
+        if (showAttachmentMenu || isQuickReplyPickerOpen || showEmojiPicker || replyTo) {
           event.preventDefault();
           setShowAttachmentMenu(false);
-          setShowQuickTests(false);
           closeQuickReplyPicker();
           setShowEmojiPicker(false);
           if (replyTo && onCancelReply) {
@@ -374,7 +365,6 @@ export default function MessageInput({
     onEscapeToConversationList,
     replyTo,
     showAttachmentMenu,
-    showQuickTests,
     showEmojiPicker,
   ]);
 
@@ -477,7 +467,6 @@ export default function MessageInput({
     if (resolveQuickReplyCommand(nextValue, event.target.selectionStart)) {
       setShowEmojiPicker(false);
       setShowAttachmentMenu(false);
-      setShowQuickTests(false);
     }
   };
 
@@ -490,10 +479,9 @@ export default function MessageInput({
     if (event.key === 'Escape') {
       event.preventDefault();
 
-      if (showAttachmentMenu || showQuickTests || isQuickReplyPickerOpen || showEmojiPicker) {
+      if (showAttachmentMenu || isQuickReplyPickerOpen || showEmojiPicker) {
         setShowAttachmentMenu(false);
-        setShowQuickTests(false);
-        closeQuickReplyPicker();
+          closeQuickReplyPicker();
         setShowEmojiPicker(false);
         return;
       }
@@ -961,7 +949,6 @@ export default function MessageInput({
                 onClick={() => {
                   if (!canSendFreeText) return;
                   setShowAttachmentMenu((currentValue) => !currentValue);
-                  setShowQuickTests(false);
                   setShowEmojiPicker(false);
                   closeQuickReplyPicker();
                 }}
@@ -977,8 +964,7 @@ export default function MessageInput({
                   if (open) {
                     closeQuickReplyPicker();
                     setShowAttachmentMenu(false);
-                    setShowQuickTests(false);
-                  }
+                    }
                 }}
               >
                 <PopoverTrigger asChild>
@@ -1030,32 +1016,12 @@ export default function MessageInput({
                   setQuickReplyCommand(null);
                   setShowEmojiPicker(false);
                   setShowAttachmentMenu(false);
-                  setShowQuickTests(false);
                   onOpenQuickReplies?.();
                 }}
                 title="Respostas rápidas"
                 disabled={Boolean(audioPreview)}
               >
                 <Zap className="h-5 w-5" />
-              </Button>
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 rounded-full shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                onClick={() => {
-                  setShowQuickTests((currentValue) => !currentValue);
-                  setShowAttachmentMenu(false);
-                  setShowEmojiPicker(false);
-                  closeQuickReplyPicker();
-                }}
-                title="Teste rápido"
-              >
-                <span className="relative inline-flex h-5 w-5 items-center justify-center">
-                  <Rocket className="h-5 w-5" aria-hidden="true" />
-                  <i className="fa-solid fa-bolt absolute -right-1 top-2 text-[8px] text-amber-400" aria-hidden="true" />
-                </span>
               </Button>
 
               {!canSendFreeText ? (
@@ -1120,34 +1086,6 @@ export default function MessageInput({
             </>
           )}
         </div>
-
-        {showQuickTests ? (
-          <div
-            ref={quickTestMenuRef}
-            className="absolute bottom-[calc(100%+10px)] left-0 right-0 z-40 mx-auto flex max-w-full gap-2 overflow-x-auto px-1 py-1 animate-in fade-in-0 slide-in-from-bottom-2"
-          >
-            {(quickTestOptions.length
-              ? quickTestOptions
-              : [
-                  { id: 'teste-1', label: 'TESTE 1' },
-                  { id: 'teste-2', label: 'TESTE 2' },
-                  { id: 'teste-3', label: 'TESTE 3' },
-                ]
-            ).map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => {
-                  onQuickTestSelect?.(option);
-                  setShowQuickTests(false);
-                }}
-                className="shrink-0 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-xs font-bold tracking-wide text-primary transition hover:bg-primary hover:text-primary-foreground"
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       <TemplatePicker

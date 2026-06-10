@@ -70,14 +70,16 @@ const normalizeStringArray = (value) =>
   );
 
 const LABEL_ID_ALIASES = Object.freeze({
-  'label-lead': ['system-lead'],
-  'system-lead': ['label-lead'],
-  'label-sql': ['system-sql'],
-  'system-sql': ['label-sql'],
-  'label-customer': ['system-cliente'],
-  'system-cliente': ['label-customer'],
-  'label-churn': ['system-cancelados'],
-  'system-cancelados': ['label-churn'],
+  'label-lead': ['system-new-customer'],
+  'system-lead': ['system-new-customer', 'label-lead'],
+  'system-new-customer': ['label-lead', 'system-lead'],
+  'label-customer': ['system-customer'],
+  'system-cliente': ['system-customer', 'label-customer'],
+  'system-customer': ['label-customer', 'system-cliente'],
+  'label-churn': ['system-recovery'],
+  'system-cancelados': ['system-recovery', 'label-churn'],
+  'system-pos-venda': ['system-customer'],
+  'system-recovery': ['label-churn', 'system-cancelados'],
 });
 
 const expandServiceLabelIds = (value) =>
@@ -133,11 +135,18 @@ export const normalizeService = (service = {}, index = 0) => {
     phone_numbers: normalizeStringArray(service.phone_numbers || service.phoneNumbers),
     user_ids: normalizeStringArray(service.user_ids || service.userIds),
     user_emails: normalizeStringArray(service.user_emails || service.userEmails),
-    label_ids: normalizeStringArray(service.label_ids || service.labelIds).map((labelId) =>
-      ['system-cancelado-10', 'system-cancelado-20', 'system-cancelado-30'].includes(labelId)
-        ? 'system-cancelados'
-        : labelId
-    ),
+    label_ids: normalizeStringArray(service.label_ids || service.labelIds).map((labelId) => {
+      if (['system-cancelado-10', 'system-cancelado-20', 'system-cancelado-30', 'system-cancelados', 'label-churn'].includes(labelId)) {
+        return 'system-recovery';
+      }
+      if (['system-pos-venda', 'system-cliente', 'label-customer'].includes(labelId)) {
+        return 'system-customer';
+      }
+      if (['system-lead', 'label-lead'].includes(labelId)) {
+        return 'system-new-customer';
+      }
+      return labelId;
+    }),
     icon_key: getServiceIconMeta(service.icon_key || service.iconKey || DEFAULT_SERVICE_ICON_KEY).id,
     created_date: String(service.created_date || service.createdAt || now),
     updated_date: String(service.updated_date || service.updatedAt || now),

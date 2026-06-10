@@ -10,64 +10,34 @@ const DEFAULT_LABELS_REFRESH_INTERVAL_MS = Number.parseInt(
 
 const DEFAULT_LABELS = [
   {
-    id: "label-customer",
-    systemKey: "customer",
-    name: "Cliente",
-    color: "#22C55E",
+    id: "system-new-customer",
+    systemKey: "new_customer",
+    name: "Novo cliente",
+    color: "#F59E0B",
     visibleInFilter: true,
     isDefault: true,
     manualAssignable: false,
     sortOrder: 10,
   },
   {
-    id: "label-lead",
-    systemKey: "lead",
-    name: "Lead",
-    color: "#F59E0B",
+    id: "system-customer",
+    systemKey: "customer",
+    name: "Cliente",
+    color: "#22C55E",
     visibleInFilter: true,
     isDefault: true,
-    manualAssignable: true,
+    manualAssignable: false,
     sortOrder: 20,
   },
   {
-    id: "label-sql",
-    systemKey: "sql",
-    name: "SQL",
-    color: "#0F766E",
-    visibleInFilter: true,
-    isDefault: true,
-    manualAssignable: false,
-    sortOrder: 25,
-  },
-  {
-    id: "label-lead-test",
-    systemKey: "lead_test",
-    name: "Lead TESTE",
-    color: "#EF4444",
-    visibleInFilter: false,
-    isDefault: true,
-    manualAssignable: false,
-    sortOrder: 30,
-  },
-  {
-    id: "label-promoter",
-    systemKey: "promoter",
-    name: "PROMOTOR",
-    color: "#22C55E",
-    visibleInFilter: false,
-    isDefault: true,
-    manualAssignable: true,
-    sortOrder: 40,
-  },
-  {
-    id: "label-churn",
-    systemKey: "churn",
-    name: "Cancelados",
+    id: "system-recovery",
+    systemKey: "recovery",
+    name: "Recuperacao",
     color: "#F97316",
     visibleInFilter: true,
     isDefault: true,
     manualAssignable: false,
-    sortOrder: 50,
+    sortOrder: 30,
   },
 ];
 
@@ -75,6 +45,55 @@ const nowIso = () => new Date().toISOString();
 const randomId = (prefix) => `${prefix}-${crypto.randomUUID()}`;
 const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
 const normalizeLabelNameKey = (value) => String(value || "").trim().toLowerCase();
+
+const parseStoreDate = (value) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const excelEpoch = Date.UTC(1899, 11, 30);
+    const parsedExcelDate = new Date(excelEpoch + value * 24 * 60 * 60 * 1000);
+    if (!Number.isNaN(parsedExcelDate.getTime()) && value > 20000 && value < 80000) return parsedExcelDate;
+  }
+  const raw = String(value || "").trim();
+  if (!raw || ["0000-00-00", "0000-00-00 00:00:00", "00/00/0000"].includes(raw)) return null;
+  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (brDate) {
+    const [, day, month, year, hour = "0", minute = "0", second = "0"] = brDate;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return null;
+  const parsed = new Date(timestamp);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const differenceInCalendarDays = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  return Math.floor((today.getTime() - target.getTime()) / (24 * 60 * 60 * 1000));
+};
+
+const parseIntegerValue = (value) => {
+  const number = Number.parseInt(String(value ?? "").replace(/[^\d-]/g, ""), 10);
+  return Number.isFinite(number) ? number : null;
+};
+
+const getSourceField = (row, keys = []) => {
+  const sources = [row, row?.raw, row?.source, row?.profile, row?.customer].filter(
+    (source) => source && typeof source === "object",
+  );
+  for (const source of sources) {
+    for (const key of keys) {
+      if (source?.[key] !== undefined && source?.[key] !== null && String(source[key]).trim() !== "") {
+        return source[key];
+      }
+    }
+  }
+  return "";
+};
 
 const clone = (value) => {
   if (value == null || typeof value !== "object") return value;
@@ -113,6 +132,7 @@ const emptyMainStore = () => ({
     customLabels: [],
     assignments: {},
     stageAssignments: {},
+    greetings: {},
     updatedAt: null,
   },
   customers: [],
@@ -143,6 +163,7 @@ const normalizeLabelState = (store) => {
     assignments: state.assignments && typeof state.assignments === "object" ? state.assignments : {},
     stageAssignments:
       state.stageAssignments && typeof state.stageAssignments === "object" ? state.stageAssignments : {},
+    greetings: state.greetings && typeof state.greetings === "object" ? state.greetings : {},
     updatedAt: state.updatedAt || null,
   };
 };
@@ -166,6 +187,7 @@ const saveLabelState = async (store, state) => {
     assignments: state.assignments && typeof state.assignments === "object" ? state.assignments : {},
     stageAssignments:
       state.stageAssignments && typeof state.stageAssignments === "object" ? state.stageAssignments : {},
+    greetings: state.greetings && typeof state.greetings === "object" ? state.greetings : {},
     updatedAt: nowIso(),
   };
   await writeMainStore(store);
@@ -200,7 +222,7 @@ const buildContactFromRow = (row, fallback = {}) => {
     lookupKey,
     name: String(row?.name || row?.customerName || row?.nome || fallback?.name || ""),
     number: phone || "n/a",
-    existsInBase: Boolean(row?.existsInBase ?? row?.exists_in_base ?? true),
+    existsInBase: Boolean(row?.existsInBase ?? row?.exists_in_base ?? fallback?.existsInBase ?? true),
     isTeste: Boolean(row?.isTeste ?? row?.is_teste ?? row?.trial ?? row?.isTrial),
     conversationId: row?.conversationId || row?.conversation_id || fallback?.conversationId || null,
     lastInteractionAt: row?.lastInteractionAt || row?.last_interaction_at || row?.updated_date || null,
@@ -211,6 +233,30 @@ const buildContactFromRow = (row, fallback = {}) => {
     status: row?.status || null,
     situacao: row?.situacao || null,
     notes: row?.notes || row?.note || row?.observacao || null,
+    lastCutAt:
+      row?.lastCutAt ||
+      row?.last_cut_at ||
+      row?.ultimoCorte ||
+      row?.UltimoCorte ||
+      getSourceField(row, ["UltimoCorte", "ultimoCorte", "last_cut_at", "lastCutAt"]),
+    lastVisitAt:
+      row?.lastVisitAt ||
+      row?.last_visit_at ||
+      row?.ultimoAgendamento ||
+      row?.UltimoAgendamento ||
+      row?.lastAppointmentAt ||
+      row?.last_appointment_at ||
+      getSourceField(row, [
+        "UltimoAgendamento",
+        "ultimoAgendamento",
+        "last_appointment_at",
+        "lastAppointmentAt",
+        "UltimaVisita",
+        "ultimaVisita",
+        "last_visit_at",
+        "lastVisitAt",
+      ]),
+    daysWithoutVisit: row?.daysWithoutVisit ?? row?.days_without_visit ?? getSourceField(row, ["DiasSemVir", "diasSemVir", "days_without_visit", "daysWithoutVisit"]),
   };
 };
 
@@ -230,6 +276,7 @@ const buildContacts = (store, conversations = [], painelCustomers = []) => {
       conversationId: conversation?.id,
       name: conversation?.customer_name || conversation?.name,
       number: conversation?.wa_id || conversation?.waId || conversation?.phone,
+      existsInBase: false,
     });
     byLookup.set(contact.lookupKey, {
       ...(byLookup.get(contact.lookupKey) || {}),
@@ -242,27 +289,16 @@ const buildContacts = (store, conversations = [], painelCustomers = []) => {
 };
 
 const resolveAutoDefaultLabelIds = (contact, labels) => {
-  const ids = [];
   const labelsBySystemKey = new Map(labels.map((label) => [label.systemKey, label]));
-  if (contact?.isTeste && labelsBySystemKey.get("lead_test")) {
-    ids.push(labelsBySystemKey.get("lead_test").id);
-  } else if (contact?.existsInBase && labelsBySystemKey.get("customer")) {
-    ids.push(labelsBySystemKey.get("customer").id);
-  } else if (labelsBySystemKey.get("lead")) {
-    ids.push(labelsBySystemKey.get("lead").id);
-  }
-  const status = String(`${contact?.status || ""} ${contact?.situacao || ""} ${contact?.notes || ""}`).toLowerCase();
-  if (
-    labelsBySystemKey.get("churn") &&
-    (status.includes("vencid") ||
-      status.includes("inadimpl") ||
-      status.includes("inativ") ||
-      status.includes("suspens") ||
-      status.includes("bloquead"))
-  ) {
-    ids.push(labelsBySystemKey.get("churn").id);
-  }
-  return Array.from(new Set(ids));
+  const key = (() => {
+    if (!contact?.existsInBase) return "new_customer";
+    const explicitDays = parseIntegerValue(contact?.daysWithoutVisit);
+    const lastCutDate = parseStoreDate(contact?.lastCutAt) || parseStoreDate(contact?.lastVisitAt);
+    const daysWithoutVisit = Number.isFinite(explicitDays) ? explicitDays : differenceInCalendarDays(lastCutDate);
+    return Number.isFinite(daysWithoutVisit) && daysWithoutVisit > 30 ? "recovery" : "customer";
+  })();
+  const label = labelsBySystemKey.get(key);
+  return label ? [label.id] : [];
 };
 
 const resolveLabelsForContact = (contact, labels, manualIds = []) => {
@@ -353,6 +389,7 @@ export const resolveConversationLabels = async ({ conversations = [], painelCust
       conversationId: conversation?.id,
       name: conversation?.customer_name || conversation?.name,
       number: conversation?.wa_id || conversation?.waId || conversation?.phone,
+      existsInBase: false,
     });
     const resolved = contactsByLookup.get(contact.lookupKey) || contact;
     const contactId = String(resolved.id || resolved.lookupKey);

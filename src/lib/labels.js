@@ -9,6 +9,7 @@ import {
   normalizeLabelCatalog,
   saveConversationLabelAssignments,
   saveConversationLabelStage,
+  saveLabelGreetingConfig,
   updateCustomLabelRecord,
 } from './labels-api';
 import { queryClientInstance } from './query-client';
@@ -26,43 +27,66 @@ const LABEL_CATALOG_REFRESH_INTERVAL_MS = 15000;
 
 export const SYSTEM_LABELS = [
   {
-    id: 'system-lead',
-    name: 'Lead',
-    description: 'Numero fora da base principal ou presente apenas como trial ainda nao vencido.',
+    id: 'system-new-customer',
+    name: 'Novo cliente',
+    description: 'Todo numero que ainda nao esta na base de clientes da barbearia.',
     color: '#F59E0B',
     kind: 'system',
+    systemKey: 'new_customer',
   },
   {
-    id: 'system-sql',
-    name: 'SQL',
-    description: 'Numero presente apenas como trial vencido na base sincronizada.',
-    color: '#0F766E',
-    kind: 'system',
-  },
-  {
-    id: 'system-cliente',
+    id: 'system-customer',
     name: 'Cliente',
-    description: 'Cliente confirmado na base sincronizada, fora da janela de pos-venda e sem vencimento recente.',
+    description: 'Numero presente na base com ultimo corte em ate 30 dias ou sem data de ultimo corte.',
     color: '#16A34A',
     kind: 'system',
+    systemKey: 'customer',
   },
   {
-    id: 'system-pos-venda',
-    name: 'Pos-venda',
-    description: 'Cliente recente na base sincronizada, dentro da janela de 30 dias.',
-    color: '#2563EB',
-    kind: 'system',
-  },
-  {
-    id: 'system-cancelados',
-    name: 'Cancelados',
-    description: 'Cliente vencido ha pelo menos 1 dia.',
+    id: 'system-recovery',
+    name: 'Recuperacao',
+    description: 'Numero presente na base com ultimo corte ha mais de 30 dias.',
     color: '#F97316',
     kind: 'system',
+    systemKey: 'recovery',
   },
 ];
 
 const SYSTEM_LABELS_BY_ID = new Map(SYSTEM_LABELS.map((label) => [label.id, label]));
+
+export const DEFAULT_LABEL_GREETINGS = {
+  'system-new-customer': {
+    enabled: true,
+    message: 'Olá! Seja bem-vindo à Barbearia Freguesia. Quer agendar seu corte?',
+    repeatMode: 'once_per_open_conversation',
+  },
+  'system-customer': {
+    enabled: true,
+    message: 'Fala! Bom te ver por aqui de novo. Quer agendar seu próximo corte?',
+    repeatMode: 'once_per_open_conversation',
+  },
+  'system-recovery': {
+    enabled: true,
+    message: 'Fala! Já tem um tempinho desde seu último corte. Quer reservar um horário essa semana?',
+    repeatMode: 'once_per_open_conversation',
+  },
+};
+
+export function normalizeLabelGreeting(value = {}, fallback = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const base = fallback && typeof fallback === 'object' ? fallback : {};
+  return {
+    enabled: Boolean(source.enabled ?? base.enabled ?? false),
+    message: String(source.message ?? base.message ?? '').trim(),
+    repeatMode: String(source.repeatMode || source.mode || base.repeatMode || 'once_per_open_conversation').trim() || 'once_per_open_conversation',
+    updatedAt: source.updatedAt || source.updated_at || base.updatedAt || null,
+  };
+}
+
+export function getLabelGreetingConfig(labelId, greetings = {}) {
+  const safeLabelId = String(labelId || '').trim();
+  return normalizeLabelGreeting(greetings?.[safeLabelId], DEFAULT_LABEL_GREETINGS[safeLabelId] || {});
+}
 
 const EMPTY_SNAPSHOT = normalizeLabelCatalog({});
 let legacyMigrationPromise = null;
@@ -363,6 +387,23 @@ function resolveCustomerCreatedDate(customerRow) {
   return findCreationDateInObject(customerRow?.sourceCustomer || customerRow);
 }
 
+function resolveLastCutDate(customerRow) {
+  if (!customerRow) return null;
+  const directDates = [
+    customerRow.lastVisitDate,
+    customerRow.lastAppointmentDate,
+    customerRow.last_cut_at,
+    customerRow.lastCutAt,
+    customerRow.ultimoCorte,
+    customerRow.UltimoCorte,
+  ];
+  for (const value of directDates) {
+    const parsed = value instanceof Date ? value : parseDate(value);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
 export function getLabelBadgeStyle(label) {
   const color = normalizeHexColor(label?.color || '#14B8A6');
 
@@ -401,6 +442,18 @@ export async function deleteCustomLabel(labelId) {
 
   await deleteCustomLabelRecord(safeLabelId);
   await refreshLabelCatalog();
+}
+
+
+export async function saveLabelGreeting(labelId, payload) {
+  const safeLabelId = String(labelId || '').trim();
+  if (!safeLabelId) {
+    throw new Error('Etiqueta invalida para configurar saudacao.');
+  }
+
+  const savedState = await saveLabelGreetingConfig(safeLabelId, payload);
+  await refreshLabelCatalog();
+  return savedState;
 }
 
 export async function toggleConversationCustomLabel(conversationId, labelId, enabled) {
@@ -459,31 +512,20 @@ export async function saveConversationStageLabel(conversationId, labelId, custom
 
 function resolveAutomaticLabel(conversation, customerRow) {
   if (!customerRow) {
-    return SYSTEM_LABELS_BY_ID.get('system-lead') || null;
+    return SYSTEM_LABELS_BY_ID.get('system-new-customer') || null;
   }
 
-  if (customerRow.hasConfirmedCustomer) {
-    const overdueDays = differenceInCalendarDaysFromToday(customerRow?.dueDate);
+  const explicitDaysWithoutVisit = Number(customerRow.daysWithoutVisit);
+  const lastCutDate = resolveLastCutDate(customerRow);
+  const daysWithoutVisit = Number.isFinite(explicitDaysWithoutVisit)
+    ? explicitDaysWithoutVisit
+    : differenceInCalendarDaysFromToday(lastCutDate);
 
-    if (Number.isFinite(overdueDays) && overdueDays >= 1) {
-      return SYSTEM_LABELS_BY_ID.get('system-cancelados') || null;
-    }
-
-    const createdAt = resolveCustomerCreatedDate(customerRow);
-    const accountAgeInDays = differenceInCalendarDaysFromToday(createdAt);
-
-    if (Number.isFinite(accountAgeInDays) && accountAgeInDays >= 0 && accountAgeInDays <= 30) {
-      return SYSTEM_LABELS_BY_ID.get('system-pos-venda') || null;
-    }
-
-    return SYSTEM_LABELS_BY_ID.get('system-cliente') || null;
+  if (Number.isFinite(daysWithoutVisit) && daysWithoutVisit > 30) {
+    return SYSTEM_LABELS_BY_ID.get('system-recovery') || null;
   }
 
-  if (customerRow.hasExpiredTrial) {
-    return SYSTEM_LABELS_BY_ID.get('system-sql') || null;
-  }
-
-  return SYSTEM_LABELS_BY_ID.get('system-lead') || null;
+  return SYSTEM_LABELS_BY_ID.get('system-customer') || null;
 }
 
 function buildPhoneLookupKeys(value) {

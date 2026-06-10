@@ -4,6 +4,7 @@ const LABELS_DEFAULT_STATE = {
   customLabels: [],
   assignments: {},
   stageAssignments: {},
+  greetings: {},
   updatedAt: null,
 };
 
@@ -26,6 +27,7 @@ export const normalizeLabelCatalog = (value) => {
   const customLabels = Array.isArray(source.customLabels) ? source.customLabels : [];
   const assignments = normalizeCatalogObject(source.assignments);
   const stageAssignments = normalizeCatalogObject(source.stageAssignments);
+  const greetings = normalizeCatalogObject(source.greetings);
 
   return {
     ...LABELS_DEFAULT_STATE,
@@ -33,6 +35,7 @@ export const normalizeLabelCatalog = (value) => {
     customLabels,
     assignments,
     stageAssignments,
+    greetings,
   };
 };
 
@@ -64,6 +67,17 @@ export const updateCustomLabelRecord = async (labelId, payload) => {
 export const deleteCustomLabelRecord = async (labelId) => {
   return await requestLabelsJson(`/${encodeURIComponent(labelId)}`, {
     method: 'DELETE',
+  });
+};
+
+
+export const saveLabelGreetingConfig = async (labelId, payload) => {
+  return await requestLabelsJson(`/greetings/${encodeURIComponent(labelId)}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload || {}),
   });
 };
 
