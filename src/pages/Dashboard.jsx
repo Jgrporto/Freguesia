@@ -71,20 +71,23 @@ const dashboards = {
     title: 'Atendimento e Conversão',
     subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em agendamentos.',
     cards: [
-      { title: 'Conversas recebidas', value: '0', subtitle: 'Volume total no período', icon: MessageSquare },
-      { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
-      { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock3 },
-      { title: 'Agendamentos realizados', value: '0', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
-      { title: 'Taxa de conversão', value: '0%', subtitle: 'Cortes / conversas', icon: Target },
+      { title: 'Conversas recebidas', value: '248', subtitle: 'Volume total no período', icon: MessageSquare },
+      { title: '1ª resposta média', value: '02:48', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
+      { title: 'TMR', value: '08:32', subtitle: 'Tempo médio de resposta', icon: Clock3 },
+      { title: 'Agendamentos realizados', value: '112', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
+      { title: 'Taxa de conversão', value: '33,9%', subtitle: 'Cortes / conversas', icon: Target },
     ],
     main: {
       title: 'Funil de conversão',
       description: 'Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.',
       type: 'atendimentoFunnel',
       values: {
-        conversations: 0,
-        bookings: 0,
-        conversions: 0,
+        conversations: 248,
+        bookings: 112,
+        conversions: 84,
+        bookingDelta: '6,3 pp',
+        conversionDelta: '4,1 pp',
+        finalDelta: '3,7 pp',
       },
     },
     sideCharts: [
@@ -399,38 +402,37 @@ function EmptyGauge() {
   );
 }
 
-function FunnelMetric({ title, value }) {
+function MetricTrend({ title, value, trend }) {
   return (
-    <div className="px-6 py-3 text-center">
+    <div className="px-8 py-4 text-left">
       <div className="text-sm text-muted-foreground">{title}</div>
-      <div className="mt-1 text-[18px] font-bold tracking-[-0.02em] text-foreground">{value}</div>
+      <div className="mt-1 flex items-center gap-3">
+        <span className="text-[16px] font-bold tracking-[-0.02em] text-foreground">{value}</span>
+        <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-emerald-500">
+          <TrendingUp className="h-3.5 w-3.5" />
+          {trend}
+        </span>
+      </div>
     </div>
   );
 }
 
-function LossBubble({ title, value, detail, className }) {
+function LossBubble({ value, percent, leftClassName }) {
   return (
-    <div className={cn('absolute top-1/2 z-10 hidden h-[88px] w-[88px] -translate-y-1/2 place-items-center rounded-full bg-white text-center shadow-[0_12px_24px_rgba(15,23,42,0.14)] ring-1 ring-border lg:grid', className)}>
+    <div className={cn('absolute top-1/2 z-20 hidden h-[88px] w-[88px] -translate-y-1/2 place-items-center rounded-full bg-white text-center shadow-[0_10px_25px_rgba(15,23,42,0.14)] ring-1 ring-[#ede5e5] lg:grid', leftClassName)}>
       <div className="px-2 leading-tight">
-        <div className="text-[11px] font-medium text-muted-foreground">{title}</div>
-        <div className="text-[18px] font-bold tracking-[-0.03em] text-foreground">{value}</div>
-        <div className="text-[11px] text-muted-foreground">{detail}</div>
+        <div className="text-[11px] font-medium text-muted-foreground">Perda</div>
+        <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-foreground">{value}</div>
+        <div className="mt-1 text-[11px] text-muted-foreground">{percent}</div>
       </div>
     </div>
   );
 }
 
-function FunnelStage({ title, value, percentText, icon: Icon, iconBg, className, style }) {
+function StageIconBox({ icon: Icon, tone = 'light' }) {
   return (
-    <div className={cn('relative flex min-h-[164px] items-center overflow-hidden px-7 py-6 text-white', className)} style={style}>
-      <div className={cn('mr-5 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-white/90', iconBg)}>
-        <Icon className="h-7 w-7" />
-      </div>
-      <div>
-        <div className="text-[15px] font-bold">{title}</div>
-        <div className="mt-1 text-5xl font-bold tracking-[-0.05em] leading-none">{value}</div>
-        <div className="mt-2 text-[15px] font-semibold text-white/90">{percentText}</div>
-      </div>
+    <div className={cn('mr-6 flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-2xl', tone === 'dark' ? 'bg-white/12 text-white' : 'bg-[#eed6d7] text-[#8b6a6c]')}>
+      <Icon className="h-6 w-6" />
     </div>
   );
 }
@@ -442,7 +444,6 @@ function AtendimentoConversionFunnel({ values }) {
 
   const loss1 = Math.max(conversations - bookings, 0);
   const loss2 = Math.max(bookings - conversions, 0);
-
   const rateConversationToBooking = safeRate(bookings, conversations);
   const rateBookingToConversion = safeRate(conversions, bookings);
   const rateFinal = safeRate(conversions, conversations);
@@ -450,70 +451,69 @@ function AtendimentoConversionFunnel({ values }) {
   const loss2Rate = safeRate(loss2, bookings);
 
   return (
-    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-5">
-      <div className="mb-4">
-        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">Funil de conversão</h3>
+    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
+      <div className="mb-3">
+        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">FUNIL DE CONVERSÃO</h3>
         <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.</p>
       </div>
 
-      <div className="rounded-2xl border border-border/80 bg-background/70 p-3 lg:p-4">
-        <div className="relative hidden items-stretch overflow-visible rounded-2xl lg:flex">
-          <div className="relative z-[1] w-[42%]">
-            <FunnelStage
-              title="Conversas"
-              value={conversations}
-              percentText="100% do total"
-              icon={MessageSquare}
-              iconBg="bg-white/12"
-              className="rounded-l-2xl"
+      <div className="rounded-2xl border border-[#efe5e5] bg-white p-3">
+        <div className="relative hidden overflow-visible rounded-2xl lg:flex">
+          <div className="relative z-[1] w-[44%]">
+            <div
+              className="flex min-h-[136px] items-center px-10 py-7 text-white"
               style={{
-                background: 'linear-gradient(135deg, #c40013 0%, #d9041a 60%, #a70014 100%)',
-                clipPath: 'polygon(0 0, 89% 0, 98% 50%, 89% 100%, 0 100%)',
+                background: 'linear-gradient(135deg, #c50015 0%, #db061e 50%, #b30014 100%)',
+                clipPath: 'polygon(0 0, 90% 0, 96.5% 50%, 90% 100%, 0 100%)',
+                borderRadius: '16px 0 0 16px',
               }}
-            />
+            >
+              <StageIconBox icon={MessageSquare} tone="dark" />
+              <div>
+                <div className="text-[15px] font-bold">Conversas</div>
+                <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em]">{conversations}</div>
+                <div className="mt-2 text-[15px] font-semibold text-white/95">100% do total</div>
+              </div>
+            </div>
           </div>
 
-          <LossBubble
-            title="Perda"
-            value={loss1}
-            detail={conversations ? formatPercent(loss1Rate) : 'Não agendaram'}
-            className="left-[39%]"
-          />
+          <LossBubble value={loss1} percent={formatPercent(loss1Rate)} leftClassName="left-[35.5%]" />
 
-          <div className="relative z-[2] -ml-7 w-[36%]">
-            <FunnelStage
-              title="Agendamentos"
-              value={bookings}
-              percentText={`${formatPercent(rateConversationToBooking)} do total`}
-              icon={CalendarDays}
-              iconBg="bg-white/12"
+          <div className="relative z-[2] -ml-8 w-[33.5%]">
+            <div
+              className="flex min-h-[136px] items-center px-10 py-7 text-white"
               style={{
-                background: 'linear-gradient(90deg, #ef8f92 0%, #e46f76 45%, #d06168 100%)',
-                clipPath: 'polygon(6% 0, 89% 0, 98% 50%, 89% 100%, 6% 100%, 0 50%)',
+                background: 'linear-gradient(90deg, #eb8b90 0%, #e58187 38%, #d87078 100%)',
+                clipPath: 'polygon(7% 0, 90% 0, 96.5% 50%, 90% 100%, 7% 100%, 0 50%)',
               }}
-            />
+            >
+              <StageIconBox icon={CalendarDays} tone="dark" />
+              <div>
+                <div className="text-[15px] font-bold">Agendamentos</div>
+                <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em]">{bookings}</div>
+                <div className="mt-2 text-[15px] font-semibold text-white/95">{formatPercent(rateConversationToBooking)} do total</div>
+              </div>
+            </div>
           </div>
 
-          <LossBubble
-            title="Perda"
-            value={loss2}
-            detail={bookings ? formatPercent(loss2Rate) : 'Não foram cortar'}
-            className="left-[72%]"
-          />
+          <LossBubble value={loss2} percent={formatPercent(loss2Rate)} leftClassName="left-[61.8%]" />
 
-          <div className="relative z-[3] -ml-7 w-[28%]">
-            <FunnelStage
-              title="Conversão (foi cortar)"
-              value={conversions}
-              percentText={`${formatPercent(rateFinal)} do total`}
-              icon={Scissors}
-              iconBg="bg-[#e9c8cb]"
-              className="rounded-r-2xl text-foreground"
+          <div className="relative z-[3] -ml-8 w-[28%]">
+            <div
+              className="flex min-h-[136px] items-center px-10 py-7 text-[#111827]"
               style={{
-                background: 'linear-gradient(90deg, #f2dfe1 0%, #ecdfe0 100%)',
-                clipPath: 'polygon(8% 0, 100% 0, 100% 100%, 8% 100%, 0 50%)',
+                background: 'linear-gradient(90deg, #f3e2e3 0%, #efdddd 100%)',
+                clipPath: 'polygon(10% 0, 100% 0, 100% 100%, 10% 100%, 0 50%)',
+                borderRadius: '0 16px 16px 0',
               }}
-            />
+            >
+              <StageIconBox icon={Scissors} tone="light" />
+              <div>
+                <div className="text-[15px] font-bold text-foreground">Conversão (foi cortar)</div>
+                <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em] text-foreground">{conversions}</div>
+                <div className="mt-2 text-[15px] font-semibold text-muted-foreground">{formatPercent(rateFinal)} do total</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -536,10 +536,14 @@ function AtendimentoConversionFunnel({ values }) {
         </div>
       </div>
 
-      <div className="mt-4 grid divide-y divide-border rounded-xl border border-border/90 bg-card lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-        <FunnelMetric title="Taxa conversa > agendamento" value={formatPercent(rateConversationToBooking)} />
-        <FunnelMetric title="Taxa agendamento > conversão" value={formatPercent(rateBookingToConversion)} />
-        <FunnelMetric title="Taxa final conversa > corte" value={formatPercent(rateFinal)} />
+      <div className="mt-3 grid overflow-hidden rounded-xl border border-[#ece7e7] bg-white lg:grid-cols-3">
+        <MetricTrend title="Taxa conversa > agendamento" value={formatPercent(rateConversationToBooking)} trend={values?.bookingDelta || '0,0 pp'} />
+        <div className="border-t border-[#ece7e7] lg:border-l lg:border-t-0">
+          <MetricTrend title="Taxa agendamento > conversão" value={formatPercent(rateBookingToConversion)} trend={values?.conversionDelta || '0,0 pp'} />
+        </div>
+        <div className="border-t border-[#ece7e7] lg:border-l lg:border-t-0">
+          <MetricTrend title="Taxa final (conversa > conversão)" value={formatPercent(rateFinal)} trend={values?.finalDelta || '0,0 pp'} />
+        </div>
       </div>
     </section>
   );
@@ -575,6 +579,7 @@ function DateFilter() {
         <Calendar className="h-4 w-4 text-muted-foreground" />
         <span className="font-medium">Início</span>
         <input type="text" placeholder="dd/mm/aaaa" className="w-28 border-0 bg-transparent p-0 font-semibold text-foreground outline-none placeholder:text-foreground" />
+        <Calendar className="h-4 w-4 text-muted-foreground" />
       </label>
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
         <span className="font-medium">Fim</span>
@@ -588,7 +593,6 @@ function DateFilter() {
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
   const current = dashboards[activeDashboard];
-
   const currentMain = useMemo(() => current.main, [current]);
 
   return (
