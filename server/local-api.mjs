@@ -1540,19 +1540,75 @@ const scheduleChatbotBackendRuntime = () => {
   }, Math.max(5000, CHATBOT_BACKEND_POLL_INTERVAL_MS));
 };
 
+
+const ROLE_PERMISSION_KEYS = [
+  'attendance',
+  'dashboard',
+  'kanban',
+  'quickReplies',
+  'customerBase',
+  'labels',
+  'chatbot',
+  'routines',
+  'hsms',
+  'settings',
+  'updates',
+];
+
+const DEFAULT_ROLE_PERMISSIONS = {
+  attendance: true,
+  dashboard: false,
+  kanban: false,
+  quickReplies: false,
+  customerBase: false,
+  labels: true,
+  chatbot: false,
+  routines: false,
+  hsms: false,
+  settings: false,
+  updates: true,
+};
+
+const ADMIN_ROLE_PERMISSIONS = ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
+  accumulator[key] = true;
+  return accumulator;
+}, {});
+
+const normalizeRolePermissions = (permissions = {}, fallback = DEFAULT_ROLE_PERMISSIONS) =>
+  ROLE_PERMISSION_KEYS.reduce((accumulator, key) => {
+    accumulator[key] = Boolean(permissions?.[key] ?? fallback?.[key] ?? false);
+    return accumulator;
+  }, {});
+
+const isAdminRoleRecord = (role = {}) =>
+  String(role?.id || '').trim() === 'role-admin' ||
+  String(role?.name || '').trim().toLowerCase() === 'administrador' ||
+  String(role?.department_key || role?.departmentKey || '').trim().toLowerCase() === 'administracao';
+
+const normalizeRoleRecord = (role = {}, index = 0, fallbackCreatedAt = nowIso()) => {
+  const createdAt = String(role.created_date || role.createdAt || fallbackCreatedAt || nowIso());
+  const updatedAt = String(role.updated_date || role.updatedAt || createdAt);
+  const adminRole = isAdminRoleRecord(role);
+
+  return {
+    id: String(role.id || `role-${index + 1}`).trim(),
+    name: String(role.name || `Função ${index + 1}`).trim(),
+    description: String(role.description || '').trim(),
+    department_key: String(role.department_key || role.departmentKey || '').trim(),
+    permissions: normalizeRolePermissions(role.permissions, adminRole ? ADMIN_ROLE_PERMISSIONS : DEFAULT_ROLE_PERMISSIONS),
+    settings_access: role.settings_access || role.settingsAccess,
+    created_date: createdAt,
+    updated_date: updatedAt,
+  };
+};
+
 const buildDefaultRoles = (createdAt = nowIso()) => [
   {
     id: 'role-admin',
     name: 'Administrador',
     description: 'Acesso completo a toda a plataforma e configuracoes do sistema.',
     department_key: 'administracao',
-    permissions: {
-      attendance: true,
-      dashboard: true,
-      labels: true,
-      customerBase: true,
-      settings: true,
-    },
+    permissions: { ...ADMIN_ROLE_PERMISSIONS },
     created_date: createdAt,
     updated_date: createdAt,
   },
@@ -1561,13 +1617,19 @@ const buildDefaultRoles = (createdAt = nowIso()) => [
     name: 'Comercial',
     description: 'Responsavel por leads, etiquetas e acompanhamento do funil.',
     department_key: 'comercial',
-    permissions: {
+    permissions: normalizeRolePermissions({
       attendance: true,
       dashboard: true,
-      labels: true,
+      kanban: true,
+      quickReplies: true,
       customerBase: false,
+      labels: true,
+      chatbot: false,
+      routines: true,
+      hsms: false,
       settings: false,
-    },
+      updates: true,
+    }),
     created_date: createdAt,
     updated_date: createdAt,
   },
@@ -1576,13 +1638,19 @@ const buildDefaultRoles = (createdAt = nowIso()) => [
     name: 'Suporte',
     description: 'Atua no atendimento e no acompanhamento operacional das conversas.',
     department_key: 'suporte',
-    permissions: {
+    permissions: normalizeRolePermissions({
       attendance: true,
       dashboard: true,
-      labels: true,
+      kanban: true,
+      quickReplies: true,
       customerBase: false,
+      labels: true,
+      chatbot: false,
+      routines: false,
+      hsms: false,
       settings: false,
-    },
+      updates: true,
+    }),
     created_date: createdAt,
     updated_date: createdAt,
   },
@@ -1704,19 +1772,34 @@ const normalizeUserRecord = (user = {}, index = 0, fallbackCreatedAt = nowIso())
   };
 };
 
-const sanitizeUserForClient = (user = {}) => ({
-  id: String(user.id || '').trim(),
-  full_name: String(user.full_name || '').trim(),
-  email: String(user.email || '').trim(),
-  role: String(user.role || '').trim(),
-  role_id: String(user.role_id || '').trim(),
-  role_name: String(user.role_name || '').trim(),
-  username: String(user.username || '').trim(),
-  description: String(user.description || '').trim(),
-  created_date: String(user.created_date || '').trim(),
-  updated_date: String(user.updated_date || '').trim(),
-  has_password: Boolean(String(user.password_hash || '').trim()),
-});
+const sanitizeUserForClient = (user = {}, store = null) => {
+  const role = store ? findUserRole(store, user) : null;
+  const adminUser =
+    String(user?.role || '').trim().toLowerCase() === 'admin' ||
+    String(user?.role_name || '').trim().toLowerCase() === 'administrador' ||
+    isAdminRoleRecord(role);
+  const rolePermissions = adminUser
+    ? ADMIN_ROLE_PERMISSIONS
+    : normalizeRolePermissions(role?.permissions || user?.permissions || {}, {});
+
+  return {
+    id: String(user.id || '').trim(),
+    full_name: String(user.full_name || '').trim(),
+    email: String(user.email || '').trim(),
+    role: String(user.role || '').trim(),
+    role_id: String(user.role_id || '').trim(),
+    role_name: String(user.role_name || '').trim(),
+    username: String(user.username || '').trim(),
+    description: String(user.description || '').trim(),
+    permissions: rolePermissions,
+    role_permissions: rolePermissions,
+    settings_access: role?.settings_access || role?.settingsAccess || null,
+    department_key: String(role?.department_key || '').trim(),
+    created_date: String(user.created_date || '').trim(),
+    updated_date: String(user.updated_date || '').trim(),
+    has_password: Boolean(String(user.password_hash || '').trim()),
+  };
+};
 
 const normalizeSessionRecord = (session = {}) => ({
   id: String(session.id || '').trim(),
@@ -2205,7 +2288,9 @@ const normalizeStore = (store) => {
   const base = store && typeof store === 'object' ? store : {};
   const users = (Array.isArray(base.users) ? base.users : []).map((user, index) => normalizeUserRecord(user, index));
   const createdAt = users?.[0]?.created_date || nowIso();
-  const roles = Array.isArray(base.roles) ? base.roles : buildDefaultRoles(createdAt);
+  const roles = Array.isArray(base.roles)
+    ? base.roles.map((role, index) => normalizeRoleRecord(role, index, createdAt))
+    : buildDefaultRoles(createdAt).map((role, index) => normalizeRoleRecord(role, index, createdAt));
   const services = Array.isArray(base.services)
     ? sortServices(base.services.map((service, index) => normalizeService(service, index)).filter((service) => service.name))
     : buildDefaultServices(users, createdAt);
@@ -7388,7 +7473,7 @@ const server = http.createServer(async (req, res) => {
         200,
         {
           ok: true,
-          user: sanitizeUserForClient(matchedUser),
+          user: sanitizeUserForClient(matchedUser, store),
           session: {
             remember,
             expiresAt: record.expires_at,
@@ -7423,7 +7508,7 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/local/auth/me' && req.method === 'GET') {
         const authContext = await requireAuthenticatedSession(req);
         void updateUserLastSeenSession(authContext.session.id);
-        return sendJson(res, 200, sanitizeUserForClient(authContext.user));
+        return sendJson(res, 200, sanitizeUserForClient(authContext.user, authContext.store));
       }
 
       const authContext = await requireAuthenticatedSession(req);

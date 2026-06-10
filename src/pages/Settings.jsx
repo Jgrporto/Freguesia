@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bell,
@@ -45,6 +45,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { SYSTEM_LABELS, useLabelCatalog } from '@/lib/labels';
+import { normalizeRolePermissions, ROLE_PERMISSION_OPTIONS } from '@/lib/role-permissions';
 import { useAuth } from '@/lib/AuthContext';
 import { resolveEffectiveUser } from '@/lib/current-user';
 import { disconnectLocalUserSessions } from '@/lib/local-auth';
@@ -80,22 +81,6 @@ import {
 
 const SETTINGS_AUDIT_STORAGE_KEY = 'freguesia:settings:audit:v1';
 
-const DEFAULT_ROLE_PERMISSIONS = {
-  attendance: true,
-  dashboard: false,
-  labels: true,
-  customerBase: false,
-  settings: false,
-};
-
-const ROLE_PERMISSION_OPTIONS = [
-  ['attendance', 'Atendimento', 'Visualiza conversas, lista e historico operacional.'],
-  ['labels', 'Etiquetas', 'Gerencia cards, listas e o fluxo Kanban por etiqueta.'],
-  ['dashboard', 'Dashboard', 'Consulta indicadores gerais e distribuicao dos numeros.'],
-  ['customerBase', 'Base de clientes', 'Acessa importacao, filtros e disparos da base.'],
-  ['settings', 'Configurações', 'Pode editar equipe, funcoes e preferencias locais.'],
-];
-
 const createEmptyUserForm = (roleId = '') => ({
   id: '',
   full_name: '',
@@ -110,7 +95,7 @@ const createEmptyRoleForm = () => ({
   name: '',
   description: '',
   department_key: '',
-  permissions: { ...DEFAULT_ROLE_PERMISSIONS },
+  permissions: normalizeRolePermissions(),
   settings_access: { ...DEFAULT_ROLE_SETTINGS_ACCESS },
 });
 
@@ -428,14 +413,19 @@ export default function Settings() {
   const canOpenSettingsRoute =
     String(user?.role || '').trim().toLowerCase() === 'admin' ||
     String(user?.role_name || '').trim().toLowerCase() === 'administrador' ||
-    Boolean(currentUserRole?.permissions?.settings);
+    Boolean(currentUserRole?.permissions?.settings || user?.permissions?.settings || user?.role_permissions?.settings);
   const currentSettingsAccess = useMemo(() => {
     if (!canOpenSettingsRoute) {
       return HIDDEN_ROLE_SETTINGS_ACCESS;
     }
 
-    return normalizeRoleSettingsAccess(currentUserRole?.settings_access || currentUserRole?.settingsAccess);
-  }, [canOpenSettingsRoute, currentUserRole?.settings_access, currentUserRole?.settingsAccess]);
+    return normalizeRoleSettingsAccess(
+      currentUserRole?.settings_access ||
+        currentUserRole?.settingsAccess ||
+        user?.settings_access ||
+        user?.settingsAccess,
+    );
+  }, [canOpenSettingsRoute, currentUserRole?.settings_access, currentUserRole?.settingsAccess, user?.settings_access, user?.settingsAccess]);
   const canEditTeamSection = canEditSettingsSection(currentSettingsAccess, 'team');
   const canEditRolesSection = canEditSettingsSection(currentSettingsAccess, 'roles');
   const canEditServicesSection = canEditSettingsSection(currentSettingsAccess, 'services');
@@ -507,10 +497,7 @@ export default function Settings() {
       name: role.name || '',
       description: role.description || '',
       department_key: role.department_key || '',
-      permissions: {
-        ...DEFAULT_ROLE_PERMISSIONS,
-        ...(role.permissions || {}),
-      },
+      permissions: normalizeRolePermissions(role.permissions),
       settings_access: normalizeRoleSettingsAccess(role.settings_access || role.settingsAccess),
     });
     setRoleDialogOpen(true);
@@ -548,10 +535,10 @@ export default function Settings() {
   const handleRolePermissionChange = (permissionKey, checked) => {
     setRoleForm((current) => ({
       ...current,
-      permissions: {
+      permissions: normalizeRolePermissions({
         ...current.permissions,
         [permissionKey]: Boolean(checked),
-      },
+      }),
     }));
   };
 
@@ -779,8 +766,8 @@ export default function Settings() {
       name: normalizedName,
       description: roleForm.description.trim(),
       department_key: departmentKey,
-      permissions: roleForm.permissions,
-      settings_access: roleForm.permissions.settings
+      permissions: normalizeRolePermissions(roleForm.permissions),
+      settings_access: normalizeRolePermissions(roleForm.permissions).settings
         ? normalizeRoleSettingsAccess(roleForm.settings_access)
         : HIDDEN_ROLE_SETTINGS_ACCESS,
     };
@@ -1733,8 +1720,8 @@ export default function Settings() {
 
           <div className="rounded-lg border border-border bg-secondary/20 p-4">
             <div className="mb-3">
-              <h3 className="text-sm font-semibold text-foreground">Definição de acessos</h3>
-              <p className="text-xs text-muted-foreground">Ative apenas os blocos que esta função pode consultar ou editar.</p>
+              <h3 className="text-sm font-semibold text-foreground">Menus da sidebar</h3>
+              <p className="text-xs text-muted-foreground">Marque os menus da sidebar que esta função pode visualizar. Menus desmarcados ficam ocultos e a rota também fica bloqueada.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {ROLE_PERMISSION_OPTIONS.map(([key, title, description]) => (
@@ -1772,7 +1759,7 @@ export default function Settings() {
                   <Select
                     value={normalizeRoleSettingsAccess(roleForm.settings_access)[key]}
                     onValueChange={(value) => handleRoleSettingsAccessChange(key, value)}
-                    disabled={isRoleReadOnly || isSavingRole || !Boolean(roleForm.permissions?.settings)}
+                    disabled={isRoleReadOnly || isSavingRole || !Boolean(normalizeRolePermissions(roleForm.permissions).settings)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecione o nivel" />
