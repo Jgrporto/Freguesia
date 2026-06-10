@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Award,
   Calendar,
@@ -71,23 +71,23 @@ const dashboards = {
     title: 'Atendimento e Conversão',
     subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em agendamentos.',
     cards: [
-      { title: 'Conversas recebidas', value: '248', subtitle: 'Volume total no período', icon: MessageSquare },
-      { title: '1ª resposta média', value: '02:48', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
-      { title: 'TMR', value: '08:32', subtitle: 'Tempo médio de resposta', icon: Clock3 },
-      { title: 'Agendamentos realizados', value: '112', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
-      { title: 'Taxa de conversão', value: '33,9%', subtitle: 'Cortes / conversas', icon: Target },
+      { title: 'Conversas recebidas', value: '0', subtitle: 'Volume total no período', icon: MessageSquare },
+      { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
+      { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock3 },
+      { title: 'Agendamentos realizados', value: '0', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
+      { title: 'Taxa de conversão', value: '0%', subtitle: 'Cortes / conversas', icon: Target },
     ],
     main: {
       title: 'Funil de conversão',
       description: 'Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.',
       type: 'atendimentoFunnel',
       values: {
-        conversations: 248,
-        bookings: 112,
-        conversions: 84,
-        bookingDelta: '6,3 pp',
-        conversionDelta: '4,1 pp',
-        finalDelta: '3,7 pp',
+        conversations: 0,
+        bookings: 0,
+        conversions: 0,
+        bookingDelta: '0,0 pp',
+        conversionDelta: '0,0 pp',
+        finalDelta: '0,0 pp',
       },
     },
     sideCharts: [
@@ -248,6 +248,56 @@ function safeRate(part, total) {
   if (!total) return 0;
   return (part / total) * 100;
 }
+
+const toDateInputValue = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getDefaultDateRange = () => {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - 6);
+  return {
+    start: toDateInputValue(start),
+    end: toDateInputValue(end),
+  };
+};
+
+const formatDurationSeconds = (seconds) => {
+  const totalSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+  }
+
+  return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+};
+
+const formatInteger = (value) => String(Math.max(0, Math.round(Number(value) || 0)));
+
+const formatPercentCard = (value) => `${((Number(value) || 0) * 100).toFixed(1).replace('.', ',')}%`;
+
+const resolveApiBaseUrl = () => {
+  const configuredBase = String(import.meta.env.VITE_WHATSAPP_API_BASE_URL || '').trim();
+  if (!configuredBase || configuredBase === '/') return '';
+  return configuredBase.replace(/\/$/, '');
+};
+
+const buildWhatsappApiUrl = (path) => {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const base = resolveApiBaseUrl();
+  if (!base) return normalizedPath;
+  if (base.endsWith('/api/whatsapp') && normalizedPath.startsWith('/api/whatsapp/')) {
+    return `${base}${normalizedPath.slice('/api/whatsapp'.length)}`;
+  }
+  return `${base}${normalizedPath}`;
+};
 
 function DashboardBrowserTabs({ activeTab, onChange }) {
   return (
@@ -572,18 +622,27 @@ function ChartCard({ title, description, type, labels = [], helper, className })
   );
 }
 
-function DateFilter() {
+function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) {
   return (
     <div className="flex flex-wrap items-center gap-3 xl:justify-end">
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
         <Calendar className="h-4 w-4 text-muted-foreground" />
         <span className="font-medium">Início</span>
-        <input type="text" placeholder="dd/mm/aaaa" className="w-28 border-0 bg-transparent p-0 font-semibold text-foreground outline-none placeholder:text-foreground" />
-        <Calendar className="h-4 w-4 text-muted-foreground" />
+        <input
+          type="date"
+          value={startDate}
+          onChange={(event) => onStartDateChange(event.target.value)}
+          className="w-32 border-0 bg-transparent p-0 font-semibold text-foreground outline-none"
+        />
       </label>
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
         <span className="font-medium">Fim</span>
-        <input type="text" placeholder="dd/mm/aaaa" className="w-28 border-0 bg-transparent p-0 font-semibold text-foreground outline-none placeholder:text-foreground" />
+        <input
+          type="date"
+          value={endDate}
+          onChange={(event) => onEndDateChange(event.target.value)}
+          className="w-32 border-0 bg-transparent p-0 font-semibold text-foreground outline-none"
+        />
         <Calendar className="h-4 w-4 text-muted-foreground" />
       </label>
     </div>
@@ -592,8 +651,103 @@ function DateFilter() {
 
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
+  const [{ start, end }, setDateRange] = useState(() => getDefaultDateRange());
+  const [attendanceMetrics, setAttendanceMetrics] = useState(null);
   const current = dashboards[activeDashboard];
   const currentMain = useMemo(() => current.main, [current]);
+
+  useEffect(() => {
+    if (activeDashboard !== 'atendimento') return;
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams();
+    if (start) searchParams.set('start', start);
+    if (end) searchParams.set('end', end);
+
+    fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/attendance?${searchParams.toString()}`), {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Falha ao carregar métricas de atendimento');
+        return response.json();
+      })
+      .then((payload) => setAttendanceMetrics(payload))
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.error('[dashboard] failed to load attendance metrics:', error);
+        }
+      });
+
+    return () => controller.abort();
+  }, [activeDashboard, start, end]);
+
+  const cards = useMemo(() => {
+    if (activeDashboard !== 'atendimento') return current.cards;
+
+    const receivedConversations = attendanceMetrics?.attendance?.receivedConversations;
+    const firstResponseSeconds = attendanceMetrics?.firstResponse?.seconds;
+    const tmrSeconds = attendanceMetrics?.tmr?.seconds;
+    const appointments = attendanceMetrics?.commerce?.appointments?.count;
+    const conversionRate = attendanceMetrics?.rates?.finalConversionRate;
+
+    return current.cards.map((card) => {
+      if (card.title === 'Conversas recebidas') {
+        return {
+          ...card,
+          value: formatInteger(receivedConversations),
+          subtitle: 'Conversas com mensagem no período',
+        };
+      }
+
+      if (card.title === '1ª resposta média') {
+        return {
+          ...card,
+          value: formatDurationSeconds(firstResponseSeconds),
+          subtitle: 'Tempo até o primeiro retorno',
+        };
+      }
+
+      if (card.title === 'TMR') {
+        return {
+          ...card,
+          value: formatDurationSeconds(tmrSeconds),
+          subtitle: 'Tempo médio de resposta',
+        };
+      }
+
+      if (card.title === 'Agendamentos realizados') {
+        return {
+          ...card,
+          value: formatInteger(appointments),
+          subtitle: 'Pendente de fonte de agenda',
+        };
+      }
+
+      if (card.title === 'Taxa de conversão') {
+        return {
+          ...card,
+          value: formatPercentCard(conversionRate),
+          subtitle: 'Cortes / conversas',
+        };
+      }
+
+      return card;
+    });
+  }, [activeDashboard, attendanceMetrics, current.cards]);
+
+  const atendimentoFunnelValues = useMemo(() => {
+    if (activeDashboard !== 'atendimento') return currentMain.values;
+
+    return {
+      ...currentMain.values,
+      conversations: attendanceMetrics?.funnel?.conversations ?? 0,
+      bookings: attendanceMetrics?.funnel?.appointments ?? 0,
+      conversions: attendanceMetrics?.funnel?.conversions ?? 0,
+      bookingDelta: '0,0 pp',
+      conversionDelta: '0,0 pp',
+      finalDelta: '0,0 pp',
+    };
+  }, [activeDashboard, attendanceMetrics, currentMain.values]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">
@@ -609,18 +763,23 @@ export default function Dashboard() {
             <h2 className="text-lg font-bold text-foreground">{current.title}</h2>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{current.subtitle}</p>
           </div>
-          <DateFilter />
+          <DateFilter
+            startDate={start}
+            endDate={end}
+            onStartDateChange={(nextStart) => setDateRange((currentRange) => ({ ...currentRange, start: nextStart }))}
+            onEndDateChange={(nextEnd) => setDateRange((currentRange) => ({ ...currentRange, end: nextEnd }))}
+          />
         </div>
       </section>
 
-      <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3', current.cards.length >= 5 ? '2xl:grid-cols-5' : '2xl:grid-cols-6')}>
-        {current.cards.map((card) => (
+      <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3', cards.length >= 5 ? '2xl:grid-cols-5' : '2xl:grid-cols-6')}>
+        {cards.map((card) => (
           <DashboardStatCard key={card.title} {...card} />
         ))}
       </div>
 
       {currentMain.type === 'atendimentoFunnel' ? (
-        <AtendimentoConversionFunnel values={currentMain.values} />
+        <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
       ) : (
         <ChartCard
           title={currentMain.title}
