@@ -12,6 +12,7 @@ import {
   PiggyBank,
   Repeat2,
   Send,
+  Scissors,
   Sparkles,
   Star,
   Target,
@@ -73,13 +74,42 @@ const dashboards = {
       { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: Timer },
       { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock },
       { title: 'Agendamentos realizados', value: '0', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
-      { title: 'Taxa de conversão', value: '0%', subtitle: 'Agendamentos / conversas', icon: Target },
+      { title: 'Taxa de conversão', value: '0%', subtitle: 'Cortes / conversas', icon: Target },
     ],
-    funnel: ['Conversas recebidas', 'Respondidas', 'Qualificados', 'Agendamentos', 'Comparecimentos'],
+    funnel: [
+      {
+        id: 'conversas',
+        title: 'Conversas',
+        value: '0',
+        caption: '100% do total',
+        icon: MessageSquare,
+        loss: { label: 'Perda', value: '0', caption: 'Não agendaram' },
+      },
+      {
+        id: 'agendamentos',
+        title: 'Agendamentos',
+        value: '0',
+        caption: '0% do total',
+        icon: CalendarDays,
+        loss: { label: 'Perda', value: '0', caption: 'Não foram cortar' },
+      },
+      {
+        id: 'conversao',
+        title: 'Conversão (foi cortar)',
+        value: '0',
+        caption: '0% do total',
+        icon: Scissors,
+      },
+    ],
     main: {
       title: 'Funil de conversão',
-      description: 'Onde os clientes estão se perdendo entre o primeiro contato e o comparecimento.',
+      description: 'Conversas > agendamentos > conversão real de clientes que foram cortar.',
       type: 'funnel',
+      metrics: [
+        { label: 'Taxa conversa > agendamento', value: '0%' },
+        { label: 'Taxa agendamento > conversão', value: '0%' },
+        { label: 'Taxa final conversa > corte', value: '0%' },
+      ],
     },
     sideCharts: [
       {
@@ -349,7 +379,104 @@ function EmptyDonut({ labels = [], large = false }) {
   );
 }
 
-function EmptyFunnel({ labels = [] }) {
+const conversionFunnelStageStyles = [
+  {
+    wrapper: 'z-30 w-full lg:w-[46%]',
+    body: 'bg-gradient-to-br from-primary via-primary to-[#8f0711] text-primary-foreground shadow-[0_18px_40px_rgba(188,12,25,0.22)]',
+    icon: 'bg-white/15 text-white',
+    value: 'text-white',
+    caption: 'text-white/85',
+    clipPath: 'polygon(0 0, 92% 0, 100% 50%, 92% 100%, 0 100%)',
+  },
+  {
+    wrapper: 'z-20 w-full lg:-ml-8 lg:w-[36%]',
+    body: 'bg-gradient-to-br from-primary/75 via-primary/55 to-primary/35 text-white shadow-[0_18px_36px_rgba(188,12,25,0.14)]',
+    icon: 'bg-white/20 text-white',
+    value: 'text-white',
+    caption: 'text-white/85',
+    clipPath: 'polygon(0 0, 90% 0, 100% 50%, 90% 100%, 0 100%, 10% 50%)',
+  },
+  {
+    wrapper: 'z-10 w-full lg:-ml-8 lg:w-[28%]',
+    body: 'border border-primary/10 bg-gradient-to-br from-primary/16 via-primary/10 to-card text-foreground',
+    icon: 'bg-primary/10 text-primary',
+    value: 'text-foreground',
+    caption: 'text-muted-foreground',
+    clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 100%, 12% 50%)',
+  },
+];
+
+function ConversionFunnel({ stages = [], metrics = [] }) {
+  const lossPositions = ['left-[44%]', 'left-[70%]'];
+
+  return (
+    <div className="space-y-3">
+      <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-card via-card to-primary/5 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)]">
+        <div className="relative flex min-h-[168px] flex-col gap-3 lg:flex-row lg:items-stretch lg:gap-0">
+          {stages.map((stage, index) => {
+            const Icon = stage.icon || Target;
+            const styles = conversionFunnelStageStyles[index] || conversionFunnelStageStyles[conversionFunnelStageStyles.length - 1];
+
+            return (
+              <div key={stage.id || stage.title} className={cn('relative', styles.wrapper)}>
+                <div
+                  className={cn(
+                    'flex h-full min-h-[148px] items-center gap-4 rounded-2xl px-6 py-5 lg:rounded-none',
+                    index > 0 && 'lg:pl-12',
+                    styles.body,
+                  )}
+                  style={{ clipPath: styles.clipPath }}
+                >
+                  <div className={cn('flex h-12 w-12 shrink-0 items-center justify-center rounded-xl', styles.icon)}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold">{stage.title}</p>
+                    <div className={cn('mt-1 text-4xl font-black tracking-[-0.05em]', styles.value)}>{stage.value}</div>
+                    <p className={cn('mt-1 text-xs font-medium', styles.caption)}>{stage.caption}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {stages.slice(0, -1).map((stage, index) => (
+            <div
+              key={`${stage.id || stage.title}-loss`}
+              className={cn(
+                'absolute top-1/2 z-40 hidden h-[76px] w-[76px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-border bg-card text-center shadow-[0_12px_30px_rgba(15,23,42,0.14)] lg:flex lg:flex-col lg:items-center lg:justify-center',
+                lossPositions[index],
+              )}
+            >
+              <span className="text-[10px] font-semibold text-muted-foreground">{stage.loss?.label || 'Perda'}</span>
+              <strong className="text-lg leading-tight text-foreground">{stage.loss?.value || '0'}</strong>
+              <span className="max-w-[58px] text-[9px] leading-tight text-muted-foreground">{stage.loss?.caption || 'Sem avanço'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {metrics.length > 0 ? (
+        <div className="grid gap-2 rounded-xl border border-border bg-card px-3 py-3 md:grid-cols-3">
+          {metrics.map((metric, index) => (
+            <div key={metric.label} className={cn('px-3 text-center', index > 0 && 'md:border-l md:border-border')}>
+              <p className="text-xs text-muted-foreground">{metric.label}</p>
+              <div className="mt-1 text-lg font-bold text-foreground">{metric.value}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EmptyFunnel({ labels = [], metrics = [] }) {
+  const isCustomConversionFunnel = labels.length > 0 && typeof labels[0] === 'object';
+
+  if (isCustomConversionFunnel) {
+    return <ConversionFunnel stages={labels} metrics={metrics} />;
+  }
+
   return (
     <div className="grid gap-3 md:grid-cols-5">
       {labels.map((label, index) => (
@@ -379,7 +506,7 @@ function EmptyGauge() {
   );
 }
 
-function ChartCard({ title, description, type, labels = [], helper, className }) {
+function ChartCard({ title, description, type, labels = [], helper, className, metrics = [] }) {
   return (
     <section className={cn('rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]', className)}>
       <div className="mb-4">
@@ -387,7 +514,7 @@ function ChartCard({ title, description, type, labels = [], helper, className })
         {description || helper ? <p className="mt-1 text-xs text-muted-foreground">{description || helper}</p> : null}
       </div>
 
-      {type === 'funnel' ? <EmptyFunnel labels={labels} /> : null}
+      {type === 'funnel' ? <EmptyFunnel labels={labels} metrics={metrics} /> : null}
       {type === 'line' ? <EmptyLineChart labels={labels} secondLine /> : null}
       {type === 'combo' ? <EmptyLineChart labels={labels} secondLine /> : null}
       {type === 'bars' ? <EmptyBars labels={labels} /> : null}
@@ -409,7 +536,7 @@ export default function Dashboard() {
 
   const currentMain = useMemo(() => {
     if (current.main.type === 'funnel') {
-      return { ...current.main, labels: current.funnel };
+      return { ...current.main, labels: current.funnel, metrics: current.main.metrics || [] };
     }
     return current.main;
   }, [current]);
@@ -468,6 +595,7 @@ export default function Dashboard() {
         description={currentMain.description}
         type={currentMain.type}
         labels={currentMain.labels}
+        metrics={currentMain.metrics}
         className="min-h-[260px]"
       />
 
