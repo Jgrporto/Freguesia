@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import {
@@ -86,6 +86,31 @@ const statusConfig = {
     icon: AlertCircle,
     className: 'border-destructive/30 bg-destructive/10 text-destructive',
   },
+  paused: {
+    label: 'Pausado',
+    icon: AlertCircle,
+    className: 'border-orange-500/30 bg-orange-500/10 text-orange-700',
+  },
+  disabled: {
+    label: 'Desativado',
+    icon: AlertCircle,
+    className: 'border-slate-500/30 bg-slate-500/10 text-slate-700',
+  },
+  in_appeal: {
+    label: 'Em recurso',
+    icon: Clock3,
+    className: 'border-blue-500/30 bg-blue-500/10 text-blue-700',
+  },
+  pending_deletion: {
+    label: 'Exclusão pendente',
+    icon: Clock3,
+    className: 'border-slate-500/30 bg-slate-500/10 text-slate-700',
+  },
+  deleted: {
+    label: 'Excluído',
+    icon: AlertCircle,
+    className: 'border-slate-500/30 bg-slate-500/10 text-slate-700',
+  },
 };
 
 const languageOptions = [
@@ -168,8 +193,22 @@ const normalizeServiceIds = (value, fallback = '') => {
 };
 
 const normalizeStatus = (value) => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'approved' || normalized === 'pending' || normalized === 'rejected') {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (
+    [
+      'approved',
+      'pending',
+      'rejected',
+      'paused',
+      'disabled',
+      'in_appeal',
+      'pending_deletion',
+      'deleted',
+    ].includes(normalized)
+  ) {
     return normalized;
   }
   return 'pending';
@@ -367,8 +406,9 @@ const mapLocalItemToTemplate = (item, uiStateMap) => {
       buttons: Array.isArray(item?.buttons) ? item.buttons : [],
       active: typeof item?.active === 'boolean' ? item.active : false,
       status: normalizeStatus(item?.status),
+      statusSyncedAt: item?.statusSyncedAt || item?.status_synced_at || null,
       createdAt: String(item?.createdAt || new Date().toISOString()),
-      source: 'local',
+      source: item?.source || 'local',
       syncKey,
     },
     uiState,
@@ -423,6 +463,7 @@ const mapRemoteItemToTemplate = (item, uiStateMap, existingLocal) => {
           : extractButtonsFromComponent(buttonsComponent),
       active: localFallback ? localFallback.active : false,
       status: normalizeStatus(item?.status),
+      statusSyncedAt: new Date().toISOString(),
       createdAt: String(localFallback?.createdAt || uiState?.createdAt || new Date().toISOString()),
       source: 'meta',
       syncKey,
@@ -447,6 +488,8 @@ const toLocalPayload = (template) => {
     productFormat: template.productFormat,
     content: template.body,
     status: normalizeStatus(template.status),
+    statusSyncedAt: template.statusSyncedAt || null,
+    source: template.source || 'local',
     active: Boolean(template.active),
     utilityType: template.utilityType === 'custom' ? 'personalizado' : template.utilityType,
     headerType: template.headerType,
@@ -567,6 +610,56 @@ const getPreviewButtonMeta = (buttonType) => {
   return { icon: MessageSquare, hint: 'Resposta rápida' };
 };
 
+const mergeTemplateWithMetaStatus = (existingTemplate, remoteTemplate, syncedAt) => {
+  if (!existingTemplate) {
+    return {
+      ...remoteTemplate,
+      status: normalizeStatus(remoteTemplate.status),
+      statusSyncedAt: syncedAt,
+      source: 'meta',
+    };
+  }
+
+  return {
+    ...existingTemplate,
+    code: remoteTemplate.code || existingTemplate.code,
+    category: remoteTemplate.category || existingTemplate.category,
+    status: normalizeStatus(remoteTemplate.status || existingTemplate.status),
+    statusSyncedAt: syncedAt,
+    source: 'meta',
+  };
+};
+
+const syncTemplatesWithMeta = async (localItems, uiStateMap) => {
+  const localTemplates = (Array.isArray(localItems) ? localItems : []).map((item) =>
+    mapLocalItemToTemplate(item, uiStateMap),
+  );
+  const localMap = new Map(localTemplates.map((template) => [template.syncKey, template]));
+  const mergedMap = new Map(localMap);
+  const remoteItems = await fetchMetaHsms();
+  const syncedAt = new Date().toISOString();
+
+  remoteItems.forEach((item) => {
+    const syncKey = hsmSyncKey(item?.name, item?.language);
+    const existingTemplate = localMap.get(syncKey);
+    const remoteTemplate = mapRemoteItemToTemplate(item, uiStateMap, existingTemplate);
+    mergedMap.set(remoteTemplate.syncKey, mergeTemplateWithMetaStatus(existingTemplate, remoteTemplate, syncedAt));
+  });
+
+  const mergedTemplates = Array.from(mergedMap.values()).sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
+  );
+
+  await replaceLocalHsms(mergedTemplates.map(toLocalPayload));
+
+  return {
+    templates: mergedTemplates,
+    remoteCount: remoteItems.length,
+    syncedAt,
+  };
+};
+
+
 export default function HsmSection() {
   const [search, setSearch] = useState('');
   const [templates, setTemplates] = useState([]);
@@ -613,8 +706,22 @@ export default function HsmSection() {
       const uiStateMap = readHsmUiState();
       const payload = await fetchLocalHsms();
       const items = Array.isArray(payload.items) ? payload.items : [];
-      setTemplates(items.map((item) => mapLocalItemToTemplate(item, uiStateMap)));
-      setFeedback({ type: '', title: '', message: '' });
+
+      try {
+        const syncResult = await syncTemplatesWithMeta(items, uiStateMap);
+        setTemplates(syncResult.templates);
+        setFeedback({ type: '', title: '', message: '' });
+      } catch (syncError) {
+        setTemplates(items.map((item) => mapLocalItemToTemplate(item, uiStateMap)));
+        setFeedback({
+          type: 'warning',
+          title: 'Status Meta não atualizado',
+          message:
+            syncError instanceof Error
+              ? syncError.message
+              : 'Os HSMs foram carregados do banco local, mas não foi possível consultar a Meta agora.',
+        });
+      }
     } catch (error) {
       setTemplates([]);
       setFeedback({
@@ -904,40 +1011,14 @@ export default function HsmSection() {
     setIsSyncing(true);
     try {
       const uiStateMap = readHsmUiState();
-      const [localPayload, remoteItems] = await Promise.all([fetchLocalHsms(), fetchMetaHsms()]);
-      const localTemplates = (Array.isArray(localPayload.items) ? localPayload.items : []).map((item) =>
-        mapLocalItemToTemplate(item, uiStateMap),
-      );
-      const localMap = new Map(localTemplates.map((template) => [template.syncKey, template]));
-      const mergedMap = new Map(localMap);
+      const localPayload = await fetchLocalHsms();
+      const syncResult = await syncTemplatesWithMeta(localPayload.items, uiStateMap);
 
-      remoteItems.forEach((item) => {
-        const syncKey = hsmSyncKey(item?.name, item?.language);
-        const existingTemplate = localMap.get(syncKey);
-        const remoteTemplate = mapRemoteItemToTemplate(item, uiStateMap, existingTemplate);
-        mergedMap.set(
-          remoteTemplate.syncKey,
-          existingTemplate
-            ? {
-                ...existingTemplate,
-                code: remoteTemplate.code || existingTemplate.code,
-                category: remoteTemplate.category || existingTemplate.category,
-                source: 'meta',
-              }
-            : remoteTemplate,
-        );
-      });
-
-      const mergedTemplates = Array.from(mergedMap.values()).sort(
-        (a, b) => new Date(b.createdAt) - new Date(a.createdAt),
-      );
-
-      await replaceLocalHsms(mergedTemplates.map(toLocalPayload));
-      setTemplates(mergedTemplates);
+      setTemplates(syncResult.templates);
       setFeedback({
         type: 'success',
         title: 'Sincronização concluída',
-        message: `${remoteItems.length} template(s) da Meta processado(s).`,
+        message: `${syncResult.remoteCount} template(s) da Meta processado(s) com status atualizado.`,
       });
     } catch (error) {
       setFeedback({
@@ -1109,7 +1190,11 @@ export default function HsmSection() {
                         </div>
                       </TableCell>
                       <TableCell className="px-2 py-3">
-                        <Badge variant="outline" className={cn('gap-1 px-2 py-1 text-[11px]', status.className)}>
+                        <Badge
+                          variant="outline"
+                          className={cn('gap-1 px-2 py-1 text-[11px]', status.className)}
+                          title={template.statusSyncedAt ? `Status atualizado pela Meta em ${format(new Date(template.statusSyncedAt), 'dd/MM/yyyy HH:mm', { locale: ptBR })}` : 'Status ainda não sincronizado com a Meta'}
+                        >
                           <StatusIcon className="size-3" />
                           {status.label}
                         </Badge>
