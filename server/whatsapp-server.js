@@ -1878,28 +1878,43 @@ const normalizeLocalTemplateHeaderType = (value) => {
   return "none";
 };
 
+const normalizeLocalTemplateButtonType = (value) => {
+  const raw = String(value || "").toLowerCase().trim();
+  if (["personalizado", "quick_reply", "custom"].includes(raw)) return "personalizado";
+  if (["acessar_site", "url", "website"].includes(raw)) return "acessar_site";
+  if (["ligar", "phone", "phone_number", "telefone"].includes(raw)) return "ligar";
+  if (["copiar_codigo", "copy_code", "copycode"].includes(raw)) return "copiar_codigo";
+  if (["fluxo_whatsapp", "flow"].includes(raw)) return "fluxo_whatsapp";
+  if (["pedido", "order"].includes(raw)) return "pedido";
+  return "personalizado";
+};
+
 const normalizeLocalTemplateButtons = (value) => {
   if (!Array.isArray(value)) return [];
   return value
     .map((item, index) => {
-      const rawType = String(item?.type || "").toLowerCase();
-      const type =
-        rawType === "personalizado" || rawType === "acessar_site" || rawType === "fluxo_whatsapp"
-          ? rawType
-          : null;
-      if (!type) return null;
+      const type = normalizeLocalTemplateButtonType(item?.type || item?.buttonType);
       const id = String(item?.id || `btn-${Date.now()}-${index}`);
-      const text = String(item?.text || "").trim();
+      const text = String(item?.text || item?.label || "").trim();
       if (!text) return null;
+
       const normalized = { id, type, text };
       if (type === "acessar_site") {
-        const urlType = String(item?.urlType || "").toLowerCase() === "dinamico" ? "dinamico" : "fixo";
+        const urlType = String(item?.urlType || item?.url_type || "").toLowerCase() === "dinamico" ? "dinamico" : "fixo";
         const url = String(item?.url || "").trim();
         return { ...normalized, urlType, url };
       }
+      if (type === "ligar") {
+        return { ...normalized, phoneNumber: String(item?.phoneNumber || item?.phone_number || "").trim() };
+      }
+      if (type === "copiar_codigo") {
+        return { ...normalized, offerCode: String(item?.offerCode || item?.offer_code || "").trim() };
+      }
       if (type === "fluxo_whatsapp") {
-        const flowId = String(item?.flowId || "").trim();
-        return { ...normalized, flowId };
+        return { ...normalized, flowId: String(item?.flowId || item?.flow_id || "").trim() };
+      }
+      if (type === "pedido") {
+        return { ...normalized, orderReference: String(item?.orderReference || item?.order_reference || "").trim() };
       }
       return normalized;
     })
@@ -1919,6 +1934,33 @@ const normalizeLocalTemplateServiceIds = (...values) => {
         .filter(Boolean)
     )
   );
+};
+
+
+const normalizeTemplateVariableValues = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? ""));
+};
+
+const normalizeTemplatePreviewButtons = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      const label = String(item?.label || item?.text || "").trim();
+      if (!label) return null;
+      return {
+        id: String(item?.id || `tpl-button-${index}`),
+        type: String(item?.type || item?.buttonType || "").trim() || "quick_reply",
+        label,
+        text: label,
+        url: String(item?.url || "").trim() || undefined,
+        phoneNumber: String(item?.phoneNumber || item?.phone_number || "").trim() || undefined,
+        offerCode: String(item?.offerCode || item?.offer_code || "").trim() || undefined,
+        flowId: String(item?.flowId || item?.flow_id || "").trim() || undefined,
+        orderReference: String(item?.orderReference || item?.order_reference || "").trim() || undefined,
+      };
+    })
+    .filter(Boolean);
 };
 
 const normalizeLocalTemplateItem = (input, existing = null) => {
@@ -1974,11 +2016,18 @@ const normalizeLocalTemplateItem = (input, existing = null) => {
     utilityType: normalizeLocalTemplateUtilityType(input?.utilityType || existing?.utilityType),
     headerType: normalizeLocalTemplateHeaderType(input?.headerType || existing?.headerType),
     footer: hasFooter ? String(input?.footer || "") : String(existing?.footer || ""),
-    bodyVariables: Array.isArray(input?.bodyVariables)
-      ? input.bodyVariables.map((item) => String(item || ""))
-      : Array.isArray(existing?.bodyVariables)
-        ? existing.bodyVariables.map((item) => String(item || ""))
-        : [],
+    bodyVariables: Object.prototype.hasOwnProperty.call(input || {}, "bodyVariables")
+      ? normalizeTemplateVariableValues(input?.bodyVariables)
+      : normalizeTemplateVariableValues(existing?.bodyVariables),
+    headerVariables: Object.prototype.hasOwnProperty.call(input || {}, "headerVariables")
+      ? normalizeTemplateVariableValues(input?.headerVariables)
+      : normalizeTemplateVariableValues(existing?.headerVariables),
+    buttonVariables: Object.prototype.hasOwnProperty.call(input || {}, "buttonVariables")
+      ? normalizeTemplateVariableValues(input?.buttonVariables)
+      : normalizeTemplateVariableValues(existing?.buttonVariables),
+    buttons: normalizeTemplatePreviewButtons(
+      Array.isArray(input?.buttons) ? input.buttons : existing?.buttons
+    ),
     buttonConfig: normalizeLocalTemplateButtons(
       Array.isArray(input?.buttonConfig) ? input.buttonConfig : existing?.buttonConfig
     ),
@@ -6923,6 +6972,245 @@ const getSortedMessages = (conversationId, messages) => {
     : [...messages].sort((a, b) => toTimeMs(a?.timestamp) - toTimeMs(b?.timestamp));
   setBoundedCacheEntry(messageListCache, conversationId, { signature, messages: sorted }, messageListCacheMaxEntries);
   return sorted;
+};
+
+const parseDashboardDateBoundary = (value, boundary = "start") => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  const isoDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDateMatch) {
+    const [, year, month, day] = isoDateMatch;
+    const suffix = boundary === "end" ? "T23:59:59.999" : "T00:00:00.000";
+    const parsed = Date.parse(`${year}-${month}-${day}${suffix}`);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const brDateMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brDateMatch) {
+    const [, day, month, year] = brDateMatch;
+    const suffix = boundary === "end" ? "T23:59:59.999" : "T00:00:00.000";
+    const parsed = Date.parse(`${year}-${month}-${day}${suffix}`);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return null;
+  if (boundary === "end" && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const endDate = new Date(parsed);
+    endDate.setHours(23, 59, 59, 999);
+    return endDate.getTime();
+  }
+  return parsed;
+};
+
+const getDefaultAttendanceDashboardRange = () => {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
+  return { startMs: start.getTime(), endMs: end.getTime() };
+};
+
+const resolveDashboardMessageTimestampMs = (message) =>
+  Math.max(
+    toTimeMs(message?.timestamp),
+    toTimeMs(message?.created_at),
+    toTimeMs(message?.createdAt),
+  );
+
+const buildAttendanceDashboardMetrics = (store, { startMs, endMs } = {}) => {
+  const fallbackRange = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : fallbackRange.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : fallbackRange.endMs;
+
+  const normalizeDashboardMessageType = (message = {}) => {
+    const type = String(message?.type || message?.direction || message?.origin || "").trim().toLowerCase();
+    if (["client", "customer", "inbound", "received", "user"].includes(type)) return "client";
+    if (["agent", "attendant", "operator", "outbound", "sent", "system"].includes(type)) return "agent";
+    return type;
+  };
+
+  const findNextAgentMessage = (messages, fromIndex, afterTs) => {
+    for (let index = fromIndex + 1; index < messages.length; index += 1) {
+      const candidate = messages[index];
+      if (candidate.__kind === "agent" && candidate.__ts > afterTs) return candidate;
+    }
+    return null;
+  };
+
+  const dayKeyFromMs = (timestampMs) => new Date(timestampMs).toISOString().slice(0, 10);
+  const dayStats = new Map();
+  const ensureDayStats = (dayKey) => {
+    if (!dayStats.has(dayKey)) {
+      dayStats.set(dayKey, {
+        date: dayKey,
+        conversationIds: new Set(),
+        answeredConversationIds: new Set(),
+        clientMessages: 0,
+        respondedMessages: 0,
+        totalResponseSeconds: 0,
+        firstResponseCount: 0,
+        firstResponseTotalSeconds: 0,
+      });
+    }
+    return dayStats.get(dayKey);
+  };
+
+  let clientMessages = 0;
+  let respondedMessages = 0;
+  let unansweredClientMessages = 0;
+  let totalResponseSeconds = 0;
+  let firstResponseCount = 0;
+  let totalFirstResponseSeconds = 0;
+  const respondedConversationIds = new Set();
+  const conversationIdsWithClientMessages = new Set();
+
+  for (const [conversationId, rawMessages] of Object.entries(store?.messages || {})) {
+    const messages = getSortedMessages(conversationId, rawMessages)
+      .map((message) => ({
+        ...message,
+        __ts: resolveDashboardMessageTimestampMs(message),
+        __kind: normalizeDashboardMessageType(message),
+      }))
+      .filter((message) => Number.isFinite(message.__ts) && message.__ts > 0);
+
+    const firstClientMessageInPeriodIndex = messages.findIndex(
+      (message) =>
+        message.__kind === "client" &&
+        message.__ts >= normalizedStartMs &&
+        message.__ts <= normalizedEndMs,
+    );
+
+    if (firstClientMessageInPeriodIndex >= 0) {
+      const firstClientMessage = messages[firstClientMessageInPeriodIndex];
+      const nextAgentMessage = findNextAgentMessage(
+        messages,
+        firstClientMessageInPeriodIndex,
+        firstClientMessage.__ts,
+      );
+      if (nextAgentMessage) {
+        const firstResponseSeconds = Math.max(
+          0,
+          Math.round((nextAgentMessage.__ts - firstClientMessage.__ts) / 1000),
+        );
+        totalFirstResponseSeconds += firstResponseSeconds;
+        firstResponseCount += 1;
+        ensureDayStats(dayKeyFromMs(firstClientMessage.__ts)).firstResponseTotalSeconds += firstResponseSeconds;
+        ensureDayStats(dayKeyFromMs(firstClientMessage.__ts)).firstResponseCount += 1;
+      }
+    }
+
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index];
+      if (message.__kind !== "client") continue;
+      if (message.__ts < normalizedStartMs || message.__ts > normalizedEndMs) continue;
+
+      clientMessages += 1;
+      conversationIdsWithClientMessages.add(conversationId);
+      const dayStatsEntry = ensureDayStats(dayKeyFromMs(message.__ts));
+      dayStatsEntry.conversationIds.add(conversationId);
+      dayStatsEntry.clientMessages += 1;
+
+      const nextAgentMessage = findNextAgentMessage(messages, index, message.__ts);
+
+      if (!nextAgentMessage) {
+        unansweredClientMessages += 1;
+        continue;
+      }
+
+      const responseSeconds = Math.max(0, Math.round((nextAgentMessage.__ts - message.__ts) / 1000));
+      totalResponseSeconds += responseSeconds;
+      respondedMessages += 1;
+      respondedConversationIds.add(conversationId);
+      dayStatsEntry.respondedMessages += 1;
+      dayStatsEntry.totalResponseSeconds += responseSeconds;
+      dayStatsEntry.answeredConversationIds.add(conversationId);
+    }
+  }
+
+  const receivedConversations = conversationIdsWithClientMessages.size;
+  const answeredConversations = respondedConversationIds.size;
+  const tmrSeconds = respondedMessages > 0 ? Math.round(totalResponseSeconds / respondedMessages) : 0;
+  const firstResponseAverageSeconds =
+    firstResponseCount > 0 ? Math.round(totalFirstResponseSeconds / firstResponseCount) : 0;
+
+  // Ainda não existe uma fonte confiável de agendamentos/cortes realizados neste store.
+  // Mantemos os campos estruturados para o frontend e para a futura integração da agenda.
+  const appointments = 0;
+  const conversions = 0;
+  const appointmentRate = receivedConversations > 0 ? appointments / receivedConversations : 0;
+  const appointmentToConversionRate = appointments > 0 ? conversions / appointments : 0;
+  const finalConversionRate = receivedConversations > 0 ? conversions / receivedConversations : 0;
+
+  const byDay = Array.from(dayStats.values())
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((entry) => ({
+      date: entry.date,
+      receivedConversations: entry.conversationIds.size,
+      answeredConversations: entry.answeredConversationIds.size,
+      clientMessages: entry.clientMessages,
+      respondedMessages: entry.respondedMessages,
+      tmrSeconds:
+        entry.respondedMessages > 0 ? Math.round(entry.totalResponseSeconds / entry.respondedMessages) : 0,
+      firstResponseAverageSeconds:
+        entry.firstResponseCount > 0
+          ? Math.round(entry.firstResponseTotalSeconds / entry.firstResponseCount)
+          : 0,
+    }));
+
+  return {
+    period: {
+      start: new Date(normalizedStartMs).toISOString(),
+      end: new Date(normalizedEndMs).toISOString(),
+    },
+    cards: {
+      receivedConversations,
+      firstResponseAverageSeconds,
+      tmrSeconds,
+      appointments,
+      conversionRate: finalConversionRate,
+    },
+    attendance: {
+      receivedConversations,
+      answeredConversations,
+      responseRate: receivedConversations > 0 ? answeredConversations / receivedConversations : 0,
+    },
+    firstResponse: {
+      seconds: firstResponseAverageSeconds,
+      answeredConversations: firstResponseCount,
+      receivedConversations,
+    },
+    tmr: {
+      seconds: tmrSeconds,
+      respondedMessages,
+      clientMessages,
+      unansweredClientMessages,
+    },
+    commerce: {
+      appointments: {
+        count: appointments,
+        source: "not_configured",
+      },
+      conversions: {
+        count: conversions,
+        source: "not_configured",
+      },
+    },
+    funnel: {
+      conversations: receivedConversations,
+      appointments,
+      conversions,
+    },
+    rates: {
+      responseRate: receivedConversations > 0 ? answeredConversations / receivedConversations : 0,
+      appointmentRate,
+      appointmentToConversionRate,
+      finalConversionRate,
+    },
+    byDay,
+  };
 };
 
 const buildConversationListResponse = (store, painelCustomers) => {
@@ -24012,6 +24300,7 @@ const upsertStoredMessage = async ({
   clientMessageId = null,
   providerMessageId = null,
   replyToId = null,
+  templateButtons = [],
 }) => {
 
 
@@ -24380,6 +24669,8 @@ const upsertStoredMessage = async ({
       timestamp,
       isRead,
       attachments,
+      templateButtons: normalizeTemplatePreviewButtons(templateButtons),
+      template_buttons: normalizeTemplatePreviewButtons(templateButtons),
       replyTo,
       reply_to_id: replyToId || undefined,
       replyToId: replyToId || undefined,
@@ -24441,6 +24732,7 @@ const upsertStoredMessage = async ({
       const nextAttachments = Array.isArray(attachments) && attachments.length > 0
         ? attachments
         : message.attachments;
+      const nextTemplateButtons = normalizeTemplatePreviewButtons(templateButtons);
       return {
         ...message,
         from: message.from || getMessageSender(type) || undefined,
@@ -24456,6 +24748,8 @@ const upsertStoredMessage = async ({
         created_at: message.created_at || String(timestamp || nowIso()),
         content: nextContent,
         attachments: nextAttachments,
+        templateButtons: nextTemplateButtons.length ? nextTemplateButtons : message.templateButtons,
+        template_buttons: nextTemplateButtons.length ? nextTemplateButtons : message.template_buttons,
         replyTo: replyTo || message.replyTo,
         reply_to_id: replyToId || message.reply_to_id || undefined,
         replyToId: replyToId || message.replyToId || undefined,
@@ -25351,6 +25645,7 @@ const upsertAgentMessage = async ({
   senderName = null,
   clientMessageId = null,
   replyToId = null,
+  templateButtons = [],
 }) => {
 
 
@@ -32026,6 +32321,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/whatsapp/dashboard/attendance") {
+    setCors(res);
+    try {
+      const startMs = parseDashboardDateBoundary(url.searchParams.get("start"), "start");
+      const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
+      const store = await readStore({ mutable: false });
+      const metrics = buildAttendanceDashboardMetrics(store, { startMs, endMs });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(metrics));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error?.message || "Attendance dashboard error" }));
+    }
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/whatsapp/conversations") {
 
 
@@ -33063,6 +33374,7 @@ const server = http.createServer(async (req, res) => {
         origin,
         agentName,
         senderName,
+        templateButtons,
       } = payload;
       const metaSelector = resolveRequestedMetaSelector(req, payload);
       const hasButtons = Array.isArray(buttons) && buttons.length > 0;
@@ -50151,6 +50463,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         origin,
         agentName,
         senderName,
+        templateButtons,
       } = payload;
       const metaSelector = resolveRequestedMetaSelector(req, payload);
 
@@ -50757,6 +51070,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         text,
         messageId: responseMessageId,
         attachments: templateAttachments,
+        templateButtons: normalizeTemplatePreviewButtons(templateButtons),
         replyTo,
         origin: origin || "panel",
         senderName: senderName || agentName || null,
