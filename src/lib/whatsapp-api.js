@@ -1004,28 +1004,12 @@ export const transcribeWhatsappAudioMessage = async (messageId, options = {}) =>
   }
 
   const force = options.force === true ? '?force=true' : '';
-  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 180000;
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timeout = controller && timeoutMs > 0
-    ? window.setTimeout(() => controller.abort(), timeoutMs)
-    : null;
-
-  try {
-    return await requestWhatsappJson(`/api/whatsapp/messages/${encodeURIComponent(safeMessageId)}/transcribe${force}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new Error('A transcrição demorou demais. Tente novamente em instantes.');
-    }
-    throw error;
-  } finally {
-    if (timeout) window.clearTimeout(timeout);
-  }
+  return await requestWhatsappJson(`/api/whatsapp/messages/${encodeURIComponent(safeMessageId)}/transcribe${force}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
 };
 
 export const getWhatsappAudioTranscription = async (messageId) => {
