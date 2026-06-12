@@ -124,10 +124,14 @@ async function login(page, username, password) {
   await page.fill('input[name="userid"]', username);
   await page.fill('input[name="password"]', password);
 
-  const loginResponsePromise = page.waitForResponse(
-    (response) => response.url().includes('/php/logar.php') && response.request().method() === 'POST',
-    { timeout: 60000 },
-  );
+  const loginResponsePromise = page
+    .waitForResponse(
+      (response) =>
+        response.url().includes('/php/logar.php') &&
+        response.request().method() === 'POST',
+      { timeout: 15000 },
+    )
+    .catch(() => null);
 
   await page.click('.btnLogin');
   await loginResponsePromise;
