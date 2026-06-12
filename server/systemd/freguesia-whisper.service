@@ -1,0 +1,18 @@
+[Unit]
+Description=Freguesia Whisper Local API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/Freguesia
+EnvironmentFile=/root/Freguesia/.env
+Environment=WHISPER_MODEL=tiny
+Environment=WHISPER_LANGUAGE=pt
+Environment=WHISPER_TMP_DIR=server/data/whisper-tmp
+Environment=WHISPER_MAX_AUDIO_MB=25
+ExecStart=/opt/freguesia-whisper-venv/bin/python -m uvicorn server.whisper_api:app --host 127.0.0.1 --port 5260
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

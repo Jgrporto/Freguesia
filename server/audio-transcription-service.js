@@ -10,6 +10,8 @@ const DEFAULT_TMP_DIR = process.env.WHISPER_TMP_DIR || "server/data/whisper-tmp"
 const DEFAULT_MAX_AUDIO_MB = Number.parseInt(process.env.WHISPER_MAX_AUDIO_MB || "25", 10);
 const DEFAULT_TIMEOUT_MS = Number.parseInt(process.env.WHISPER_TIMEOUT_MS || "180000", 10);
 const WHISPER_ENABLED = String(process.env.WHISPER_ENABLED || "true").trim().toLowerCase() !== "false";
+const WHISPER_SERVICE_URL = String(process.env.WHISPER_SERVICE_URL || "").trim();
+const WHISPER_PROVIDER = WHISPER_SERVICE_URL ? "local-whisper-service" : "local-whisper";
 
 const nowIso = () => new Date().toISOString();
 const normalizeMessageId = (value) => String(value || "").trim();
@@ -96,7 +98,7 @@ const buildTranscriptionPatch = (patch = {}) => ({
   text: patch.text || "",
   language: patch.language || DEFAULT_WHISPER_LANGUAGE,
   model: patch.model || DEFAULT_WHISPER_MODEL,
-  provider: "local-whisper",
+  provider: patch.provider || WHISPER_PROVIDER,
   createdAt: patch.createdAt || nowIso(),
   updatedAt: nowIso(),
   error: patch.error || "",
@@ -126,6 +128,70 @@ const updateStoredMessageTranscription = async ({ readStore, writeStore, message
   store.messages[found.conversationId][found.index] = nextMessage;
   await writeStore(store);
   return { conversationId: found.conversationId, message: nextMessage };
+};
+
+
+const parseWhisperJsonResponse = (raw, fallbackError = "Whisper transcription failed") => {
+  const output = String(raw || "").trim();
+  try {
+    const parsed = JSON.parse(output || "{}");
+    if (!parsed?.ok) {
+      throw new Error(parsed?.error || fallbackError);
+    }
+    return parsed;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`Invalid Whisper JSON output: ${error?.message || error}`);
+    }
+    throw error;
+  }
+};
+
+const runWhisperService = async ({ audioPath, mimeType }) => {
+  if (!WHISPER_SERVICE_URL) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const audioBuffer = await fs.readFile(audioPath);
+    const startedAt = Date.now();
+    console.info(`[whisper] service request started url=${WHISPER_SERVICE_URL} model=${DEFAULT_WHISPER_MODEL}`);
+
+    const response = await fetch(WHISPER_SERVICE_URL, {
+      method: "POST",
+      headers: {
+        "content-type": mimeType || "audio/ogg",
+        "x-whisper-model": DEFAULT_WHISPER_MODEL,
+        "x-whisper-language": DEFAULT_WHISPER_LANGUAGE,
+      },
+      body: audioBuffer,
+      signal: controller.signal,
+    });
+
+    const raw = await response.text();
+    if (!response.ok) {
+      let detail = raw;
+      try {
+        const parsed = JSON.parse(raw || "{}");
+        detail = parsed?.detail || parsed?.error || raw;
+      } catch {
+        // keep raw detail
+      }
+      throw new Error(detail || `Whisper service failed with status ${response.status}`);
+    }
+
+    const parsed = parseWhisperJsonResponse(raw);
+    console.info(`[whisper] service request finished in ${Date.now() - startedAt}ms`);
+    return parsed;
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Whisper service timeout after ${DEFAULT_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 };
 
 const runWhisperScript = ({ audioPath, mimeType }) => new Promise((resolve, reject) => {
@@ -257,7 +323,7 @@ export const transcribeAudioMessage = async ({ messageId, readStore, writeStore,
       text: previous?.text || "",
       language: DEFAULT_WHISPER_LANGUAGE,
       model: DEFAULT_WHISPER_MODEL,
-      provider: "local-whisper",
+      provider: WHISPER_PROVIDER,
       createdAt: previous?.createdAt || startedAt,
       updatedAt: nowIso(),
       error: "",
@@ -283,7 +349,11 @@ export const transcribeAudioMessage = async ({ messageId, readStore, writeStore,
     audioPath = path.join(tmpDir, `${randomUUID()}${audioMimeToExtension(mimeType || attachment.mimeType)}`);
     await fs.writeFile(audioPath, buffer);
 
-    const whisperResult = await runWhisperScript({ audioPath, mimeType: mimeType || attachment.mimeType });
+    const whisperResult = await (
+      WHISPER_SERVICE_URL
+        ? runWhisperService({ audioPath, mimeType: mimeType || attachment.mimeType })
+        : runWhisperScript({ audioPath, mimeType: mimeType || attachment.mimeType })
+    );
     const finalTranscription = buildTranscriptionPatch({
       status: "done",
       text: String(whisperResult.text || "").trim(),
