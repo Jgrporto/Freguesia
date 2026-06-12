@@ -40742,6 +40742,7 @@ const server = http.createServer(async (req, res) => {
         readStore,
         writeStore,
         downloadMediaBuffer: downloadWhatsappMediaBuffer,
+        force: ["true", "1", "yes"].includes(String(url.searchParams.get("force") || "").trim().toLowerCase()),
       });
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -53375,7 +53376,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
 
 
 

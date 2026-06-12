@@ -56,7 +56,7 @@ As variaveis `WHISPER_*` controlam a transcricao local de audios recebidos no ch
 
 ```env
 WHISPER_ENABLED=true
-WHISPER_MODEL=base
+WHISPER_MODEL=tiny
 WHISPER_LANGUAGE=pt
 WHISPER_PYTHON_BIN=/opt/freguesia-whisper-venv/bin/python
 WHISPER_TMP_DIR=server/data/whisper-tmp

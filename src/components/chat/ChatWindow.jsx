@@ -2374,7 +2374,7 @@ export default function ChatWindow({
     }));
 
     try {
-      const result = await transcribeWhatsappAudioMessage(messageId);
+      const result = await transcribeWhatsappAudioMessage(messageId, { force: true });
       const nextMessage = result?.message;
       const transcription = result?.transcription || nextMessage?.transcription || null;
 

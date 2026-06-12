@@ -11,7 +11,7 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
   const status = resolveStatus(transcription);
   const text = String(transcription?.text || '').trim();
   const error = String(transcription?.error || '').trim();
-  const isProcessing = isTranscribing || status === 'processing' || status === 'pending';
+  const isProcessing = isTranscribing;
 
   if (status === 'done' && text) {
     return (
@@ -43,6 +43,36 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
       >
         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
         Transcrevendo áudio...
+      </div>
+    );
+  }
+
+  if (status === 'processing' || status === 'pending') {
+    return (
+      <div
+        className={cn(
+          'mt-2 rounded-xl border px-3 py-2 text-xs',
+          isAgent
+            ? 'border-primary-foreground/15 bg-primary-foreground/10 text-primary-foreground'
+            : 'border-amber-500/20 bg-amber-500/10 text-amber-700'
+        )}
+      >
+        <div className="flex items-center gap-1.5 font-semibold">
+          <AlertCircle className="h-3.5 w-3.5" />
+          <span>Transcricao nao finalizada.</span>
+        </div>
+        <button
+          type="button"
+          onClick={onTranscribe}
+          className={cn(
+            'mt-2 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors',
+            isAgent
+              ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
+              : 'border-amber-500/25 hover:bg-amber-500/10'
+          )}
+        >
+          Transcrever audio
+        </button>
       </div>
     );
   }

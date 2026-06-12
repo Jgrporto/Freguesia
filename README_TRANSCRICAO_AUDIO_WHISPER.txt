@@ -21,7 +21,7 @@ Variaveis de ambiente
 Adicionar no /root/Freguesia/.env:
 
 WHISPER_ENABLED=true
-WHISPER_MODEL=base
+WHISPER_MODEL=tiny
 WHISPER_LANGUAGE=pt
 WHISPER_PYTHON_BIN=/opt/freguesia-whisper-venv/bin/python
 WHISPER_TMP_DIR=server/data/whisper-tmp
@@ -77,6 +77,7 @@ curl -s -X POST "https://freguesia.hakione.tech/api/whatsapp/messages/MESSAGE_ID
 Observacoes operacionais
 ------------------------
 - O processamento e manual por botao, para evitar carga automatica na VPS.
+- O modelo padrao e tiny para reduzir latencia no teste real. Troque para base depois se a VPS suportar o tempo de processamento.
 - Audios acima de WHISPER_MAX_AUDIO_MB sao recusados.
 - Arquivos temporarios sao removidos ao final do processamento.
 - Se o servico reiniciar durante uma transcricao, o estado processing expira pelo WHISPER_TIMEOUT_MS e permite nova tentativa.

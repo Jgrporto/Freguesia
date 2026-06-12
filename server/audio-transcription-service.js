@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
-const DEFAULT_WHISPER_MODEL = process.env.WHISPER_MODEL || "base";
+const DEFAULT_WHISPER_MODEL = process.env.WHISPER_MODEL || "tiny";
 const DEFAULT_WHISPER_LANGUAGE = process.env.WHISPER_LANGUAGE || "pt";
 const DEFAULT_PYTHON_BIN = process.env.WHISPER_PYTHON_BIN || "python3";
 const DEFAULT_TMP_DIR = process.env.WHISPER_TMP_DIR || "server/data/whisper-tmp";
@@ -196,7 +196,7 @@ const runWhisperScript = ({ audioPath, mimeType }) => new Promise((resolve, reje
   });
 });
 
-export const transcribeAudioMessage = async ({ messageId, readStore, writeStore, downloadMediaBuffer }) => {
+export const transcribeAudioMessage = async ({ messageId, readStore, writeStore, downloadMediaBuffer, force = false }) => {
   if (!WHISPER_ENABLED) {
     const error = new Error("Whisper transcription is disabled");
     error.statusCode = 503;
@@ -223,7 +223,7 @@ export const transcribeAudioMessage = async ({ messageId, readStore, writeStore,
     };
   }
 
-  if (isProcessingTranscriptionFresh(currentTranscription)) {
+  if (!force && isProcessingTranscriptionFresh(currentTranscription)) {
     return {
       ok: true,
       messageId: found.message.id || messageId,

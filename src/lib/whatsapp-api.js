@@ -997,13 +997,14 @@ export const sendWhatsappTemplateMessage = async ({
 };
 
 
-export const transcribeWhatsappAudioMessage = async (messageId) => {
+export const transcribeWhatsappAudioMessage = async (messageId, options = {}) => {
   const safeMessageId = String(messageId || '').trim();
   if (!safeMessageId) {
     throw new Error('Mensagem de áudio inválida.');
   }
 
-  return await requestWhatsappJson(`/api/whatsapp/messages/${encodeURIComponent(safeMessageId)}/transcribe`, {
+  const force = options.force === false ? '' : '?force=true';
+  return await requestWhatsappJson(`/api/whatsapp/messages/${encodeURIComponent(safeMessageId)}/transcribe${force}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
