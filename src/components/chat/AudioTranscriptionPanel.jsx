@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, FileText, LoaderCircle } from 'lucide-react';
+import { AlertCircle, FileText, LoaderCircle, RotateCcw } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 
@@ -11,7 +11,6 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
   const status = resolveStatus(transcription);
   const text = String(transcription?.text || '').trim();
   const error = String(transcription?.error || '').trim();
-  const isProcessing = isTranscribing;
 
   if (status === 'done' && text) {
     return (
@@ -33,7 +32,7 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
     );
   }
 
-  if (isProcessing) {
+  if (isTranscribing) {
     return (
       <div
         className={cn(
@@ -59,19 +58,21 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
       >
         <div className="flex items-center gap-1.5 font-semibold">
           <AlertCircle className="h-3.5 w-3.5" />
-          <span>Transcricao nao finalizada.</span>
+          <span>Transcrição interrompida.</span>
         </div>
+        <p className="mt-1 opacity-80">O áudio ficou marcado como processamento pendente. Tente novamente manualmente.</p>
         <button
           type="button"
-          onClick={onTranscribe}
+          onClick={() => onTranscribe?.({ force: true })}
           className={cn(
-            'mt-2 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors',
+            'mt-2 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors',
             isAgent
               ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
               : 'border-amber-500/25 hover:bg-amber-500/10'
           )}
         >
-          Transcrever audio
+          <RotateCcw className="h-3.5 w-3.5" />
+          Tentar novamente
         </button>
       </div>
     );
@@ -94,14 +95,15 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
         {error ? <p className="mt-1 line-clamp-2 opacity-80">{error}</p> : null}
         <button
           type="button"
-          onClick={onTranscribe}
+          onClick={() => onTranscribe?.({ force: true })}
           className={cn(
-            'mt-2 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors',
+            'mt-2 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors',
             isAgent
               ? 'border-primary-foreground/20 hover:bg-primary-foreground/10'
               : 'border-destructive/25 hover:bg-destructive/10'
           )}
         >
+          <RotateCcw className="h-3.5 w-3.5" />
           Tentar novamente
         </button>
       </div>
@@ -111,7 +113,7 @@ export default function AudioTranscriptionPanel({ transcription, isTranscribing 
   return (
     <button
       type="button"
-      onClick={onTranscribe}
+      onClick={() => onTranscribe?.({ force: false })}
       className={cn(
         'mt-2 inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition-colors',
         isAgent

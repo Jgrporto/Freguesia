@@ -2355,7 +2355,7 @@ export default function ChatWindow({
     toast.message(`Mensagem ${message?.status || 'sem status'} enviada às ${createdAt}.`);
   };
 
-  const handleTranscribeAudio = async (message) => {
+  const handleTranscribeAudio = async (message, options = {}) => {
     const messageId = getMessageIdentifierCandidates(message)[0] || '';
     if (!messageId) {
       toast.error('Não foi possível identificar esta mensagem de áudio.');
@@ -2374,7 +2374,7 @@ export default function ChatWindow({
     }));
 
     try {
-      const result = await transcribeWhatsappAudioMessage(messageId, { force: true });
+      const result = await transcribeWhatsappAudioMessage(messageId, { force: options?.force === true });
       const nextMessage = result?.message;
       const transcription = result?.transcription || nextMessage?.transcription || null;
 

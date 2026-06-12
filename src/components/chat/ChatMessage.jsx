@@ -365,7 +365,7 @@ function AttachmentPreview({ attachment, mediaItem, message, onOpenMedia, onTran
           transcription={message?.transcription}
           isTranscribing={isAudioTranscribing}
           isAgent={message?.sender_type === 'agent'}
-          onTranscribe={() => onTranscribeAudio?.(message)}
+          onTranscribe={(options) => onTranscribeAudio?.(message, options)}
         />
       </div>
     );
