@@ -1008,10 +1008,21 @@ export default function CustomerBase() {
                 <TableCell className="text-sm text-foreground">{customer.neighborhood}</TableCell>
                 <TableCell>
                   <div className="space-y-1">
-                    <div className="text-sm text-foreground">{customer.lastProfessional}</div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {customer.lastAppointmentLabel !== '-' ? customer.lastAppointmentLabel : 'Sem agendamento'}
-                    </div>
+                    {customer.hasPendingAppointment ? (
+                      <>
+                        <div className="text-sm font-semibold text-amber-700">Pendente: {customer.nextAppointmentLabel}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {customer.pendingAppointmentProfessional !== '-' ? customer.pendingAppointmentProfessional : 'Profissional não informado'}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-sm text-foreground">{customer.lastProfessional}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {customer.lastAppointmentLabel !== '-' ? customer.lastAppointmentLabel : 'Sem agendamento'}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell>

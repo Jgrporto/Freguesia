@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 const BASE_URL = 'https://sistema.appbarber.com.br';
 const LOGIN_URL = `${BASE_URL}/login.php`;
 const CLIENTES_URL = `${BASE_URL}/pages/cadastros/buscaClientes_v4.php`;
-const PRONTUARIO_URL = `${BASE_URL}/pages/cadastros/buscaAgendamentoProntuariov2.php`;
+const AGENDAMENTOS_URL = `${BASE_URL}/pages/relatorios/buscaAgendamentos.php`;
 
 const CLIENT_COLUMNS = [
   'Nome',
@@ -42,6 +42,14 @@ const CLIENT_COLUMNS = [
   '',
 ];
 
+const APPOINTMENT_STATUS_MAP = [
+  { code: 1, key: 'pendentes', label: 'Pendente' },
+  { code: 2, key: 'resolvidos', label: 'Resolvido' },
+  { code: 3, key: 'cancelados', label: 'Cancelado' },
+  { code: 5, key: 'ausentes', label: 'Ausente' },
+  { code: 4, key: 'bloqueados', label: 'Bloqueado' },
+];
+
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
@@ -76,6 +84,38 @@ const resolveExecutablePath = (input) => {
 const toPositiveInteger = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const formatDateBr = (date) => {
+  const safeDate = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  const day = String(safeDate.getDate()).padStart(2, '0');
+  const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+  const year = String(safeDate.getFullYear());
+  return `${day}/${month}/${year}`;
+};
+
+const resolveAppointmentDateRange = (options = {}) => {
+  const dataFim = String(
+    options.appointmentsEndDate ||
+      options.agendamentosDataFim ||
+      process.env.APPBARBER_AGENDAMENTOS_DATA_FIM ||
+      '',
+  ).trim();
+  const dataIni = String(
+    options.appointmentsStartDate ||
+      options.agendamentosDataIni ||
+      process.env.APPBARBER_AGENDAMENTOS_DATA_INI ||
+      '',
+  ).trim();
+
+  const end = new Date();
+  const start = new Date(end);
+  start.setFullYear(start.getFullYear() - 1);
+
+  return {
+    dataIni: dataIni || formatDateBr(start),
+    dataFim: dataFim || formatDateBr(end),
+  };
 };
 
 async function login(page, username, password) {
@@ -151,6 +191,7 @@ async function fetchClients(page, length, maxPages, onProgress) {
       received: pageRows.length,
       accumulated: rows.length,
       total,
+      collection: 'clientes',
     });
 
     if (pageRows.length === 0) break;
@@ -169,12 +210,15 @@ async function fetchClients(page, length, maxPages, onProgress) {
   };
 }
 
-async function enrichClientsWithLatestProfessional(page, rows, concurrency, onProgress) {
+async function enrichClientsWithAppointmentReports(page, rows, options = {}, onProgress) {
   const safeRows = Array.isArray(rows) ? rows : [];
   if (!safeRows.length) return safeRows;
 
+  const { dataIni, dataFim } = resolveAppointmentDateRange(options);
+  const requestConcurrency = toPositiveInteger(options.agendamentosConcurrency || process.env.APPBARBER_AGENDAMENTOS_CONCURRENCY, 2);
+
   return await page.evaluate(
-    async ({ customers, targetUrl, requestConcurrency }) => {
+    async ({ customers, targetUrl, statuses, dateRange, requestConcurrency: concurrency }) => {
       const normalizeText = (value) =>
         String(value ?? '')
           .replace(/<[^>]*>/g, ' ')
@@ -188,6 +232,10 @@ async function enrichClientsWithLatestProfessional(page, rows, concurrency, onPr
           .replace(/[\u0300-\u036f]/g, '')
           .replace(/[^a-z0-9]/gi, '')
           .toLowerCase();
+
+      const normalizePhone = (value) => normalizeText(value).replace(/\D/g, '');
+
+      const normalizeName = (value) => normalizeKey(value);
 
       const parseDate = (value) => {
         const raw = normalizeText(value);
@@ -227,12 +275,12 @@ async function enrichClientsWithLatestProfessional(page, rows, concurrency, onPr
         if (Array.isArray(payload)) return payload;
         if (!payload || typeof payload !== 'object') return [];
 
-        for (const key of ['data', 'rows', 'items', 'results', 'agendamentos', 'prontuario']) {
+        for (const key of ['data', 'aaData', 'rows', 'items', 'results', 'agendamentos', 'appointments']) {
           if (Array.isArray(payload[key])) return payload[key];
         }
 
         if (payload.data && typeof payload.data === 'object') {
-          for (const key of ['data', 'rows', 'items', 'results', 'agendamentos', 'prontuario']) {
+          for (const key of ['data', 'aaData', 'rows', 'items', 'results', 'agendamentos', 'appointments']) {
             if (Array.isArray(payload.data[key])) return payload.data[key];
           }
         }
@@ -268,9 +316,13 @@ async function enrichClientsWithLatestProfessional(page, rows, concurrency, onPr
         }
       };
 
-      const fieldValueByMeaning = (record, expectedFragments) => {
-        for (const [key, value] of Object.entries(record || {})) {
+      const fieldValueByMeaning = (record, expectedFragments, options = {}) => {
+        const deniedFragments = Array.isArray(options.deniedFragments) ? options.deniedFragments : [];
+        const entries = Object.entries(record || {});
+
+        for (const [key, value] of entries) {
           const normalizedKey = normalizeKey(key);
+          if (deniedFragments.some((fragment) => normalizedKey.includes(fragment))) continue;
           if (expectedFragments.some((fragment) => normalizedKey.includes(fragment))) {
             const normalizedValue = normalizeText(value);
             if (normalizedValue) return normalizedValue;
@@ -279,51 +331,100 @@ async function enrichClientsWithLatestProfessional(page, rows, concurrency, onPr
         return '';
       };
 
-      const extractProfessional = (record) =>
-        fieldValueByMeaning(record, ['profissional', 'colaborador', 'funcionario', 'barbeiro', 'prestador']);
-
-      const extractDateValue = (record) =>
-        fieldValueByMeaning(record, ['datahora', 'dataagendamento', 'agendamento', 'agedata', 'data', 'inicio', 'hora']);
-
-      const resolveLatestAppointment = (records) => {
-        const enriched = records
-          .map((record, index) => {
-            const dateValue = extractDateValue(record);
-            const date = parseDate(dateValue);
-            return {
-              record,
-              index,
-              dateValue,
-              dateTime: date ? date.getTime() : null,
-              professional: extractProfessional(record),
-            };
-          })
-          .filter((item) => item.professional || item.dateValue);
-
-        if (!enriched.length) return null;
-
-        enriched.sort((a, b) => {
-          if (a.dateTime !== null && b.dateTime !== null) return b.dateTime - a.dateTime;
-          if (a.dateTime !== null) return -1;
-          if (b.dateTime !== null) return 1;
-          return a.index - b.index;
-        });
-
-        return enriched[0];
+      const firstByKeys = (record, keys) => {
+        for (const wanted of keys.map(normalizeKey)) {
+          for (const [key, value] of Object.entries(record || {})) {
+            if (normalizeKey(key) === wanted) {
+              const normalizedValue = normalizeText(value);
+              if (normalizedValue) return normalizedValue;
+            }
+          }
+        }
+        return '';
       };
 
-      const fetchLatestForCustomer = async (customer) => {
-        const customerCode = normalizeText(customer?.Codigo || customer?.UsuCodigo || customer?.sync_key || '');
-        if (!customerCode) return customer;
+      const extractAppointmentDateValue = (record) =>
+        firstByKeys(record, ['DataHora', 'DataAgendamento', 'AgeDataHora', 'AgeData', 'Data', 'DtAgenda', 'Data Agenda']) ||
+        fieldValueByMeaning(record, ['datahora', 'dataagendamento', 'agedatahora', 'agedata', 'dtagenda', 'agenda'], {
+          deniedFragments: ['cadastro', 'nascimento', 'lgpd'],
+        }) ||
+        fieldValueByMeaning(record, ['data'], { deniedFragments: ['cadastro', 'nascimento', 'lgpd'] });
 
+      const extractProfessional = (record) =>
+        firstByKeys(record, ['Profissional', 'AgeProfissional', 'NomeProfissional', 'ProNome', 'Barbeiro']) ||
+        fieldValueByMeaning(record, ['profissional', 'colaborador', 'funcionario', 'barbeiro', 'prestador']);
+
+      const extractService = (record) =>
+        firstByKeys(record, ['Servico', 'Serviço', 'AgeServico', 'SerNome', 'NomeServico']) ||
+        fieldValueByMeaning(record, ['servico', 'servio', 'procedimento', 'corte']);
+
+      const extractCustomerCode = (record) =>
+        firstByKeys(record, ['PesCodigoCliente', 'PesCodigo', 'CliCodigo', 'ClienteCodigo', 'CodCliente', 'CodigoCliente']) ||
+        fieldValueByMeaning(record, ['pescodigocliente', 'codigocliente', 'clientecodigo', 'clicodigo', 'codcliente', 'idcliente']);
+
+      const extractCustomerName = (record) =>
+        firstByKeys(record, ['Cliente', 'NomeCliente', 'CliNome', 'PesNome', 'Nome']) ||
+        fieldValueByMeaning(record, ['nomecliente', 'clinome', 'pesnome']) ||
+        fieldValueByMeaning(record, ['cliente'], { deniedFragments: ['codigo', 'id'] });
+
+      const extractCustomerPhone = (record) =>
+        firstByKeys(record, ['Celular', 'Telefone', 'Whatsapp', 'WhatsApp', 'CliCelular', 'PesCelular']) ||
+        fieldValueByMeaning(record, ['celular', 'telefone', 'whatsapp', 'fone']);
+
+      const phoneLookupKeys = (value) => {
+        const digits = normalizePhone(value);
+        if (!digits) return [];
+        const keys = new Set([digits]);
+        if (digits.startsWith('55') && digits.length > 11) keys.add(digits.slice(2));
+        if (digits.length >= 11) keys.add(digits.slice(-11));
+        if (digits.length >= 10) keys.add(digits.slice(-10));
+        return Array.from(keys).filter(Boolean);
+      };
+
+      const addToLookup = (map, key, customerIndex) => {
+        const normalized = String(key || '').trim();
+        if (!normalized) return;
+        if (!map.has(normalized)) map.set(normalized, []);
+        map.get(normalized).push(customerIndex);
+      };
+
+      const customerByCode = new Map();
+      const customerByPhone = new Map();
+      const customerByName = new Map();
+
+      customers.forEach((customer, index) => {
+        addToLookup(customerByCode, normalizeText(customer?.Codigo), index);
+        addToLookup(customerByCode, normalizeText(customer?.UsuCodigo), index);
+        addToLookup(customerByCode, normalizeText(customer?.sync_key), index);
+
+        phoneLookupKeys(customer?.Celular).forEach((key) => addToLookup(customerByPhone, key, index));
+        phoneLookupKeys(customer?.Telefone).forEach((key) => addToLookup(customerByPhone, key, index));
+        phoneLookupKeys(customer?.whatsapp).forEach((key) => addToLookup(customerByPhone, key, index));
+
+        addToLookup(customerByName, normalizeName(customer?.Nome), index);
+      });
+
+      const findCustomerIndex = (record) => {
+        const code = normalizeText(extractCustomerCode(record));
+        if (code && customerByCode.has(code)) return customerByCode.get(code)[0];
+
+        for (const phoneKey of phoneLookupKeys(extractCustomerPhone(record))) {
+          if (customerByPhone.has(phoneKey)) return customerByPhone.get(phoneKey)[0];
+        }
+
+        const name = normalizeName(extractCustomerName(record));
+        if (name && customerByName.has(name)) return customerByName.get(name)[0];
+
+        return -1;
+      };
+
+      const fetchReportForStatus = async (status) => {
         const body = new URLSearchParams({
-          pescodigocliente: customerCode,
-          tipo: '1',
-          agecodigo: '',
-          dataini: '',
-          datafim: '',
-          pescodigoprofissional: '',
-          sercodigo: '',
+          edtDataIni: dateRange.dataIni,
+          edtDataFim: dateRange.dataFim,
+          tipoStatus: String(status.code),
+          AgeProfissional: '',
+          AgeServico: '',
         });
 
         const response = await fetch(targetUrl, {
@@ -339,56 +440,154 @@ async function enrichClientsWithLatestProfessional(page, rows, concurrency, onPr
 
         const text = await response.text();
         if (!response.ok) {
-          return {
-            ...customer,
-            ProntuarioErro: `HTTP ${response.status}`,
-          };
+          throw new Error(`Relatorio ${status.label} retornou HTTP ${response.status}: ${text.slice(0, 300)}`);
         }
 
-        const records = parseRecords(text);
-        const latest = resolveLatestAppointment(records);
+        return parseRecords(text).map((record, index) => {
+          const dateValue = extractAppointmentDateValue(record);
+          const parsedDate = parseDate(dateValue);
+          return {
+            record,
+            sourceIndex: index,
+            statusCode: status.code,
+            statusKey: status.key,
+            statusLabel: status.label,
+            dateValue,
+            dateTime: parsedDate ? parsedDate.getTime() : null,
+            professional: extractProfessional(record),
+            service: extractService(record),
+            customerCode: extractCustomerCode(record),
+            customerName: extractCustomerName(record),
+            customerPhone: extractCustomerPhone(record),
+          };
+        });
+      };
+
+      const reports = [];
+      let cursor = 0;
+      const workers = Array.from({ length: Math.max(1, Math.min(Number(concurrency) || 1, statuses.length)) }, async () => {
+        while (cursor < statuses.length) {
+          const index = cursor;
+          cursor += 1;
+          const status = statuses[index];
+          const items = await fetchReportForStatus(status);
+          reports[index] = { status, items };
+        }
+      });
+      await Promise.all(workers);
+
+      const appointmentsByCustomerIndex = new Map();
+      const totalsByStatus = statuses.reduce((acc, status) => ({ ...acc, [status.key]: 0 }), {});
+      let unmatched = 0;
+
+      reports.forEach((report) => {
+        const items = Array.isArray(report?.items) ? report.items : [];
+        totalsByStatus[report.status.key] = items.length;
+
+        items.forEach((appointment) => {
+          const customerIndex = findCustomerIndex(appointment.record);
+          if (customerIndex < 0) {
+            unmatched += 1;
+            return;
+          }
+          if (!appointmentsByCustomerIndex.has(customerIndex)) appointmentsByCustomerIndex.set(customerIndex, []);
+          appointmentsByCustomerIndex.get(customerIndex).push(appointment);
+        });
+      });
+
+      const sortLatestFirst = (a, b) => {
+        if (a.dateTime !== null && b.dateTime !== null) return b.dateTime - a.dateTime;
+        if (a.dateTime !== null) return -1;
+        if (b.dateTime !== null) return 1;
+        return a.sourceIndex - b.sourceIndex;
+      };
+
+      const sortNextFirst = (a, b) => {
+        if (a.dateTime !== null && b.dateTime !== null) return a.dateTime - b.dateTime;
+        if (a.dateTime !== null) return -1;
+        if (b.dateTime !== null) return 1;
+        return a.sourceIndex - b.sourceIndex;
+      };
+
+      const now = Date.now();
+      const pickNextPending = (items) => {
+        const withDate = items.filter((item) => item.dateTime !== null).sort(sortNextFirst);
+        return withDate.find((item) => item.dateTime >= now) || withDate[0] || items[0] || null;
+      };
+
+      const enrichedCustomers = customers.map((customer, index) => {
+        const appointments = appointmentsByCustomerIndex.get(index) || [];
+        const pendentes = appointments.filter((item) => item.statusCode === 1);
+        const resolvidos = appointments.filter((item) => item.statusCode === 2).sort(sortLatestFirst);
+        const cancelados = appointments.filter((item) => item.statusCode === 3).sort(sortLatestFirst);
+        const ausentes = appointments.filter((item) => item.statusCode === 5).sort(sortLatestFirst);
+        const bloqueados = appointments.filter((item) => item.statusCode === 4).sort(sortLatestFirst);
+        const encerrados = [...cancelados, ...ausentes, ...bloqueados].sort(sortLatestFirst);
+        const ultimoResolvido = resolvidos[0] || null;
+        const proximoPendente = pickNextPending(pendentes);
+        const ultimoEncerrado = encerrados[0] || null;
 
         return {
           ...customer,
-          UltimoProfissional: latest?.professional || '',
-          UltimoAgendamento: latest?.dateValue || '',
-          ProntuarioTotal: records.length,
-          ProntuarioCodigoCliente: customerCode,
+          UltimoProfissional: ultimoResolvido?.professional || customer?.UltimoProfissional || '',
+          UltimoAgendamento: ultimoResolvido?.dateValue || customer?.UltimoAgendamento || '',
+          UltimoAgendamentoResolvido: ultimoResolvido?.dateValue || '',
+          UltimoServico: ultimoResolvido?.service || '',
+          ProximoAgendamento: proximoPendente?.dateValue || '',
+          AgendamentoPendente: pendentes.length > 0 ? 'Sim' : 'Nao',
+          AgendamentoPendenteData: proximoPendente?.dateValue || '',
+          AgendamentoPendenteProfissional: proximoPendente?.professional || '',
+          AgendamentoPendenteServico: proximoPendente?.service || '',
+          AgendamentoPendenteTotal: pendentes.length,
+          AgendamentosResolvidosTotal: resolvidos.length,
+          AgendamentosCanceladosTotal: cancelados.length,
+          AgendamentosAusentesTotal: ausentes.length,
+          AgendamentosBloqueadosTotal: bloqueados.length,
+          AgendamentosEncerradosTotal: encerrados.length,
+          UltimoAgendamentoCancelado: cancelados[0]?.dateValue || '',
+          UltimoAgendamentoAusente: ausentes[0]?.dateValue || '',
+          UltimoAgendamentoBloqueado: bloqueados[0]?.dateValue || '',
+          UltimoAgendamentoEncerrado: ultimoEncerrado?.dateValue || '',
+          UltimoAgendamentoEncerradoStatus: ultimoEncerrado?.statusLabel || '',
+          AppBarberAgendamentosTotal: appointments.length,
+          AppBarberAgendamentosPeriodo: `${dateRange.dataIni} - ${dateRange.dataFim}`,
+          AppBarberAgendamentosSyncEm: new Date().toISOString(),
         };
+      });
+
+      const matchedAppointments = Array.from(appointmentsByCustomerIndex.values()).reduce((sum, items) => sum + items.length, 0);
+      return {
+        rows: enrichedCustomers,
+        summary: {
+          periodo: `${dateRange.dataIni} - ${dateRange.dataFim}`,
+          pendentes: totalsByStatus.pendentes || 0,
+          resolvidos: totalsByStatus.resolvidos || 0,
+          cancelados: totalsByStatus.cancelados || 0,
+          ausentes: totalsByStatus.ausentes || 0,
+          bloqueados: totalsByStatus.bloqueados || 0,
+          encerrados: (totalsByStatus.cancelados || 0) + (totalsByStatus.ausentes || 0) + (totalsByStatus.bloqueados || 0),
+          total: Object.values(totalsByStatus).reduce((sum, value) => sum + Number(value || 0), 0),
+          vinculados: matchedAppointments,
+          naoVinculados: unmatched,
+          clientesComAgendamento: appointmentsByCustomerIndex.size,
+        },
       };
-
-      const results = new Array(customers.length);
-      let cursor = 0;
-
-      const worker = async () => {
-        while (cursor < customers.length) {
-          const index = cursor;
-          cursor += 1;
-          results[index] = await fetchLatestForCustomer(customers[index]);
-        }
-      };
-
-      const workers = Array.from(
-        { length: Math.max(1, Math.min(Number(requestConcurrency) || 1, customers.length)) },
-        () => worker(),
-      );
-
-      await Promise.all(workers);
-      return results;
     },
     {
       customers: safeRows,
-      targetUrl: PRONTUARIO_URL,
-      requestConcurrency: concurrency,
+      targetUrl: AGENDAMENTOS_URL,
+      statuses: APPOINTMENT_STATUS_MAP,
+      dateRange: { dataIni, dataFim },
+      requestConcurrency,
     },
   ).then((result) => {
-    const withProfessional = result.filter((row) => String(row?.UltimoProfissional || '').trim()).length;
     onProgress?.({
-      page: 'prontuario',
-      received: withProfessional,
-      accumulated: result.length,
-      total: result.length,
-      collection: 'prontuario',
+      page: 'agendamentos',
+      received: result.summary?.total || 0,
+      accumulated: result.summary?.vinculados || 0,
+      total: result.summary?.total || 0,
+      collection: 'agendamentos',
+      summary: result.summary,
     });
     return result;
   });
@@ -406,9 +605,14 @@ export async function fetchAllCustomersFromAppBarber(options = {}) {
   const maxPages = Number.parseInt(String(options.maxPages || process.env.APPBARBER_SYNC_MAX_PAGES || '0'), 10) || undefined;
   const headless = String(options.showBrowser || process.env.APPBARBER_SHOW_BROWSER || '').toLowerCase() !== 'true';
   const executablePath = resolveExecutablePath(options.chromePath);
-  const fetchProntuario =
-    String(options.fetchProntuario ?? process.env.APPBARBER_FETCH_PRONTUARIO ?? 'true').toLowerCase() !== 'false';
-  const prontuarioConcurrency = toPositiveInteger(options.prontuarioConcurrency || process.env.APPBARBER_PRONTUARIO_CONCURRENCY, 4);
+  const fetchAppointments =
+    String(
+      options.fetchAppointments ??
+        options.fetchAgendamentos ??
+        process.env.APPBARBER_FETCH_AGENDAMENTOS ??
+        process.env.APPBARBER_FETCH_APPOINTMENTS ??
+        'true',
+    ).toLowerCase() !== 'false';
 
   const browser = await chromium.launch({
     executablePath,
@@ -420,15 +624,16 @@ export async function fetchAllCustomersFromAppBarber(options = {}) {
     const page = await browser.newPage({ userAgent: DEFAULT_USER_AGENT });
     await login(page, username, password);
     const result = await fetchClients(page, Number.isFinite(length) && length > 0 ? length : 1000, maxPages, options.onProgress);
-    if (!fetchProntuario) return result;
+    if (!fetchAppointments) return { ...result, source: 'appbarber', agendamentosFetched: false };
 
-    const rows = await enrichClientsWithLatestProfessional(page, result.rows, prontuarioConcurrency, options.onProgress);
+    const appointments = await enrichClientsWithAppointmentReports(page, result.rows, options, options.onProgress);
     return {
       ...result,
-      rows,
+      rows: appointments.rows,
       source: 'appbarber',
-      prontuarioFetched: true,
-      prontuarioWithProfessional: rows.filter((row) => String(row?.UltimoProfissional || '').trim()).length,
+      agendamentosFetched: true,
+      agendamentosSummary: appointments.summary,
+      agendamentosWithCustomer: appointments.summary?.clientesComAgendamento || 0,
     };
   } finally {
     await browser.close();

@@ -250,8 +250,17 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const matchingConversations = phoneDigits ? conversationsByPhone.get(phoneDigits) || [] : [];
     const registrationDate = parseCustomerDate(getCustomerField(customer, ['Cadastro', 'cadastro', 'created_at', 'createdAt']));
     const lastAppointmentDate = parseCustomerDate(
-      getCustomerField(customer, ['UltimoAgendamento', 'ultimoAgendamento', 'last_appointment_at', 'lastAppointmentAt']),
+      getCustomerField(customer, ['UltimoAgendamentoResolvido', 'ultimoAgendamentoResolvido', 'UltimoAgendamento', 'ultimoAgendamento', 'last_appointment_at', 'lastAppointmentAt']),
     );
+    const nextAppointmentDate = parseCustomerDate(
+      getCustomerField(customer, ['ProximoAgendamento', 'proximoAgendamento', 'AgendamentoPendenteData', 'agendamentoPendenteData']),
+    );
+    const pendingAppointmentTotal = parseInteger(
+      getCustomerField(customer, ['AgendamentoPendenteTotal', 'agendamentoPendenteTotal', 'pendingAppointmentsTotal'], ''),
+    );
+    const hasPendingAppointment = ['sim', 's', 'true', '1', 'yes', 'pendente'].includes(
+      normalizeText(getCustomerField(customer, ['AgendamentoPendente', 'agendamentoPendente', 'pendingAppointment'], '')).toLowerCase(),
+    ) || (Number.isFinite(pendingAppointmentTotal) && pendingAppointmentTotal > 0);
     const lastVisitDate =
       lastAppointmentDate ||
       parseCustomerDate(getCustomerField(customer, ['UltimaVisita', 'ultimaVisita', 'last_visit_at', 'lastVisitAt']));
@@ -298,6 +307,16 @@ export function buildCustomerRows(customers = [], conversations = []) {
       ),
       lastAppointmentDate,
       lastAppointmentLabel: formatCustomerDate(lastAppointmentDate),
+      nextAppointmentDate,
+      nextAppointmentLabel: formatCustomerDate(nextAppointmentDate),
+      hasPendingAppointment,
+      pendingAppointmentTotal: Number.isFinite(pendingAppointmentTotal) ? pendingAppointmentTotal : 0,
+      pendingAppointmentProfessional: normalizeText(
+        getCustomerField(customer, ['AgendamentoPendenteProfissional', 'agendamentoPendenteProfissional'], ''),
+        '-',
+      ),
+      pendingAppointmentService: normalizeText(getCustomerField(customer, ['AgendamentoPendenteServico', 'agendamentoPendenteServico'], ''), '-'),
+      lastResolvedService: normalizeText(getCustomerField(customer, ['UltimoServico', 'ultimoServico'], ''), '-'),
       appAccessStatus: isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
       reseller: customer?.reseller || '-',
       planName: customer?.package || '-',

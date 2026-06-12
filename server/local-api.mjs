@@ -796,6 +796,32 @@ const parseIntegerValue = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const customerHasAppBarberPendingAppointment = (customer) => {
+  if (!customer) return false;
+  const pendingFlag = String(
+    getObjectField(customer, ['AgendamentoPendente', 'agendamentoPendente', 'pendingAppointment', 'hasPendingAppointment']) || '',
+  )
+    .trim()
+    .toLowerCase();
+  const pendingTotal = parseIntegerValue(
+    getObjectField(customer, ['AgendamentoPendenteTotal', 'agendamentosPendentesTotal', 'pendingAppointmentsTotal']),
+  );
+
+  const hasPendingFlag = ['sim', 's', 'true', '1', 'yes', 'pendente'].includes(pendingFlag);
+  if (!hasPendingFlag && !(Number.isFinite(pendingTotal) && pendingTotal > 0)) return false;
+
+  const pendingDate = parseFallbackDate(
+    getObjectField(customer, ['ProximoAgendamento', 'AgendamentoPendenteData', 'proximoAgendamento', 'pendingAppointmentAt']),
+  );
+  if (!pendingDate) return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(pendingDate);
+  target.setHours(0, 0, 0, 0);
+  return target.getTime() >= today.getTime();
+};
+
 const buildPhoneLookupKeys = (value) => {
   const digits = normalizePhone(value);
   if (!digits) return [];
@@ -4452,7 +4478,9 @@ const normalizeCustomerRow = (customer, index, syncedAt) => {
   const raw = {
     ...(customer && typeof customer === 'object' ? customer : {}),
   };
-  if (hasUsefulValue(raw.UltimoAgendamento)) {
+  if (hasUsefulValue(raw.UltimoAgendamentoResolvido)) {
+    raw.UltimaVisita = raw.UltimoAgendamentoResolvido;
+  } else if (hasUsefulValue(raw.UltimoAgendamento)) {
     raw.UltimaVisita = raw.UltimoAgendamento;
   }
 
@@ -4516,7 +4544,31 @@ const buildCustomerSyncSummary = (customers) => {
 
 const appendCustomerSyncLog = (logs, entry) => [entry, ...logs].slice(0, CUSTOMER_SYNC_LOG_LIMIT);
 
-const CUSTOMER_PRONTUARIO_FIELDS = ['UltimoProfissional', 'UltimoAgendamento', 'ProntuarioTotal', 'ProntuarioCodigoCliente'];
+const CUSTOMER_APPOINTMENT_FIELDS = [
+  'UltimoProfissional',
+  'UltimoAgendamento',
+  'UltimoAgendamentoResolvido',
+  'UltimoServico',
+  'ProximoAgendamento',
+  'AgendamentoPendente',
+  'AgendamentoPendenteData',
+  'AgendamentoPendenteProfissional',
+  'AgendamentoPendenteServico',
+  'AgendamentoPendenteTotal',
+  'AgendamentosResolvidosTotal',
+  'AgendamentosCanceladosTotal',
+  'AgendamentosAusentesTotal',
+  'AgendamentosBloqueadosTotal',
+  'AgendamentosEncerradosTotal',
+  'UltimoAgendamentoCancelado',
+  'UltimoAgendamentoAusente',
+  'UltimoAgendamentoBloqueado',
+  'UltimoAgendamentoEncerrado',
+  'UltimoAgendamentoEncerradoStatus',
+  'AppBarberAgendamentosTotal',
+  'AppBarberAgendamentosPeriodo',
+  'AppBarberAgendamentosSyncEm',
+];
 
 const hasUsefulValue = (value) => value !== undefined && value !== null && String(value).trim() !== '';
 
@@ -4555,16 +4607,20 @@ const mergeCustomerRows = (existingCustomers = [], incomingCustomers = []) => {
       ...(customer.raw && typeof customer.raw === 'object' ? customer.raw : {}),
     };
 
-    CUSTOMER_PRONTUARIO_FIELDS.forEach((field) => {
-      if (!hasUsefulValue(raw[field]) && hasUsefulValue(existing.raw?.[field])) {
+    CUSTOMER_APPOINTMENT_FIELDS.forEach((field) => {
+      const incomingRawHasField = Object.prototype.hasOwnProperty.call(customer.raw || {}, field);
+      const incomingHasField = Object.prototype.hasOwnProperty.call(customer || {}, field);
+      if (!incomingRawHasField && !hasUsefulValue(raw[field]) && hasUsefulValue(existing.raw?.[field])) {
         raw[field] = existing.raw[field];
       }
-      if (!hasUsefulValue(customer[field]) && hasUsefulValue(existing[field])) {
+      if (!incomingHasField && !hasUsefulValue(customer[field]) && hasUsefulValue(existing[field])) {
         customer[field] = existing[field];
       }
     });
 
-    if (hasUsefulValue(raw.UltimoAgendamento)) {
+    if (hasUsefulValue(raw.UltimoAgendamentoResolvido)) {
+      raw.UltimaVisita = raw.UltimoAgendamentoResolvido;
+    } else if (hasUsefulValue(raw.UltimoAgendamento)) {
       raw.UltimaVisita = raw.UltimoAgendamento;
     }
 
@@ -6120,6 +6176,10 @@ const buildFollowUpForecast = async (store, routine, options = {}) => {
       ignored.belowMinimumTime += 1;
       continue;
     }
+    if (customerHasAppBarberPendingAppointment(matchedCustomer)) {
+      ignored.pendingSchedule += 1;
+      continue;
+    }
     if (
       hasPendingQuickReplyScheduleForTarget(store, {
         conversationId: conversation.id,
@@ -6798,6 +6858,19 @@ const executeRoutineNow = async (routineId, options = {}) => {
         });
         continue;
       }
+      if (customerHasAppBarberPendingAppointment(customer)) {
+        skipped += 1;
+        await persistRoutineLog({
+          routineId: id,
+          routineName: routine.name,
+          level: 'info',
+          status: 'skipped',
+          runId,
+          message: 'Envio ignorado: cliente possui agendamento pendente.',
+          details: { customerId: customer.id || null, phone, source: 'appbarber_agendamentos' },
+        });
+        continue;
+      }
       if (
         hasPendingQuickReplyScheduleForTarget(currentStore, {
           customerId: customer.id,
@@ -7420,17 +7493,17 @@ const startAppBarberManualCustomerSync = async (overrides = {}) =>
   startAppBarberCustomerSync(
     {
       ...overrides,
-      fetchProntuario: false,
+      fetchAppointments: true,
     },
     'appbarber_manual',
   );
 
-const startAppBarberDailyProntuarioSync = async () =>
+const startAppBarberDailyAppointmentSync = async () =>
   startAppBarberCustomerSync(
     {
-      fetchProntuario: true,
+      fetchAppointments: true,
     },
-    'appbarber_daily_prontuario',
+    'appbarber_daily_agendamentos',
   );
 
 const startCustomerSync = async (mode = 'manual', overrides = {}) => {
@@ -7581,7 +7654,7 @@ const scheduleNextAppBarberDailySync = () => {
   const delayMs = getNextAppBarberDailySyncDelayMs();
   appBarberDailySyncTimer = setTimeout(() => {
     appBarberDailySyncTimer = null;
-    void startAppBarberDailyProntuarioSync()
+    void startAppBarberDailyAppointmentSync()
       .catch((error) => {
         log(`Falha na rotina diaria AppBarber: ${error?.message || error}`);
       })
