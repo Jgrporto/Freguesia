@@ -199,6 +199,7 @@ import {
   normalizeTemplateMediaUrl,
   resolveTemplateMediaPublicOrigin as resolveConfiguredTemplateMediaPublicOrigin,
 } from "./template-media-url.js";
+import { transcribeAudioMessage } from "./audio-transcription-service.js";
 import {
   addContactLabelsById,
   clearContactLabelsById,
@@ -6806,6 +6807,60 @@ const setCachedMediaProxyPayload = ({ mediaId, mimeType, buffer }) => {
     mediaProxyCache.delete(cachedKey);
     mediaProxyCacheBytes = Math.max(0, mediaProxyCacheBytes - Number(cachedValue?.size || 0));
   }
+};
+
+const downloadWhatsappMediaBuffer = async (mediaId) => {
+  const normalizedMediaId = String(mediaId || "").trim();
+  if (!normalizedMediaId) {
+    throw new Error("Missing media id");
+  }
+
+  const cachedMedia = getCachedMediaProxyPayload(normalizedMediaId);
+  if (cachedMedia) {
+    return {
+      buffer: cachedMedia.buffer,
+      mimeType: cachedMedia.mimeType || "application/octet-stream",
+      fromCache: true,
+    };
+  }
+
+  const { accessToken } = await resolveMetaConfig();
+  if (!accessToken) {
+    throw new Error("Missing WhatsApp access token");
+  }
+
+  const metaResponse = await fetch(`https://graph.facebook.com/${API_VERSION}/${normalizedMediaId}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!metaResponse.ok) {
+    const text = await metaResponse.text();
+    throw new Error(`Failed to fetch media metadata: ${text}`);
+  }
+
+  const meta = await metaResponse.json();
+  const mediaUrl = meta?.url;
+  const mimeType = meta?.mime_type || meta?.mimeType || "application/octet-stream";
+  if (!mediaUrl) {
+    throw new Error("Media URL not available");
+  }
+
+  const mediaResponse = await fetch(mediaUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!mediaResponse.ok) {
+    const text = await mediaResponse.text();
+    throw new Error(`Failed to download media: ${text}`);
+  }
+
+  const buffer = Buffer.from(await mediaResponse.arrayBuffer());
+  setCachedMediaProxyPayload({ mediaId: normalizedMediaId, mimeType, buffer });
+  return { buffer, mimeType, fromCache: false };
 };
 
 const pruneStatusEventCache = () => {
@@ -40671,6 +40726,92 @@ const server = http.createServer(async (req, res) => {
 
 
 
+
+  if (req.method === "POST" && /^\/api\/whatsapp\/messages\/[^/]+\/transcribe$/.test(url.pathname)) {
+    setCors(res);
+    try {
+      const messageId = decodeURIComponent(url.pathname.split("/")[4] || "");
+      if (!messageId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing message id" }));
+        return;
+      }
+
+      const result = await transcribeAudioMessage({
+        messageId,
+        readStore,
+        writeStore,
+        downloadMediaBuffer: downloadWhatsappMediaBuffer,
+      });
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      const status = Number(error?.statusCode || error?.status || 500);
+      res.writeHead(status >= 400 && status < 600 ? status : 500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: error?.message || "Audio transcription error" }));
+    }
+    return;
+  }
+
+  if (req.method === "GET" && /^\/api\/whatsapp\/messages\/[^/]+\/transcription$/.test(url.pathname)) {
+    setCors(res);
+    try {
+      const messageId = decodeURIComponent(url.pathname.split("/")[4] || "");
+      if (!messageId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Missing message id" }));
+        return;
+      }
+
+      const store = await readStore({ mutable: false });
+      let found = null;
+      for (const [conversationId, messages] of Object.entries(store?.messages || {})) {
+        if (!Array.isArray(messages)) continue;
+        const message = messages.find((item) =>
+          [
+            item?.id,
+            item?.provider_message_id,
+            item?.providerMessageId,
+            item?.server_message_id,
+            item?.serverMessageId,
+            item?.client_message_id,
+            item?.clientMessageId,
+            item?.wamid,
+            item?.messageId,
+            item?.message_id,
+            item?.temp_id,
+            item?.raw?.id,
+          ]
+            .map((value) => String(value || "").trim())
+            .includes(String(messageId || "").trim()),
+        );
+        if (message) {
+          found = { conversationId, message };
+          break;
+        }
+      }
+
+      if (!found) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Message not found" }));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        ok: true,
+        messageId: found.message.id || messageId,
+        conversationId: found.conversationId,
+        transcription: found.message.transcription || { status: "idle", text: "" },
+      }));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: error?.message || "Audio transcription status error" }));
+    }
+    return;
+  }
+
     if (req.method === "GET" && url.pathname === "/api/whatsapp/media") {
     setCors(res);
     try {
@@ -53234,7 +53375,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
 
 
 

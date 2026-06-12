@@ -23,6 +23,7 @@ import { getAttachmentDisplayLabel, resolveAttachmentKind } from '@/lib/whatsapp
 import { cn } from '@/lib/utils';
 import ContactAvatar from './ContactAvatar';
 import AudioMessagePlayer from './AudioMessagePlayer';
+import AudioTranscriptionPanel from './AudioTranscriptionPanel';
 
 const QUICK_REACTIONS = [
   '\uD83D\uDC4D',
@@ -266,7 +267,7 @@ function BrokenAttachment({ attachment, type }) {
   );
 }
 
-function AttachmentPreview({ attachment, mediaItem, onOpenMedia }) {
+function AttachmentPreview({ attachment, mediaItem, message, onOpenMedia, onTranscribeAudio, isAudioTranscribing }) {
   const [failed, setFailed] = useState(false);
   const attachmentType = useMemo(() => resolveAttachmentType(attachment), [attachment]);
   const isSticker = resolveAttachmentKind(attachment) === 'sticker' || String(attachment?.name || '').trim().toLowerCase() === 'sticker';
@@ -359,6 +360,12 @@ function AttachmentPreview({ attachment, mediaItem, onOpenMedia }) {
           avatarSrc={mediaItem?.avatarUrl || ''}
           avatarName={mediaItem?.senderName || 'Contato'}
           onError={() => setFailed(true)}
+        />
+        <AudioTranscriptionPanel
+          transcription={message?.transcription}
+          isTranscribing={isAudioTranscribing}
+          isAgent={message?.sender_type === 'agent'}
+          onTranscribe={() => onTranscribeAudio?.(message)}
         />
       </div>
     );
@@ -595,6 +602,8 @@ export default function ChatMessage({
   onInfo,
   onOpenMedia,
   onStartConversation,
+  onTranscribeAudio,
+  transcribingAudioMessageId,
 }) {
   const [failedReactionFallback, setFailedReactionFallback] = useState('');
   const [isHovered, setIsHovered] = useState(false);
@@ -1080,7 +1089,24 @@ export default function ChatMessage({
                       avatarUrl: message.sender_type === 'client' ? contactAvatarUrl || '' : '',
                       onStartConversation,
                     }}
+                    message={message}
                     onOpenMedia={onOpenMedia}
+                    onTranscribeAudio={onTranscribeAudio}
+                    isAudioTranscribing={[
+                      message.id,
+                      message.provider_message_id,
+                      message.providerMessageId,
+                      message.server_message_id,
+                      message.serverMessageId,
+                      message.client_message_id,
+                      message.clientMessageId,
+                      message.wamid,
+                      message.messageId,
+                      message.message_id,
+                      message.message_key,
+                      message.temp_id,
+                      message.raw?.id,
+                    ].map((value) => String(value || '').trim()).includes(String(transcribingAudioMessageId || '').trim())}
                   />
                 ))}
               </div>

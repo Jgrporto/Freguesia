@@ -41,6 +41,7 @@ import {
   sendWhatsappTemplateMessage,
   sendWhatsappTextMessage,
   sendWhatsappVideoMessage,
+  transcribeWhatsappAudioMessage,
 } from '@/lib/whatsapp-api';
 import { getQuickReplyActions, incrementQuickReplyUsage } from '@/lib/quick-replies';
 import {
@@ -323,7 +324,9 @@ function normalizeTemplateItem(item) {
     headerType: String(item?.headerType || 'none').trim().toLowerCase(),
     headerFormat: String(item?.headerFormat || '').trim().toUpperCase(),
     bodyVariables: Array.isArray(item?.bodyVariables) ? item.bodyVariables : [],
+    headerVariables: Array.isArray(item?.headerVariables) ? item.headerVariables : [],
     buttonParameters: Array.isArray(item?.buttonVariables) ? item.buttonVariables : [],
+    buttonVariables: Array.isArray(item?.buttonVariables) ? item.buttonVariables : [],
     buttons: Array.isArray(item?.buttons) ? item.buttons : Array.isArray(item?.buttonConfig) ? item.buttonConfig : [],
     serviceId: String(item?.serviceId || item?.service_id || '').trim(),
     headerMediaUrl: String(item?.headerMediaUrl || item?.headerExample || '').trim(),
@@ -610,15 +613,45 @@ function resolveIncomingMessageIdentifier(message) {
       message?.provider_message_id ||
       message?.providerMessageId ||
       message?.server_message_id ||
+      message?.serverMessageId ||
+      message?.wamid ||
+      message?.messageId ||
+      message?.message_id ||
       message?.id ||
       message?.message_key ||
       message?.temp_id ||
+      message?.raw?.id ||
       ''
   ).trim();
 }
 
 function resolveServerMessageIdentifier(message) {
-  return String(message?.server_message_id || '').trim();
+  return String(message?.server_message_id || message?.serverMessageId || '').trim();
+}
+
+function getMessageIdentifierCandidates(message = {}) {
+  return [
+    message?.id,
+    message?.provider_message_id,
+    message?.providerMessageId,
+    message?.server_message_id,
+    message?.serverMessageId,
+    message?.client_message_id,
+    message?.clientMessageId,
+    message?.wamid,
+    message?.messageId,
+    message?.message_id,
+    message?.message_key,
+    message?.temp_id,
+    message?.raw?.id,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+}
+
+function messageMatchesIdentifier(message, messageId) {
+  const target = String(messageId || '').trim();
+  return Boolean(target && getMessageIdentifierCandidates(message).includes(target));
 }
 
 function resolvePreferredSenderName(currentMessage, incomingMessage) {
@@ -843,6 +876,7 @@ export default function ChatWindow({
   const [replyTo, setReplyTo] = useState(null);
   const [searchMode, setSearchMode] = useState(false);
   const [msgSearch, setMsgSearch] = useState('');
+  const [transcribingAudioMessageId, setTranscribingAudioMessageId] = useState('');
   const [draftValue, setDraftValue] = useState('');
   const [messages, setMessages] = useState([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -1246,7 +1280,7 @@ export default function ChatWindow({
   const updateMessage = (messageId, updater) => {
     setMessages((currentMessages) =>
       currentMessages.map((message) => {
-        if (message.id !== messageId && message.temp_id !== messageId) return message;
+        if (!messageMatchesIdentifier(message, messageId)) return message;
         return typeof updater === 'function' ? updater(message) : { ...message, ...updater };
       })
     );
@@ -1864,6 +1898,7 @@ export default function ChatWindow({
           headerParameters,
           headerFormat: template.headerFormat || '',
           previewText,
+          templateButtons,
           agentName: currentUserName,
           routeSelector: defaultHsmRouteSelector,
         });
@@ -2320,6 +2355,54 @@ export default function ChatWindow({
     toast.message(`Mensagem ${message?.status || 'sem status'} enviada às ${createdAt}.`);
   };
 
+  const handleTranscribeAudio = async (message) => {
+    const messageId = getMessageIdentifierCandidates(message)[0] || '';
+    if (!messageId) {
+      toast.error('Não foi possível identificar esta mensagem de áudio.');
+      return;
+    }
+
+    setTranscribingAudioMessageId(messageId);
+    updateMessage(message.id || messageId, (currentMessage) => ({
+      ...currentMessage,
+      transcription: {
+        ...(currentMessage.transcription || {}),
+        status: 'processing',
+        text: currentMessage.transcription?.text || '',
+        error: '',
+      },
+    }));
+
+    try {
+      const result = await transcribeWhatsappAudioMessage(messageId);
+      const nextMessage = result?.message;
+      const transcription = result?.transcription || nextMessage?.transcription || null;
+
+      updateMessage(message.id || messageId, (currentMessage) => ({
+        ...currentMessage,
+        ...(nextMessage || {}),
+        transcription: transcription || currentMessage.transcription,
+      }));
+
+      if (transcription?.status === 'done') {
+        toast.success('Áudio transcrito.');
+      }
+    } catch (error) {
+      updateMessage(message.id || messageId, (currentMessage) => ({
+        ...currentMessage,
+        transcription: {
+          ...(currentMessage.transcription || {}),
+          status: 'error',
+          text: '',
+          error: error?.message || 'Não foi possível transcrever o áudio.',
+        },
+      }));
+      toast.error(error?.message || 'Não foi possível transcrever o áudio.');
+    } finally {
+      setTranscribingAudioMessageId('');
+    }
+  };
+
   useEffect(() => {
     if (!searchMode && stickToBottomRef.current && !isLoadingOlder) {
       messagesEndRef.current?.scrollIntoView({
@@ -2566,6 +2649,8 @@ export default function ChatWindow({
                     setIsLightboxOpen(true);
                   }}
                   onStartConversation={(phone) => onOpenStartConversation?.(phone)}
+                  onTranscribeAudio={handleTranscribeAudio}
+                  transcribingAudioMessageId={transcribingAudioMessageId}
                 />
               );
             })

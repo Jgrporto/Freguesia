@@ -52,6 +52,18 @@ APPBARBER_DAILY_SYNC_ENABLED=true
 APPBARBER_DAILY_SYNC_TIME=00:00
 ```
 
+As variaveis `WHISPER_*` controlam a transcricao local de audios recebidos no chat. Na VPS, instale `ffmpeg`, `python3-venv` e `python3-pip`, crie a venv indicada e habilite no `.env`.
+
+```env
+WHISPER_ENABLED=true
+WHISPER_MODEL=base
+WHISPER_LANGUAGE=pt
+WHISPER_PYTHON_BIN=/opt/freguesia-whisper-venv/bin/python
+WHISPER_TMP_DIR=server/data/whisper-tmp
+WHISPER_MAX_AUDIO_MB=25
+WHISPER_TIMEOUT_MS=180000
+```
+
 ## Login local
 
 - Rota: `/login`

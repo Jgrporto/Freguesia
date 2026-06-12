@@ -966,6 +966,7 @@ export const sendWhatsappTemplateMessage = async ({
   headerType = '',
   headerMediaUrl = '',
   previewText = '',
+  templateButtons = [],
   replyTo,
   agentName,
   origin,
@@ -987,10 +988,37 @@ export const sendWhatsappTemplateMessage = async ({
       headerType,
       headerMediaUrl,
       previewText,
+      templateButtons,
       replyTo: replyTo || null,
       agentName: agentName || null,
       origin: origin || 'panel',
     }, routeSelector)),
+  });
+};
+
+
+export const transcribeWhatsappAudioMessage = async (messageId) => {
+  const safeMessageId = String(messageId || '').trim();
+  if (!safeMessageId) {
+    throw new Error('Mensagem de áudio inválida.');
+  }
+
+  return await requestWhatsappJson(`/api/whatsapp/messages/${encodeURIComponent(safeMessageId)}/transcribe`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+};
+
+export const getWhatsappAudioTranscription = async (messageId) => {
+  const safeMessageId = String(messageId || '').trim();
+  if (!safeMessageId) {
+    throw new Error('Mensagem de áudio inválida.');
+  }
+
+  return await requestWhatsappJson(`/api/whatsapp/messages/${encodeURIComponent(safeMessageId)}/transcription`, {
+    method: 'GET',
   });
 };
 
