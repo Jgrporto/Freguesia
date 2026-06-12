@@ -1092,21 +1092,29 @@ export default function ChatMessage({
                     message={message}
                     onOpenMedia={onOpenMedia}
                     onTranscribeAudio={onTranscribeAudio}
-                    isAudioTranscribing={[
-                      message.id,
-                      message.provider_message_id,
-                      message.providerMessageId,
-                      message.server_message_id,
-                      message.serverMessageId,
-                      message.client_message_id,
-                      message.clientMessageId,
-                      message.wamid,
-                      message.messageId,
-                      message.message_id,
-                      message.message_key,
-                      message.temp_id,
-                      message.raw?.id,
-                    ].map((value) => String(value || '').trim()).includes(String(transcribingAudioMessageId || '').trim())}
+                    isAudioTranscribing={(() => {
+                      const activeTranscriptionId = String(transcribingAudioMessageId || '').trim();
+                      if (!activeTranscriptionId) return false;
+
+                      return [
+                        message.id,
+                        message.provider_message_id,
+                        message.providerMessageId,
+                        message.server_message_id,
+                        message.serverMessageId,
+                        message.client_message_id,
+                        message.clientMessageId,
+                        message.wamid,
+                        message.messageId,
+                        message.message_id,
+                        message.message_key,
+                        message.temp_id,
+                        message.raw?.id,
+                      ]
+                        .map((value) => String(value || '').trim())
+                        .filter(Boolean)
+                        .includes(activeTranscriptionId);
+                    })()}
                   />
                 ))}
               </div>
