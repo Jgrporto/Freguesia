@@ -25756,18 +25756,6 @@ const upsertIncomingMessage = async ({
   });
 
   try {
-    await executeMatchingFlowForSupportMessage({
-      waId,
-      content,
-      messageId,
-      conversationId: result?.conversationId || null,
-      conversation: result?.conversation || null,
-    });
-  } catch (error) {
-    console.error("[flow] support execution failed:", error?.message || error);
-  }
-
-  try {
     await processLocalChatbotIncomingMessage({
       waId,
       content,
@@ -25778,6 +25766,18 @@ const upsertIncomingMessage = async ({
     });
   } catch (error) {
     console.error("[chatbot] local incoming processing failed:", error?.message || error);
+  }
+
+  try {
+    await executeMatchingFlowForSupportMessage({
+      waId,
+      content,
+      messageId,
+      conversationId: result?.conversationId || null,
+      conversation: result?.conversation || null,
+    });
+  } catch (error) {
+    console.error("[flow] support execution failed:", error?.message || error);
   }
 
   return result;
