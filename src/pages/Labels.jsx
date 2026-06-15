@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft,
   BadgePlus,
@@ -22,7 +22,12 @@ import PageSectionCard from '@/components/layout/PageSectionCard';
 import PageShell from '@/components/layout/PageShell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/lib/AuthContext';
+import { CHATBOT_VARIABLES } from '@/lib/chatbot-flows-api';
 import { fetchPersistedCustomers } from '@/lib/customer-sync-api';
 import { buildCustomerRows } from '@/lib/customer-base';
 import {
@@ -31,6 +36,8 @@ import {
   deleteCustomLabel,
   enrichConversationsWithLabels,
   LABEL_REFRESH_INTERVAL_MS,
+  getLabelGreetingConfig,
+  saveLabelGreeting,
   saveConversationStageLabel,
   saveCustomLabel,
   useLabelCatalog,
@@ -45,6 +52,12 @@ const VIEW_MODES = [
 ];
 const CUSTOMER_CACHE_REFRESH_INTERVAL_MS = 60000;
 const SERVICES_REFRESH_INTERVAL_MS = 30000;
+const GREETING_VARIABLES = [
+  { key: '{#nome}', label: 'Nome' },
+  { key: '{#telefone}', label: 'Telefone' },
+  { key: '{#atendente}', label: 'Atendente' },
+  ...CHATBOT_VARIABLES,
+];
 
 function getSampleContacts(conversations, labelId) {
   return conversations
@@ -58,7 +71,10 @@ export default function Labels() {
   const [selectedLabelId, setSelectedLabelId] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingLabel, setEditingLabel] = useState(null);
-  const { customLabels, assignments, stageAssignments } = useLabelCatalog();
+  const [greetingLabel, setGreetingLabel] = useState(null);
+  const [greetingDraft, setGreetingDraft] = useState({ enabled: true, message: '' });
+  const { customLabels, assignments, stageAssignments, greetings } = useLabelCatalog();
+  const queryClient = useQueryClient();
 
   const { data: conversationsResponse = [], isLoading: isLoadingConversations } = useQuery({
     queryKey: ['conversations', 'labels'],
@@ -147,6 +163,44 @@ export default function Labels() {
       toast.error(error?.message || 'Nao foi possivel mover a conversa entre etiquetas.');
     }
   }, [customLabels]);
+
+  const openGreetingSettings = useCallback((label) => {
+    const config = getLabelGreetingConfig(label.id, greetings);
+    setGreetingLabel(label);
+    setGreetingDraft({
+      enabled: Boolean(config.enabled),
+      message: String(config.message || ''),
+    });
+  }, [greetings]);
+
+  const greetingMutation = useMutation({
+    mutationFn: ({ labelId, config }) => saveLabelGreeting(labelId, config),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['labels', 'catalog'] });
+      toast.success('Saudacao da etiqueta atualizada.');
+      setGreetingLabel(null);
+    },
+    onError: (error) => toast.error(error?.message || 'Nao foi possivel salvar a saudacao.'),
+  });
+
+  const insertGreetingVariable = useCallback((variableKey) => {
+    setGreetingDraft((current) => ({
+      ...current,
+      message: `${current.message || ''}${variableKey}`,
+    }));
+  }, []);
+
+  const saveGreetingSettings = useCallback(() => {
+    if (!greetingLabel?.id) return;
+    greetingMutation.mutate({
+      labelId: greetingLabel.id,
+      config: {
+        enabled: Boolean(greetingDraft.enabled),
+        message: String(greetingDraft.message || '').trim(),
+        repeatMode: 'once_per_day',
+      },
+    });
+  }, [greetingDraft.enabled, greetingDraft.message, greetingLabel, greetingMutation]);
 
   const openLabelDetails = useCallback((labelId) => {
     setSelectedLabelId(labelId);
@@ -320,7 +374,7 @@ export default function Labels() {
                                 setEditingLabel(label);
                                 return;
                               }
-                              showFutureAction('As etiquetas de sistema continuam controladas pela regra automatica. A saudacao fica na tela de Chatbot.');
+                              openGreetingSettings(label);
                             }}
                             title={label.kind === 'custom' ? 'Editar etiqueta' : 'Etiqueta automática do sistema'}
                           >
@@ -435,6 +489,74 @@ export default function Labels() {
           onStageChange={handleStageChange}
         />
       )}
+
+      <Dialog open={Boolean(greetingLabel)} onOpenChange={(open) => !open && setGreetingLabel(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Configurar etiqueta</DialogTitle>
+            <DialogDescription>
+              Defina a saudacao enviada na primeira mensagem do dia para esta etiqueta.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">Nome da Etiqueta</label>
+              <Input value={greetingLabel?.name || ''} disabled />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/20 px-3 py-2">
+              <div>
+                <div className="text-sm font-medium text-foreground">Saudacao ativa</div>
+                <div className="text-xs text-muted-foreground">Quando desligada, esta etiqueta nao envia saudacao automatica.</div>
+              </div>
+              <Switch
+                checked={Boolean(greetingDraft.enabled)}
+                onCheckedChange={(enabled) => setGreetingDraft((current) => ({ ...current, enabled }))}
+                disabled={greetingMutation.isPending}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Saudacao</label>
+              <Textarea
+                value={greetingDraft.message}
+                onChange={(event) => setGreetingDraft((current) => ({ ...current, message: event.target.value }))}
+                placeholder="Escreva a saudacao automatica desta etiqueta."
+                className="min-h-[140px]"
+                disabled={greetingMutation.isPending}
+              />
+              <div className="flex flex-wrap gap-2">
+                {GREETING_VARIABLES.map((variable) => (
+                  <Button
+                    key={`${variable.key}-${variable.label}`}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => insertGreetingVariable(variable.key)}
+                    disabled={greetingMutation.isPending}
+                  >
+                    {variable.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setGreetingLabel(null)} disabled={greetingMutation.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={saveGreetingSettings}
+              disabled={greetingMutation.isPending || !String(greetingDraft.message || '').trim()}
+            >
+              {greetingMutation.isPending ? 'Salvando...' : 'Salvar saudacao'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <LabelFormDialog
         open={createDialogOpen}

@@ -54,6 +54,7 @@ import {
   deleteLocalHsm,
   fetchLocalHsms,
   fetchMetaHsms,
+  fetchSavedHsmMedia,
   hsmSyncKey,
   readHsmUiState,
   removeHsmUiState,
@@ -170,6 +171,9 @@ const createEmptyForm = () => ({
   headerValue: '',
   body: '',
   footer: '',
+  bodyVariables: [],
+  headerVariables: [],
+  buttonVariables: [],
   buttons: [],
   serviceId: '',
   serviceIds: [],
@@ -376,6 +380,9 @@ const mergeUiStateIntoTemplate = (baseTemplate, uiState) => ({
   productFormat: String(uiState?.productFormat || baseTemplate.productFormat || 'catalog_message'),
   serviceIds: normalizeServiceIds(uiState?.serviceIds || baseTemplate.serviceIds, uiState?.serviceId || baseTemplate.serviceId),
   serviceId: normalizeServiceIds(uiState?.serviceIds || baseTemplate.serviceIds, uiState?.serviceId || baseTemplate.serviceId)[0] || '',
+  bodyVariables: Array.isArray(uiState?.bodyVariables) ? uiState.bodyVariables : baseTemplate.bodyVariables || [],
+  headerVariables: Array.isArray(uiState?.headerVariables) ? uiState.headerVariables : baseTemplate.headerVariables || [],
+  buttonVariables: Array.isArray(uiState?.buttonVariables) ? uiState.buttonVariables : baseTemplate.buttonVariables || [],
   active: typeof uiState?.active === 'boolean' ? uiState.active : Boolean(baseTemplate.active),
   createdAt: String(uiState?.createdAt || baseTemplate.createdAt || new Date().toISOString()),
   buttons: buildButtonsFromLocalPayload(baseTemplate, uiState),
@@ -401,6 +408,9 @@ const mapLocalItemToTemplate = (item, uiStateMap) => {
       headerValue,
       body: String(item?.content || ''),
       footer: String(item?.footer || ''),
+      bodyVariables: Array.isArray(item?.bodyVariables) ? item.bodyVariables : [],
+      headerVariables: Array.isArray(item?.headerVariables) ? item.headerVariables : [],
+      buttonVariables: Array.isArray(item?.buttonVariables) ? item.buttonVariables : [],
       serviceIds: normalizeServiceIds(item?.serviceIds || item?.service_ids, item?.serviceId || item?.service_id),
       serviceId: String(item?.serviceId || item?.service_id || ''),
       buttons: Array.isArray(item?.buttons) ? item.buttons : [],
@@ -455,6 +465,9 @@ const mapRemoteItemToTemplate = (item, uiStateMap, existingLocal) => {
       headerValue,
       body: extractBodyText(item?.components || []),
       footer: localFallback?.footer || '',
+      bodyVariables: Array.isArray(localFallback?.bodyVariables) ? localFallback.bodyVariables : [],
+      headerVariables: Array.isArray(localFallback?.headerVariables) ? localFallback.headerVariables : [],
+      buttonVariables: Array.isArray(localFallback?.buttonVariables) ? localFallback.buttonVariables : [],
       serviceIds: normalizeServiceIds(localFallback?.serviceIds || localFallback?.service_ids, localFallback?.serviceId),
       serviceId: localFallback?.serviceId || '',
       buttons:
@@ -508,9 +521,9 @@ const toLocalPayload = (template) => {
     footer: template.footer,
     serviceIds: normalizeServiceIds(template.serviceIds, template.serviceId),
     serviceId: normalizeServiceIds(template.serviceIds, template.serviceId)[0] || '',
-    bodyVariables: template.bodyVariables || [],
-    headerVariables: template.headerVariables || [],
-    buttonVariables: template.buttonVariables || [],
+    bodyVariables: normalizeVariableValues(template.bodyVariables),
+    headerVariables: normalizeVariableValues(template.headerVariables),
+    buttonVariables: normalizeVariableValues(template.buttonVariables),
     buttons: normalizedButtons,
     hasButton: Boolean(firstWebsiteButton),
     buttonText: firstWebsiteButton?.label || undefined,
@@ -547,6 +560,9 @@ const buildUiStatePayload = (template) => ({
   productFormat: template.productFormat,
   serviceIds: normalizeServiceIds(template.serviceIds, template.serviceId),
   serviceId: normalizeServiceIds(template.serviceIds, template.serviceId)[0] || '',
+  bodyVariables: template.bodyVariables,
+  headerVariables: template.headerVariables,
+  buttonVariables: template.buttonVariables,
   buttons: template.buttons,
   active: template.active,
   createdAt: template.createdAt,
@@ -597,6 +613,46 @@ const getMetaSaveNote = (template) => {
 
   return 'A API atual da Meta conectada a este projeto cria automaticamente apenas body + 1 botão URL. Os demais campos ficam salvos localmente nesta interface.';
 };
+
+const extractVariableIndexes = (value = '') =>
+  Array.from(
+    new Set(
+      [...String(value || '').matchAll(/\{\{\s*(\d+)\s*\}\}/g)]
+        .map((match) => Number(match[1]))
+        .filter((index) => Number.isFinite(index) && index > 0),
+    ),
+  ).sort((left, right) => left - right);
+
+const buildVariableArray = (current = [], indexes = []) =>
+  indexes.map((index) => ({
+    index,
+    value:
+      Array.isArray(current)
+        ? String(current.find((item) => Number(item?.index) === index)?.value || current[index - 1] || '')
+        : '',
+  }));
+
+const getButtonVariableIndexes = (buttons = []) =>
+  extractVariableIndexes(
+    buttons
+      .map((button) => [button?.label, button?.url, button?.phoneNumber, button?.offerCode, button?.flowId].join('\n'))
+      .join('\n'),
+  );
+
+const renderTemplateTextWithVariables = (value = '', variables = []) => {
+  const byIndex = new Map(
+    (Array.isArray(variables) ? variables : []).map((item, index) => [
+      Number(item?.index || index + 1),
+      String(item?.value || '').trim(),
+    ]),
+  );
+  return String(value || '').replace(/\{\{\s*(\d+)\s*\}\}/g, (token, index) => byIndex.get(Number(index)) || token);
+};
+
+const normalizeVariableValues = (variables = []) =>
+  (Array.isArray(variables) ? variables : []).map((item) =>
+    item && typeof item === 'object' ? String(item.value || '') : String(item || ''),
+  );
 
 const getPreviewButtonMeta = (buttonType) => {
   const type = normalizeButtonType(buttonType);
@@ -675,6 +731,8 @@ export default function HsmSection() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [buttonTypeToAdd, setButtonTypeToAdd] = useState('quick_reply');
+  const [savedMedia, setSavedMedia] = useState([]);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
   const [services, setServices] = useState([]);
 
   const filteredTemplates = useMemo(() => {
@@ -690,7 +748,13 @@ export default function HsmSection() {
     return filteredTemplates.slice(startIndex, startIndex + itemsPerPage);
   }, [currentPage, filteredTemplates, itemsPerPage]);
 
-  const metaSaveNote = useMemo(() => getMetaSaveNote(form), [form]);
+  const bodyVariableIndexes = useMemo(() => extractVariableIndexes(form.body), [form.body]);
+  const headerVariableIndexes = useMemo(
+    () => (form.headerType === 'text' ? extractVariableIndexes(form.headerValue) : []),
+    [form.headerType, form.headerValue],
+  );
+  const buttonVariableIndexes = useMemo(() => getButtonVariableIndexes(form.buttons), [form.buttons]);
+  const metaSaveNote = null;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -740,6 +804,20 @@ export default function HsmSection() {
 
   useEffect(() => {
     let active = true;
+    fetchSavedHsmMedia()
+      .then((items) => {
+        if (active) setSavedMedia(Array.isArray(items) ? items : []);
+      })
+      .catch(() => {
+        if (active) setSavedMedia([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     fetchServices()
       .then((items) => {
         if (active) setServices(Array.isArray(items) ? items : []);
@@ -751,6 +829,15 @@ export default function HsmSection() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      bodyVariables: buildVariableArray(current.bodyVariables, bodyVariableIndexes),
+      headerVariables: buildVariableArray(current.headerVariables, headerVariableIndexes),
+      buttonVariables: buildVariableArray(current.buttonVariables, buttonVariableIndexes),
+    }));
+  }, [bodyVariableIndexes.join(','), headerVariableIndexes.join(','), buttonVariableIndexes.join(',')]);
 
   const getServiceName = (serviceId) =>
     services.find((service) => String(service.id) === String(serviceId))?.name || '';
@@ -788,6 +875,14 @@ export default function HsmSection() {
     setForm((current) => ({
       ...current,
       buttons: current.buttons.map((button) => (button.id === buttonId ? { ...button, ...patch } : button)),
+    }));
+  };
+
+  const updateVariableValue = (field, index, value) => {
+    setForm((current) => ({
+      ...current,
+      [field]: buildVariableArray(current[field], field === 'bodyVariables' ? bodyVariableIndexes : field === 'headerVariables' ? headerVariableIndexes : buttonVariableIndexes)
+        .map((item) => (Number(item.index) === Number(index) ? { ...item, value } : item)),
     }));
   };
 
@@ -850,6 +945,7 @@ export default function HsmSection() {
     try {
       const uploaded = await uploadHsmMedia(file);
       updateForm('headerValue', String(uploaded?.url || ''));
+      setSavedMedia((current) => [uploaded, ...current.filter((item) => item?.fileName !== uploaded?.fileName)].filter(Boolean));
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : 'Falha ao enviar a mídia do header.');
     } finally {
@@ -908,17 +1004,18 @@ export default function HsmSection() {
 
       writeHsmUiState(syncKey, buildUiStatePayload(nextTemplate));
 
-      if (dialogMode === 'create' && canAutoCreateOnMeta(nextTemplate)) {
+      if (dialogMode === 'create') {
         try {
-          const firstWebsiteButton = nextTemplate.buttons.find((button) => normalizeButtonType(button.type) === 'url') || null;
           const metaResult = await createMetaHsm({
             name: nextTemplate.identifier,
             language: nextTemplate.language,
             category: nextTemplate.category,
             content: nextTemplate.body,
-            hasButton: Boolean(firstWebsiteButton),
-            buttonText: firstWebsiteButton?.label || undefined,
-            buttonUrl: firstWebsiteButton?.url || undefined,
+            headerType: nextTemplate.headerType,
+            headerText: nextTemplate.headerType === 'text' ? nextTemplate.headerValue : undefined,
+            headerMediaUrl: ['image', 'document', 'video'].includes(nextTemplate.headerType) ? nextTemplate.headerValue : undefined,
+            footer: nextTemplate.footer,
+            buttons: nextTemplate.buttons,
           });
           savedTemplate.status = normalizeStatus(metaResult?.status || savedTemplate.status);
           savedTemplate.code = String(metaResult?.id || savedTemplate.code);
@@ -937,12 +1034,6 @@ export default function HsmSection() {
                 : 'Não foi possível criar o template diretamente na Meta com a configuração atual.',
           });
         }
-      } else if (dialogMode === 'create' && metaSaveNote) {
-        setFeedback({
-          type: 'warning',
-          title: 'HSM salvo localmente',
-          message: metaSaveNote,
-        });
       } else {
         setFeedback({
           type: 'success',
@@ -1032,6 +1123,38 @@ export default function HsmSection() {
   };
 
   const isViewMode = dialogMode === 'view';
+  const isEditMode = dialogMode === 'edit';
+  const isStructureLocked = isViewMode || isEditMode;
+  const canChangeTemplateStructure = !isViewMode && !isEditMode;
+  const canShowFooterField = !isViewMode && (!isEditMode || Boolean(form.footer));
+  const canShowButtonsSection = !isViewMode && (!isEditMode || form.buttons.length > 0);
+  const hasMediaHeader = ['image', 'document', 'video'].includes(form.headerType);
+
+  const renderVariableFields = (title, field, indexes) => {
+    if (!indexes.length) return null;
+    const values = Array.isArray(form[field]) ? form[field] : [];
+    return (
+      <div className="rounded-lg border border-border bg-background p-3">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{title}</div>
+        <div className="grid gap-2 md:grid-cols-2">
+          {indexes.map((index) => {
+            const currentValue = values.find((item) => Number(item?.index) === Number(index))?.value || '';
+            return (
+              <div key={`${field}-${index}`} className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-muted-foreground">{`{{${index}}}`}</label>
+                <Input
+                  value={currentValue}
+                  onChange={(event) => updateVariableValue(field, index, event.target.value)}
+                  placeholder={`Valor da variavel ${index}`}
+                  disabled={isViewMode}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="flex h-[calc(100vh-9.5rem)] min-h-[calc(100vh-9.5rem)] flex-col rounded-lg border border-border bg-card p-5 shadow-[0_2px_4px_rgba(0,0,0,0.05)]">
@@ -1225,10 +1348,23 @@ export default function HsmSection() {
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                <Select value={String(itemsPerPage)} onValueChange={(value) => setItemsPerPage(Number(value))}>
+                  <SelectTrigger className="h-9 w-[150px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[10, 20, 50, 100].map((value) => (
+                      <SelectItem key={value} value={String(value)}>
+                        {value} por pagina
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="hidden"
                   onClick={() => setItemsPerPage((current) => current + 10)}
                 >
                   Mostrar +10 por página
@@ -1287,7 +1423,7 @@ export default function HsmSection() {
                       value={form.identifier}
                       onChange={(event) => updateForm('identifier', event.target.value)}
                       placeholder="exemplo_hsm_marketing"
-                      disabled={isViewMode}
+                      disabled={isStructureLocked}
                     />
                   </div>
                   <div className="flex flex-col gap-2">
@@ -1295,7 +1431,7 @@ export default function HsmSection() {
                     <Select
                       value={form.category}
                       onValueChange={(value) => updateForm('category', value)}
-                      disabled={isViewMode}
+                      disabled={isStructureLocked}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -1311,7 +1447,7 @@ export default function HsmSection() {
                     <Select
                       value={form.language}
                       onValueChange={(value) => updateForm('language', value)}
-                      disabled={isViewMode}
+                      disabled={isStructureLocked}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -1449,7 +1585,7 @@ export default function HsmSection() {
                     <Select
                       value={form.headerType}
                       onValueChange={(value) => updateForm('headerType', value)}
-                      disabled={isViewMode}
+                      disabled={isStructureLocked}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -1488,8 +1624,40 @@ export default function HsmSection() {
                   ) : null}
                 </div>
 
-                {['image', 'document', 'video'].includes(form.headerType) && !isViewMode ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                {hasMediaHeader && !isViewMode ? (
+                  <div className="relative mt-3 flex flex-wrap items-center gap-2">
+                    {mediaPickerOpen ? (
+                      <div className="absolute bottom-full left-0 z-20 mb-2 w-full max-w-md rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+                        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                          <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">Midias salvas</span>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setMediaPickerOpen(false)}>
+                            Fechar
+                          </Button>
+                        </div>
+                        <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                          {savedMedia.length === 0 ? (
+                            <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                              Nenhuma midia HSM salva na VPS.
+                            </div>
+                          ) : (
+                            savedMedia.map((item) => (
+                              <button
+                                key={item.fileName || item.url}
+                                type="button"
+                                className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted"
+                                onClick={() => {
+                                  updateForm('headerValue', item.url || '');
+                                  setMediaPickerOpen(false);
+                                }}
+                              >
+                                <span className="min-w-0 truncate">{item.fileName || item.url}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{item.mimeType || 'arquivo'}</span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                     <Button
                       type="button"
                       variant="outline"
@@ -1502,6 +1670,9 @@ export default function HsmSection() {
                     >
                       <Upload className="size-4" />
                       {isUploading ? 'Enviando...' : 'Anexar mídia'}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setMediaPickerOpen((current) => !current)}>
+                      Escolher midia salva
                     </Button>
                     <input
                       id="hsm-header-upload"
@@ -1532,6 +1703,13 @@ export default function HsmSection() {
                     className="min-h-[140px]"
                     disabled={isViewMode}
                   />
+                  {bodyVariableIndexes.length || headerVariableIndexes.length || buttonVariableIndexes.length ? (
+                    <div className="space-y-3">
+                      {renderVariableFields('Variaveis da mensagem', 'bodyVariables', bodyVariableIndexes)}
+                      {renderVariableFields('Variaveis do header', 'headerVariables', headerVariableIndexes)}
+                      {renderVariableFields('Variaveis dos botoes', 'buttonVariables', buttonVariableIndexes)}
+                    </div>
+                  ) : null}
                   {form.buttons.length > 0 ? (
                     <div className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
                       <span className="font-medium text-foreground">Botões do template: </span>
@@ -1540,6 +1718,7 @@ export default function HsmSection() {
                   ) : null}
                 </div>
 
+                {canShowFooterField ? (
                 <div className="mt-4 flex flex-col gap-2">
                   <label className="text-sm font-medium text-foreground">Footer</label>
                   <Textarea
@@ -1550,12 +1729,13 @@ export default function HsmSection() {
                     disabled={isViewMode}
                   />
                 </div>
+                ) : null}
               </div>
 
-              <div className="rounded-xl border border-border bg-muted/20 p-4">
+              <div className={cn('rounded-xl border border-border bg-muted/20 p-4', !canShowButtonsSection && 'hidden')}>
                 <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <h3 className="font-medium text-foreground">Botões</h3>
-                  {!isViewMode ? (
+                  {canChangeTemplateStructure ? (
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                       <Select value={buttonTypeToAdd} onValueChange={setButtonTypeToAdd}>
                         <SelectTrigger className="w-full sm:w-[220px]">
@@ -1593,7 +1773,7 @@ export default function HsmSection() {
                             <div className="text-sm font-medium text-foreground">
                               Botão {index + 1} · {typeLabel}
                             </div>
-                            {!isViewMode ? (
+                            {canChangeTemplateStructure ? (
                               <Button type="button" variant="ghost" size="icon" className="size-8" onClick={() => removeButton(button.id)}>
                                 <Trash2 className="size-4" />
                               </Button>
@@ -1739,7 +1919,9 @@ export default function HsmSection() {
                       </div>
                     ) : null}
 
-                    <p className="whitespace-pre-wrap text-sm">{buildPreviewText(form.body) || 'A mensagem do HSM aparecerá aqui.'}</p>
+                    <p className="whitespace-pre-wrap text-sm">
+                      {buildPreviewText(renderTemplateTextWithVariables(form.body, form.bodyVariables)) || 'A mensagem do HSM aparecerá aqui.'}
+                    </p>
 
                     {form.footer ? <p className="mt-3 text-xs text-white/70">{form.footer}</p> : null}
 
@@ -1841,5 +2023,3 @@ export default function HsmSection() {
     </div>
   );
 }
-
-

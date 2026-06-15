@@ -251,7 +251,7 @@ export default function Chatbot() {
         }
       />
 
-      <PageSectionCard className="p-5">
+      <PageSectionCard className="hidden p-5">
         <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
             <h2 className="text-lg font-bold tracking-[-0.02em] text-foreground">Saudações automáticas por etiqueta</h2>

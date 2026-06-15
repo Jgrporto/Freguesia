@@ -58,17 +58,17 @@ export const DEFAULT_LABEL_GREETINGS = {
   'system-new-customer': {
     enabled: true,
     message: 'Olá! Seja bem-vindo à Barbearia Freguesia. Quer agendar seu corte?',
-    repeatMode: 'once_per_open_conversation',
+    repeatMode: 'once_per_day',
   },
   'system-customer': {
     enabled: true,
     message: 'Fala! Bom te ver por aqui de novo. Quer agendar seu próximo corte?',
-    repeatMode: 'once_per_open_conversation',
+    repeatMode: 'once_per_day',
   },
   'system-recovery': {
     enabled: true,
     message: 'Fala! Já tem um tempinho desde seu último corte. Quer reservar um horário essa semana?',
-    repeatMode: 'once_per_open_conversation',
+    repeatMode: 'once_per_day',
   },
 };
 
@@ -78,7 +78,7 @@ export function normalizeLabelGreeting(value = {}, fallback = {}) {
   return {
     enabled: Boolean(source.enabled ?? base.enabled ?? false),
     message: String(source.message ?? base.message ?? '').trim(),
-    repeatMode: String(source.repeatMode || source.mode || base.repeatMode || 'once_per_open_conversation').trim() || 'once_per_open_conversation',
+    repeatMode: String(source.repeatMode || source.mode || base.repeatMode || 'once_per_day').trim() || 'once_per_day',
     updatedAt: source.updatedAt || source.updated_at || base.updatedAt || null,
   };
 }

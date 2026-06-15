@@ -124,6 +124,13 @@
     overflow-y: scroll;
   }
 
+  body[data-scroll-locked],
+  body[style*="padding-right"],
+  body[style*="margin-right"] {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+  }
+
   html {
     scrollbar-gutter: stable;
   }

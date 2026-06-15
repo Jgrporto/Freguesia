@@ -85,6 +85,14 @@ export const uploadHsmMedia = async (file) => {
   });
 };
 
+export const fetchSavedHsmMedia = async () => {
+  const data = await requestWhatsappJson('/api/whatsapp/templates/local/media', {
+    method: 'GET',
+  });
+
+  return Array.isArray(data?.items) ? data.items : [];
+};
+
 export const createMetaHsm = async (payload) => {
   return await requestWhatsappJson('/api/whatsapp/templates', {
     method: 'POST',

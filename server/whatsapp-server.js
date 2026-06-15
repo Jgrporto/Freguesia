@@ -2250,6 +2250,34 @@ const persistTemplateMediaFromPayload = async (payload) => {
   };
 };
 
+const listPersistedTemplateMedia = async (req) => {
+  try {
+    const entries = await fs.readdir(templateMediaDirPath, { withFileTypes: true });
+    const items = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile())
+        .map(async (entry) => {
+          const fileName = entry.name;
+          const fullPath = path.join(templateMediaDirPath, fileName);
+          const stat = await fs.stat(fullPath);
+          const ext = String(path.extname(fileName) || "").replace(".", "").toLowerCase();
+          const mimeType = TEMPLATE_MEDIA_MIME_FROM_EXT[ext] || "application/octet-stream";
+          return {
+            fileName,
+            mimeType,
+            size: stat.size,
+            updatedAt: stat.mtime.toISOString(),
+            url: buildTemplateMediaPublicUrl(req, fileName),
+          };
+        }),
+    );
+    return items.sort((left, right) => Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+};
+
 const ROUTINE_RULE_VALUES = new Set(["due_minus_1", "due_today", "due_plus_1", "after_signup_10"]);
 const ROUTINE_STATUS_VALUES = new Set(["active", "paused"]);
 const ROUTINE_WEEKDAY_KEYS = [
@@ -20237,7 +20265,74 @@ const extractTemplateVariables = (text) => {
 
 
 
-const buildTemplateComponents = ({ content, hasButton, buttonText, buttonUrl }) => {
+const normalizeMetaTemplateHeaderType = (value = "") => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (["TEXT", "IMAGE", "DOCUMENT", "VIDEO", "LOCATION"].includes(normalized)) return normalized;
+  const lowered = String(value || "").trim().toLowerCase();
+  if (lowered === "text") return "TEXT";
+  if (lowered === "image") return "IMAGE";
+  if (lowered === "document") return "DOCUMENT";
+  if (lowered === "video") return "VIDEO";
+  if (lowered === "location") return "LOCATION";
+  return "";
+};
+
+const normalizeMetaTemplateButtonType = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["url", "website", "acessar_site"].includes(normalized)) return "URL";
+  if (["phone", "phone_number", "ligar"].includes(normalized)) return "PHONE_NUMBER";
+  if (["copy_code", "copiar_codigo", "copy_offer_code"].includes(normalized)) return "COPY_CODE";
+  if (["flow", "fluxo_whatsapp"].includes(normalized)) return "FLOW";
+  if (["order", "pedido"].includes(normalized)) return "ORDER_DETAILS";
+  return "QUICK_REPLY";
+};
+
+const buildMetaTemplateButton = (button = {}) => {
+  const type = normalizeMetaTemplateButtonType(button.type || button.buttonType);
+  const text = String(button.label || button.text || "").trim();
+  if (!text && type !== "ORDER_DETAILS") return null;
+
+  if (type === "URL") {
+    const url = String(button.url || "").trim();
+    if (!url) return null;
+    return { type, text, url };
+  }
+
+  if (type === "PHONE_NUMBER") {
+    const phoneNumber = String(button.phoneNumber || button.phone_number || "").trim();
+    if (!phoneNumber) return null;
+    return { type, text, phone_number: phoneNumber };
+  }
+
+  if (type === "COPY_CODE") {
+    const example = String(button.offerCode || button.offer_code || button.example || "").trim();
+    return example ? { type, text, example } : { type, text };
+  }
+
+  if (type === "FLOW") {
+    const flowId = String(button.flowId || button.flow_id || "").trim();
+    if (!flowId) return null;
+    return { type, text, flow_id: flowId };
+  }
+
+  if (type === "ORDER_DETAILS") {
+    return { type };
+  }
+
+  return { type: "QUICK_REPLY", text };
+};
+
+const buildTemplateComponents = ({
+  content,
+  headerType,
+  headerText,
+  headerMediaUrl,
+  footer,
+  buttons = [],
+  hasButton,
+  buttonText,
+  buttonUrl,
+}) => {
   const components = [
     {
       type: "BODY",
@@ -20245,22 +20340,78 @@ const buildTemplateComponents = ({ content, hasButton, buttonText, buttonUrl }) 
     },
   ];
 
-  if (hasButton && buttonText && buttonUrl) {
+  const normalizedHeaderType = normalizeMetaTemplateHeaderType(headerType);
+  const safeHeaderText = String(headerText || "").trim();
+  const safeHeaderMediaUrl = String(headerMediaUrl || "").trim();
+
+  if (normalizedHeaderType === "TEXT" && safeHeaderText) {
+    components.unshift({
+      type: "HEADER",
+      format: "TEXT",
+      text: safeHeaderText,
+    });
+  } else if (["IMAGE", "DOCUMENT", "VIDEO"].includes(normalizedHeaderType)) {
+    components.unshift({
+      type: "HEADER",
+      format: normalizedHeaderType,
+      ...(safeHeaderMediaUrl
+        ? {
+            example: {
+              header_handle: [safeHeaderMediaUrl],
+            },
+          }
+        : {}),
+    });
+  } else if (normalizedHeaderType === "LOCATION") {
+    components.unshift({
+      type: "HEADER",
+      format: "LOCATION",
+    });
+  }
+
+  const safeFooter = String(footer || "").trim();
+  if (safeFooter) {
+    components.push({
+      type: "FOOTER",
+      text: safeFooter,
+    });
+  }
+
+  const normalizedButtons = Array.isArray(buttons)
+    ? buttons.map(buildMetaTemplateButton).filter(Boolean)
+    : [];
+
+  if (!normalizedButtons.length && hasButton && buttonText && buttonUrl) {
+    normalizedButtons.push({
+      type: "URL",
+      text: buttonText,
+      url: buttonUrl,
+    });
+  }
+
+  if (normalizedButtons.length > 0) {
     components.push({
       type: "BUTTONS",
-      buttons: [
-        {
-          type: "URL",
-          text: buttonText,
-          url: buttonUrl,
-        },
-      ],
+      buttons: normalizedButtons,
     });
   }
 
   return components;
 };
-const createTemplate = async ({ name, language, category, content, hasButton, buttonText, buttonUrl }) => {
+const createTemplate = async ({
+  name,
+  language,
+  category,
+  content,
+  headerType,
+  headerText,
+  headerMediaUrl,
+  footer,
+  buttons,
+  hasButton,
+  buttonText,
+  buttonUrl,
+}) => {
   const { accessToken, wabaId } = await resolveMetaConfig();
   if (!accessToken) {
     throw new Error("Missing WhatsApp access token");
@@ -20396,7 +20547,17 @@ const createTemplate = async ({ name, language, category, content, hasButton, bu
 
 
 
-    components: buildTemplateComponents({ content, hasButton, buttonText, buttonUrl }),
+    components: buildTemplateComponents({
+      content,
+      headerType,
+      headerText,
+      headerMediaUrl,
+      footer,
+      buttons,
+      hasButton,
+      buttonText,
+      buttonUrl,
+    }),
 
 
 
@@ -41946,6 +42107,23 @@ const server = http.createServer(async (req, res) => {
 
   }
 
+  if (req.method === "GET" && url.pathname === "/api/whatsapp/templates/local/media") {
+
+    setCors(res);
+
+    try {
+      const items = await listPersistedTemplateMedia(req);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ items }));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error.message || "Template media list error" }));
+    }
+
+    return;
+
+  }
+
   const templateMediaMatch =
     req.method === "GET"
       ? url.pathname.match(/^\/api\/whatsapp\/templates\/local\/media\/([a-zA-Z0-9._-]+)$/)
@@ -49663,7 +49841,20 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
 
 
 
-      const { name, language, category, content, hasButton, buttonText, buttonUrl } = await readJson(req);
+      const {
+        name,
+        language,
+        category,
+        content,
+        headerType,
+        headerText,
+        headerMediaUrl,
+        footer,
+        buttons,
+        hasButton,
+        buttonText,
+        buttonUrl,
+      } = await readJson(req);
 
 
 
@@ -50016,6 +50207,11 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
 
 
         content,
+        headerType,
+        headerText,
+        headerMediaUrl,
+        footer,
+        buttons,
 
 
 
@@ -53376,11 +53572,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
 
 
 
