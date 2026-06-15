@@ -276,6 +276,58 @@ const extractButtonsFromComponent = (component) => {
         };
       }
 
+      if (type === 'PHONE_NUMBER') {
+        return {
+          id: `btn-meta-${Date.now()}-${index}`,
+          type: 'phone',
+          label: String(button?.text || '').trim(),
+          url: '',
+          phoneNumber: String(button?.phone_number || button?.phoneNumber || '').trim(),
+          offerCode: '',
+          flowId: '',
+          orderReference: '',
+        };
+      }
+
+      if (type === 'COPY_CODE' || type === 'COPY_OFFER_CODE') {
+        return {
+          id: `btn-meta-${Date.now()}-${index}`,
+          type: 'copy_code',
+          label: String(button?.text || 'Copiar código').trim(),
+          url: '',
+          phoneNumber: '',
+          offerCode: String(button?.example || button?.offer_code || button?.offerCode || '').trim(),
+          flowId: '',
+          orderReference: '',
+        };
+      }
+
+      if (type === 'FLOW') {
+        return {
+          id: `btn-meta-${Date.now()}-${index}`,
+          type: 'flow',
+          label: String(button?.text || '').trim(),
+          url: '',
+          phoneNumber: '',
+          offerCode: '',
+          flowId: String(button?.flow_id || button?.flowId || '').trim(),
+          orderReference: '',
+        };
+      }
+
+      if (type === 'ORDER_DETAILS') {
+        return {
+          id: `btn-meta-${Date.now()}-${index}`,
+          type: 'order',
+          label: String(button?.text || 'Ver pedido').trim(),
+          url: '',
+          phoneNumber: '',
+          offerCode: '',
+          flowId: '',
+          orderReference: String(button?.order_reference || button?.orderReference || '').trim(),
+        };
+      }
+
       if (type === 'QUICK_REPLY') {
         return {
           id: `btn-meta-${Date.now()}-${index}`,

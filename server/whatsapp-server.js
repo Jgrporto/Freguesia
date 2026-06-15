@@ -403,6 +403,18 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 
 
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const META_MARKETING_ACCESS_TOKEN =
+  process.env.META_MARKETING_ACCESS_TOKEN ||
+  process.env.FACEBOOK_MARKETING_ACCESS_TOKEN ||
+  process.env.META_ACCESS_TOKEN ||
+  process.env.FACEBOOK_ACCESS_TOKEN ||
+  ACCESS_TOKEN;
+const META_AD_ACCOUNT_ID = String(
+  process.env.META_AD_ACCOUNT_ID ||
+    process.env.FACEBOOK_AD_ACCOUNT_ID ||
+    process.env.META_MARKETING_AD_ACCOUNT_ID ||
+    "",
+).trim();
 
 
 
@@ -7293,6 +7305,217 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs } = {}) => {
       finalConversionRate,
     },
     byDay,
+  };
+};
+
+const getAcquisitionAdKeywords = () =>
+  String(process.env.ACQUISITION_AD_KEYWORDS || "anuncio,anúncio,facebook,instagram,utm_,fbclid,ctwa")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+const normalizeMetaAdAccountId = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("act_") ? raw : `act_${raw.replace(/^act_/i, "")}`;
+};
+
+const toDashboardDateKey = (timestampMs) => new Date(timestampMs).toISOString().slice(0, 10);
+
+const sumMetaActionValues = (rows = [], matchers = []) =>
+  rows.reduce((total, row) => {
+    const actions = Array.isArray(row?.actions) ? row.actions : [];
+    return (
+      total +
+      actions.reduce((sum, action) => {
+        const type = String(action?.action_type || "").toLowerCase();
+        if (!matchers.some((matcher) => type.includes(matcher))) return sum;
+        return sum + (Number(action?.value) || 0);
+      }, 0)
+    );
+  }, 0);
+
+const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
+  const accessToken = String(META_MARKETING_ACCESS_TOKEN || "").trim();
+  const adAccountId = normalizeMetaAdAccountId(META_AD_ACCOUNT_ID);
+  if (!accessToken || !adAccountId) {
+    return {
+      configured: false,
+      spend: 0,
+      clicks: 0,
+      conversationsStarted: 0,
+      rows: [],
+    };
+  }
+
+  const range = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  const endpoint = new URL(`https://graph.facebook.com/${API_VERSION}/${adAccountId}/insights`);
+  endpoint.searchParams.set("fields", "spend,clicks,inline_link_clicks,actions,date_start,date_stop");
+  endpoint.searchParams.set("level", "account");
+  endpoint.searchParams.set("time_range", JSON.stringify({
+    since: toDashboardDateKey(normalizedStartMs),
+    until: toDashboardDateKey(normalizedEndMs),
+  }));
+  endpoint.searchParams.set("access_token", accessToken);
+
+  const response = await fetch(endpoint.toString(), { method: "GET" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || "Meta acquisition insights error");
+  }
+
+  const rows = Array.isArray(data?.data) ? data.data : [];
+  const spend = rows.reduce((sum, row) => sum + (Number(row?.spend) || 0), 0);
+  const clicks = rows.reduce((sum, row) => sum + (Number(row?.clicks) || 0), 0);
+  const inlineLinkClicks = rows.reduce((sum, row) => sum + (Number(row?.inline_link_clicks) || 0), 0);
+  const clickToWhatsappActions = sumMetaActionValues(rows, ["click_to_whatsapp", "whatsapp"]);
+  const messagingStartedActions = sumMetaActionValues(rows, ["messaging_conversation_started"]);
+  const resolvedClicks = clickToWhatsappActions || inlineLinkClicks || clicks;
+
+  return {
+    configured: true,
+    spend,
+    clicks: resolvedClicks,
+    conversationsStarted: messagingStartedActions || resolvedClicks,
+    rows,
+  };
+};
+
+const buildCustomerPhoneIndex = (customers = {}) => {
+  const rows = Array.isArray(customers) ? customers : Object.values(customers || {});
+  const index = new Map();
+  rows.forEach((customer) => {
+    const phone = normalizePhone(
+      customer?.phoneDigits ||
+        customer?.phone_digits ||
+        customer?.whatsapp ||
+        customer?.telefone ||
+        customer?.phone ||
+        customer?.customerPhone,
+    );
+    if (phone) index.set(phone, customer);
+  });
+  return index;
+};
+
+const customerHasAppointmentSignal = (customer = {}) => {
+  const candidates = [
+    customer?.AgendamentoPendente,
+    customer?.agendamentoPendente,
+    customer?.pendingAppointment,
+    customer?.hasPendingAppointment,
+    customer?.AgendamentoPendenteTotal,
+    customer?.agendamentoPendenteTotal,
+    customer?.pendingAppointmentsTotal,
+    customer?.ProximoAgendamento,
+    customer?.proximoAgendamento,
+    customer?.pendingAppointmentAt,
+    customer?.lastAppointmentDate,
+    customer?.ultimoAgendamento,
+  ];
+  return candidates.some((value) => {
+    if (typeof value === "boolean") return value;
+    if (Number.isFinite(Number(value))) return Number(value) > 0;
+    return String(value || "").trim().length > 0;
+  });
+};
+
+const hasAdReferralSignal = (value, keywords = getAcquisitionAdKeywords()) => {
+  if (!value) return false;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const normalized = text.toLowerCase();
+  return keywords.some((keyword) => normalized.includes(keyword));
+};
+
+const conversationHasAdSignal = (conversation = {}, messages = []) =>
+  Boolean(conversation?.adReferral || conversation?.ad_referral) ||
+  hasAdReferralSignal(conversation?.adReferral || conversation?.ad_referral || conversation?.source || conversation?.origin) ||
+  (Array.isArray(messages) &&
+    messages.some((message) =>
+      Boolean(message?.adReferral || message?.ad_referral) ||
+      hasAdReferralSignal(message?.adReferral || message?.ad_referral || message?.content),
+    ));
+
+const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs } = {}) => {
+  const range = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  let meta = null;
+  try {
+    meta = await fetchMetaAcquisitionInsights({ startMs: normalizedStartMs, endMs: normalizedEndMs });
+  } catch (error) {
+    meta = {
+      configured: Boolean(String(META_MARKETING_ACCESS_TOKEN || "").trim() && normalizeMetaAdAccountId(META_AD_ACCOUNT_ID)),
+      spend: 0,
+      clicks: 0,
+      conversationsStarted: 0,
+      rows: [],
+      error: error?.message || "Meta acquisition insights error",
+    };
+  }
+  const customerIndex = buildCustomerPhoneIndex(store?.customers);
+  const adConversationIds = new Set();
+  const appointmentPhones = new Set();
+  const customerPhones = new Set();
+
+  for (const [conversationId, conversation] of Object.entries(store?.conversations || {})) {
+    const messages = getSortedMessages(conversationId, store?.messages?.[conversationId] || []);
+    const hasMessageInPeriod = messages.some((message) => {
+      const ts = resolveDashboardMessageTimestampMs(message);
+      return Number.isFinite(ts) && ts >= normalizedStartMs && ts <= normalizedEndMs;
+    });
+    const adSeenAt = toTimeMs(conversation?.ad_first_seen_at || conversation?.ad_last_seen_at);
+    const adSeenInPeriod = Number.isFinite(adSeenAt) && adSeenAt >= normalizedStartMs && adSeenAt <= normalizedEndMs;
+    if (!hasMessageInPeriod && !adSeenInPeriod) continue;
+    if (!conversationHasAdSignal(conversation, messages)) continue;
+
+    adConversationIds.add(conversationId);
+    const phone = normalizePhone(conversation?.customer?.phone || conversation?.contact_phone || conversation?.phone || conversationId);
+    const customer = phone ? customerIndex.get(phone) : null;
+    if (customer) {
+      customerPhones.add(phone);
+      if (customerHasAppointmentSignal(customer)) appointmentPhones.add(phone);
+    }
+  }
+
+  const conversationsStarted = meta.conversationsStarted || adConversationIds.size;
+  const appointments = appointmentPhones.size;
+  const newCustomers = customerPhones.size;
+  const spend = meta.spend || 0;
+
+  return {
+    period: {
+      start: new Date(normalizedStartMs).toISOString(),
+      end: new Date(normalizedEndMs).toISOString(),
+    },
+    meta: {
+      configured: meta.configured,
+      error: meta.error || null,
+      spend,
+      clicks: meta.clicks || 0,
+      conversationsStarted,
+    },
+    local: {
+      adConversations: adConversationIds.size,
+      appointments,
+      newCustomers,
+    },
+    cards: {
+      adCustomers: newCustomers,
+      conversationsStarted,
+      adAppointments: appointments,
+      cacPerAppointment: appointments > 0 ? spend / appointments : 0,
+      cacPerNewCustomer: newCustomers > 0 ? spend / newCustomers : 0,
+      adToAppointmentRate: conversationsStarted > 0 ? appointments / conversationsStarted : 0,
+    },
+    funnel: {
+      clicks: meta.clicks || conversationsStarted || 0,
+      conversations: conversationsStarted,
+      appointments,
+      newCustomers,
+    },
   };
 };
 
@@ -24517,6 +24740,7 @@ const upsertStoredMessage = async ({
   providerMessageId = null,
   replyToId = null,
   templateButtons = [],
+  adReferral = null,
 }) => {
 
 
@@ -24887,6 +25111,8 @@ const upsertStoredMessage = async ({
       attachments,
       templateButtons: normalizeTemplatePreviewButtons(templateButtons),
       template_buttons: normalizeTemplatePreviewButtons(templateButtons),
+      adReferral: adReferral && typeof adReferral === "object" ? adReferral : undefined,
+      ad_referral: adReferral && typeof adReferral === "object" ? adReferral : undefined,
       replyTo,
       reply_to_id: replyToId || undefined,
       replyToId: replyToId || undefined,
@@ -24966,6 +25192,8 @@ const upsertStoredMessage = async ({
         attachments: nextAttachments,
         templateButtons: nextTemplateButtons.length ? nextTemplateButtons : message.templateButtons,
         template_buttons: nextTemplateButtons.length ? nextTemplateButtons : message.template_buttons,
+        adReferral: adReferral && typeof adReferral === "object" ? adReferral : message.adReferral,
+        ad_referral: adReferral && typeof adReferral === "object" ? adReferral : message.ad_referral,
         replyTo: replyTo || message.replyTo,
         reply_to_id: replyToId || message.reply_to_id || undefined,
         replyToId: replyToId || message.replyToId || undefined,
@@ -25060,6 +25288,13 @@ const upsertStoredMessage = async ({
   const eventAt = String(timestamp || nowIso());
   existingConversation.lastMessageTime = eventAt;
   existingConversation.last_message_at = eventAt;
+
+  if (adReferral && typeof adReferral === "object") {
+    existingConversation.adReferral = adReferral;
+    existingConversation.ad_referral = adReferral;
+    existingConversation.ad_first_seen_at = existingConversation.ad_first_seen_at || eventAt;
+    existingConversation.ad_last_seen_at = eventAt;
+  }
 
   if (type === "client") {
     existingConversation.lastClientMessageTime = eventAt;
@@ -25518,6 +25753,7 @@ const upsertIncomingMessage = async ({
   senderName = null,
   clientMessageId = null,
   replyToId = null,
+  adReferral = null,
 }) => {
   const result = await upsertStoredMessage({
 
@@ -25722,6 +25958,7 @@ const upsertIncomingMessage = async ({
   wabaId,
   routeKey,
   webhookPath,
+  adReferral,
 
 
 
@@ -26866,6 +27103,44 @@ const extractWebhookContent = (message) => {
 
   const normalizedType = labels[type] || type || "mensagem";
   return `[${normalizedType}]`;
+};
+
+const normalizeAdReferral = (message = {}) => {
+  const source =
+    message?.referral ||
+    message?.context?.referral ||
+    message?.adReferral ||
+    message?.ad_referral ||
+    null;
+  const candidate =
+    source && typeof source === "object"
+      ? source
+      : {
+          ctwa_clid: message?.ctwa_clid || message?.ctwaClid,
+          source_id: message?.source_id || message?.sourceId,
+          source_url: message?.source_url || message?.sourceUrl,
+          headline: message?.headline,
+          body: message?.body,
+        };
+  const normalized = {
+    sourceType: String(candidate?.source_type || candidate?.sourceType || "").trim(),
+    sourceId: String(candidate?.source_id || candidate?.sourceId || candidate?.ad_id || candidate?.adId || "").trim(),
+    sourceUrl: String(candidate?.source_url || candidate?.sourceUrl || "").trim(),
+    ctwaClid: String(candidate?.ctwa_clid || candidate?.ctwaClid || "").trim(),
+    headline: String(candidate?.headline || "").trim(),
+    body: String(candidate?.body || "").trim(),
+  };
+  if (
+    normalized.sourceId ||
+    normalized.sourceUrl ||
+    normalized.ctwaClid ||
+    /ad|advert|click|whatsapp|facebook|instagram|utm_/i.test(
+      [normalized.sourceType, normalized.sourceUrl].join(" "),
+    )
+  ) {
+    return normalized;
+  }
+  return null;
 };
 
 const resolveMediaProxyUrl = (mediaId) => `/api/whatsapp/media?id=${encodeURIComponent(mediaId)}`;
@@ -30558,6 +30833,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
         }
         const content = extractWebhookContent(message);
         const attachments = extractWebhookAttachments(message);
+        const adReferral = normalizeAdReferral(message);
         const timestamp = parseWebhookTimestamp(message?.timestamp);
         const messageId = message?.id || `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const replyTo = message?.context?.id ? { id: message.context.id } : undefined;
@@ -30616,6 +30892,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
           wabaId: lineWabaId,
           routeKey: lineRouteKey,
           webhookPath: lineWebhookPath,
+          adReferral,
         });
         await appendMessageDeliveryLog({
           category: "incoming-message",
@@ -32549,6 +32826,22 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: error?.message || "Attendance dashboard error" }));
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/whatsapp/dashboard/acquisition") {
+    setCors(res);
+    try {
+      const startMs = parseDashboardDateBoundary(url.searchParams.get("start"), "start");
+      const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
+      const store = await readStore({ mutable: false });
+      const metrics = await buildAcquisitionDashboardMetrics(store, { startMs, endMs });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(metrics));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error?.message || "Acquisition dashboard error" }));
     }
     return;
   }

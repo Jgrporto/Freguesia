@@ -244,6 +244,13 @@ function formatPercent(value) {
   return `${value.toFixed(1).replace('.', ',')}%`;
 }
 
+function formatCurrency(value) {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(Number(value) || 0);
+}
+
 function safeRate(part, total) {
   if (!total) return 0;
   return (part / total) * 100;
@@ -599,6 +606,79 @@ function AtendimentoConversionFunnel({ values }) {
   );
 }
 
+function AcquisitionFunnel({ values }) {
+  const clicks = Number(values?.clicks ?? 0);
+  const conversations = Number(values?.conversations ?? 0);
+  const bookings = Number(values?.appointments ?? 0);
+  const newCustomers = Number(values?.newCustomers ?? 0);
+  const stages = [
+    { label: 'Cliques', value: clicks, icon: Megaphone, tone: 'dark', rate: 100 },
+    { label: 'Conversas', value: conversations, icon: MessageSquare, tone: 'dark', rate: safeRate(conversations, clicks) },
+    { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'dark', rate: safeRate(bookings, conversations || clicks) },
+    { label: 'Clientes novos', value: newCustomers, icon: UserCheck, tone: 'light', rate: safeRate(newCustomers, conversations || clicks) },
+  ];
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
+      <div className="mb-3">
+        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">FUNIL DE AQUISIÇÃO</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Cliques da Meta, conversas iniciadas, agendamentos e clientes novos.</p>
+      </div>
+
+      <div className="rounded-2xl border border-[#efe5e5] bg-white p-3">
+        <div className="relative hidden overflow-visible rounded-2xl lg:flex">
+          {stages.map((stage, index) => {
+            const Icon = stage.icon;
+            const isFirst = index === 0;
+            const isLast = index === stages.length - 1;
+            return (
+              <div key={stage.label} className={cn('relative', !isFirst && '-ml-8')} style={{ zIndex: index + 1, width: isFirst ? '30%' : '26%' }}>
+                <div
+                  className={cn('flex min-h-[136px] items-center px-8 py-7', isLast ? 'text-[#111827]' : 'text-white')}
+                  style={{
+                    background: isFirst
+                      ? 'linear-gradient(135deg, #c50015 0%, #db061e 50%, #b30014 100%)'
+                      : isLast
+                        ? 'linear-gradient(90deg, #f3e2e3 0%, #efdddd 100%)'
+                        : 'linear-gradient(90deg, #eb8b90 0%, #e58187 38%, #d87078 100%)',
+                    clipPath: isFirst
+                      ? 'polygon(0 0, 90% 0, 96.5% 50%, 90% 100%, 0 100%)'
+                      : isLast
+                        ? 'polygon(10% 0, 100% 0, 100% 100%, 10% 100%, 0 50%)'
+                        : 'polygon(7% 0, 90% 0, 96.5% 50%, 90% 100%, 7% 100%, 0 50%)',
+                    borderRadius: isFirst ? '16px 0 0 16px' : isLast ? '0 16px 16px 0' : undefined,
+                  }}
+                >
+                  <StageIconBox icon={Icon} tone={stage.tone} />
+                  <div>
+                    <div className="text-[15px] font-bold">{stage.label}</div>
+                    <div className="mt-1 text-[48px] font-bold leading-none tracking-[-0.06em]">{stage.value}</div>
+                    <div className={cn('mt-2 text-[14px] font-semibold', isLast ? 'text-muted-foreground' : 'text-white/95')}>
+                      {formatPercent(stage.rate)} do início
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="space-y-3 lg:hidden">
+          {stages.map((stage, index) => (
+            <div key={stage.label} className={cn('rounded-xl p-4', index === stages.length - 1 ? 'bg-primary/10 text-foreground' : 'bg-primary text-white')}>
+              <div className="text-sm font-bold">{stage.label}</div>
+              <div className="mt-1 text-4xl font-bold">{stage.value}</div>
+              <div className={cn('mt-1 text-sm', index === stages.length - 1 ? 'text-muted-foreground' : 'text-white/85')}>
+                {formatPercent(stage.rate)} do início
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ChartCard({ title, description, type, labels = [], helper, className }) {
   return (
     <section className={cn('rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]', className)}>
@@ -653,6 +733,7 @@ export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
   const [{ start, end }, setDateRange] = useState(() => getDefaultDateRange());
   const [attendanceMetrics, setAttendanceMetrics] = useState(null);
+  const [acquisitionMetrics, setAcquisitionMetrics] = useState(null);
   const current = dashboards[activeDashboard];
   const currentMain = useMemo(() => current.main, [current]);
 
@@ -681,7 +762,57 @@ export default function Dashboard() {
     return () => controller.abort();
   }, [activeDashboard, start, end]);
 
+  useEffect(() => {
+    if (activeDashboard !== 'aquisicao') return;
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams();
+    if (start) searchParams.set('start', start);
+    if (end) searchParams.set('end', end);
+
+    fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/acquisition?${searchParams.toString()}`), {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Falha ao carregar métricas de aquisição');
+        return response.json();
+      })
+      .then((payload) => setAcquisitionMetrics(payload))
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.error('[dashboard] failed to load acquisition metrics:', error);
+        }
+      });
+
+    return () => controller.abort();
+  }, [activeDashboard, start, end]);
+
   const cards = useMemo(() => {
+    if (activeDashboard === 'aquisicao') {
+      const metrics = acquisitionMetrics?.cards || {};
+      return current.cards.map((card) => {
+        if (card.title === 'Clientes vindos do anúncio') {
+          return { ...card, value: formatInteger(metrics.adCustomers), subtitle: 'Vieram de anúncio e entraram na base' };
+        }
+        if (card.title === 'Conversas iniciadas') {
+          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Cliques/conversas retornados pela Meta' };
+        }
+        if (card.title === 'Agendamentos do anúncio') {
+          return { ...card, value: formatInteger(metrics.adAppointments), subtitle: 'Leads de anúncio com agendamento' };
+        }
+        if (card.title === 'CAC por agendamento') {
+          return { ...card, value: formatCurrency(metrics.cacPerAppointment), subtitle: 'Spend / agendamentos' };
+        }
+        if (card.title === 'CAC por cliente novo') {
+          return { ...card, value: formatCurrency(metrics.cacPerNewCustomer), subtitle: 'Spend / clientes novos' };
+        }
+        if (card.title === 'Anúncio → agendamento') {
+          return { ...card, value: formatPercentCard(metrics.adToAppointmentRate), subtitle: 'Agendamentos / conversas' };
+        }
+        return card;
+      });
+    }
+
     if (activeDashboard !== 'atendimento') return current.cards;
 
     const receivedConversations = attendanceMetrics?.attendance?.receivedConversations;
@@ -733,7 +864,7 @@ export default function Dashboard() {
 
       return card;
     });
-  }, [activeDashboard, attendanceMetrics, current.cards]);
+  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, current.cards]);
 
   const atendimentoFunnelValues = useMemo(() => {
     if (activeDashboard !== 'atendimento') return currentMain.values;
@@ -748,6 +879,16 @@ export default function Dashboard() {
       finalDelta: '0,0 pp',
     };
   }, [activeDashboard, attendanceMetrics, currentMain.values]);
+
+  const acquisitionFunnelValues = useMemo(() => {
+    if (activeDashboard !== 'aquisicao') return null;
+    return {
+      clicks: acquisitionMetrics?.funnel?.clicks ?? 0,
+      conversations: acquisitionMetrics?.funnel?.conversations ?? 0,
+      appointments: acquisitionMetrics?.funnel?.appointments ?? 0,
+      newCustomers: acquisitionMetrics?.funnel?.newCustomers ?? 0,
+    };
+  }, [activeDashboard, acquisitionMetrics]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">
@@ -780,6 +921,8 @@ export default function Dashboard() {
 
       {currentMain.type === 'atendimentoFunnel' ? (
         <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
+      ) : activeDashboard === 'aquisicao' ? (
+        <AcquisitionFunnel values={acquisitionFunnelValues} />
       ) : (
         <ChartCard
           title={currentMain.title}
