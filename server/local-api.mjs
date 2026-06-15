@@ -1,10 +1,8 @@
 import http from 'node:http';
-import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { readJsonBackedStore, writeJsonBackedStore } from './sql-store.js';
 import { resolveConversationLabels } from './labels-store.js';
 import { fetchAllCustomersFromAppBarber } from './appbarber-sync.js';
@@ -15,15 +13,6 @@ const PORT = Number.parseInt(process.env.PORT || '5053', 10);
 const DATA_DIR = path.join(__dirname, 'data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 const WHATSAPP_STORE_PATH = process.env.WHATSAPP_STORE_PATH || path.join(DATA_DIR, 'whatsapp-store.json');
-const PYTHON_SYNC_BRIDGE_PATH = path.join(__dirname, 'newbr-sync-bridge.py');
-const execFileAsync = promisify(execFile);
-
-const NEWBR_SYNC_BASE_URL = process.env.NEWBR_SYNC_BASE_URL || process.env.API_BASE || 'https://painel.newbr.top';
-const NEWBR_SYNC_USERNAME = process.env.NEWBR_SYNC_USERNAME || process.env.NEWBR_USERNAME || '';
-const NEWBR_SYNC_PASSWORD = process.env.NEWBR_SYNC_PASSWORD || process.env.NEWBR_PASSWORD || '';
-const NEWBR_SYNC_PER_PAGE = Number.parseInt(process.env.NEWBR_SYNC_PER_PAGE || '100', 10);
-const NEWBR_SYNC_MAX_PAGES = Number.parseInt(process.env.NEWBR_SYNC_MAX_PAGES || '500', 10);
-const NEWBR_SYNC_TIMEOUT_MS = Number.parseInt(process.env.NEWBR_SYNC_TIMEOUT_MS || '60000', 10);
 const DEFAULT_CUSTOMER_AUTO_SYNC_INTERVAL_MS = Number.parseInt(
   process.env.CUSTOMER_AUTO_SYNC_INTERVAL_MS || `${60 * 60 * 1000}`,
   10,
@@ -39,11 +28,6 @@ const ATTENDANCE_PRESENCE_TTL_MS = Number.parseInt(
   process.env.ATTENDANCE_PRESENCE_TTL_MS || `${3 * 60 * 1000}`,
   10,
 );
-const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-  'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-  'Chrome/135.0.0.0 Safari/537.36';
-
 const entityMap = {
   Conversation: 'conversations',
   ConversationPreference: 'conversationPreferences',
@@ -348,22 +332,6 @@ const log = (message) => {
 const chatbotDebugLog = (message) => {
   if (CHATBOT_DEBUG) {
     log(`[chatbot] ${message}`);
-  }
-};
-
-const normalizeBaseUrl = (url) => {
-  const raw = String(url || '').trim();
-  if (!raw) {
-    throw new SyncError('Base URL do NewBr nao informada.', 500, 'config');
-  }
-
-  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-
-  try {
-    const parsed = new URL(withProtocol);
-    return `${parsed.protocol}//${parsed.host}`.replace(/\/+$/, '');
-  } catch {
-    throw new SyncError(`Base URL do NewBr invalida: ${raw}`, 500, 'config');
   }
 };
 
@@ -893,6 +861,14 @@ const getLabelCatalogForGreeting = (labelsState = LABELS_DEFAULT_STATE) => [
   ...(Array.isArray(labelsState.customLabels) ? labelsState.customLabels : []),
 ];
 
+const hasEnabledGreetingFallback = (store = {}) => {
+  const labelsState = normalizeLabelsState(store.labels);
+  return getLabelCatalogForGreeting(labelsState).some((label) => {
+    const config = getLabelGreetingConfig(labelsState, label.id);
+    return config.enabled && config.message;
+  });
+};
+
 const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   const labelsState = normalizeLabelsState(store.labels);
   const conversationId = String(conversation.id || '').trim();
@@ -948,7 +924,15 @@ const shouldResetGreetingAfterResolution = (store = {}, conversation = {}, sentA
   const sentAtMs = Date.parse(String(sentAt || ''));
   const resolvedAtMs = Date.parse(String(preference.resolved_at || ''));
   const lastClientMs = Date.parse(
-    String(conversation.last_client_message_time || conversation.last_received_at || conversation.lastMessageTime || ''),
+    String(
+      conversation.last_client_message_time ||
+        conversation.lastClientMessageTime ||
+        conversation.last_received_at ||
+        conversation.lastMessageTime ||
+        conversation.last_message_time ||
+        conversation.last_message_at ||
+        '',
+    ),
   );
 
   return (
@@ -1818,8 +1802,10 @@ const runChatbotBackendRuntimeOnce = async (options = {}) => {
       .map(([conversationId]) => String(conversationId || '').trim())
       .filter(Boolean),
   );
+  const greetingFallbackEnabled = hasEnabledGreetingFallback(store);
   const hasRuntimeWork =
     runtimeState.activeFlows.length > 0 ||
+    greetingFallbackEnabled ||
     runtimeState.activeSessionConversationIds.length > 0 ||
     runtimeState.waitingTimerConversationIds.length > 0 ||
     timedOutUraIds.size > 0;
@@ -1875,9 +1861,7 @@ const runChatbotBackendRuntimeOnce = async (options = {}) => {
       const matchedFlow = runtimeState.activeFlows.find((flow) =>
         evaluateChatbotRule(flow.startRule || 'contains', conversation.last_message, flow.triggerValue || ''),
       );
-      if (matchedFlow) {
-        candidates.push({ conversation, messageKey });
-      }
+      candidates.push({ conversation, messageKey });
     }
 
     if (candidates.length >= CHATBOT_BACKEND_MAX_CANDIDATES) {
@@ -3917,143 +3901,6 @@ class SyncError extends Error {
   }
 }
 
-const looksLikeCloudflare = (text) => {
-  const snippet = String(text || '').slice(0, 4000).toLowerCase();
-  return ['just a moment', 'cloudflare', 'cf-browser-verification', 'challenge-platform', 'attention required'].some(
-    (marker) => snippet.includes(marker),
-  );
-};
-
-const parseJsonResponse = async (response) => {
-  try {
-    return await response.json();
-  } catch {
-    const snippet = await response.text();
-    if (looksLikeCloudflare(snippet)) {
-      throw new SyncError(
-        'O servidor respondeu com uma pagina de protecao anti-bot/Cloudflare em vez de JSON.',
-        403,
-        'auth',
-        { html: snippet.slice(0, 500) },
-      );
-    }
-    throw new SyncError(`Resposta nao-JSON em ${response.url}`, response.status || 502, 'invalid_response', {
-      raw: snippet.slice(0, 500),
-    });
-  }
-};
-
-const fetchWithTimeout = async (url, options = {}, timeoutMs = NEWBR_SYNC_TIMEOUT_MS) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw new SyncError('A sincronizacao com o NewBr excedeu o tempo limite.', 504, 'timeout');
-    }
-    throw new SyncError(error?.message || 'Falha de rede ao acessar o NewBr.', 502, 'network');
-  } finally {
-    clearTimeout(timeoutId);
-  }
-};
-
-const findNumberDeep = (inputValue, preferredKeys = []) => {
-  if (inputValue == null) return null;
-  if (typeof inputValue === 'number') return inputValue;
-  if (typeof inputValue === 'string') {
-    const normalized = inputValue.replace(/\./g, '').replace(',', '.').trim();
-    const parsed = Number.parseFloat(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  if (Array.isArray(inputValue)) {
-    for (const item of inputValue) {
-      const found = findNumberDeep(item, preferredKeys);
-      if (found != null) return found;
-    }
-    return null;
-  }
-  if (inputValue && typeof inputValue === 'object') {
-    for (const key of preferredKeys) {
-      if (key in inputValue) {
-        const found = findNumberDeep(inputValue[key], preferredKeys);
-        if (found != null) return found;
-      }
-    }
-    for (const value of Object.values(inputValue)) {
-      const found = findNumberDeep(value, preferredKeys);
-      if (found != null) return found;
-    }
-  }
-  return null;
-};
-
-const extractRows = (payload) => {
-  if (Array.isArray(payload)) {
-    return payload.filter((item) => item && typeof item === 'object');
-  }
-
-  if (payload && typeof payload === 'object') {
-    for (const key of ['data', 'rows', 'items', 'customers', 'results']) {
-      const value = payload[key];
-      if (Array.isArray(value)) {
-        return value.filter((item) => item && typeof item === 'object');
-      }
-    }
-
-    if (payload.data && typeof payload.data === 'object') {
-      for (const key of ['data', 'rows', 'items', 'customers', 'results']) {
-        const value = payload.data[key];
-        if (Array.isArray(value)) {
-          return value.filter((item) => item && typeof item === 'object');
-        }
-      }
-    }
-  }
-
-  return [];
-};
-
-const extractMetaContainer = (payload) => {
-  if (payload && typeof payload === 'object') {
-    if (payload.meta && typeof payload.meta === 'object') return payload.meta;
-    if (payload.data && typeof payload.data === 'object' && payload.data.meta && typeof payload.data.meta === 'object') {
-      return payload.data.meta;
-    }
-  }
-  return {};
-};
-
-const extractLastPage = (payload) => {
-  const meta = extractMetaContainer(payload);
-  const value = findNumberDeep(meta, ['last_page', 'lastPage']) ?? findNumberDeep(payload, ['last_page', 'lastPage']);
-  return value != null ? Number(value) : null;
-};
-
-const extractCurrentPage = (payload) => {
-  const meta = extractMetaContainer(payload);
-  const value =
-    findNumberDeep(meta, ['current_page', 'currentPage', 'page']) ??
-    findNumberDeep(payload, ['current_page', 'currentPage', 'page']);
-  return value != null ? Number(value) : null;
-};
-
-const extractPerPage = (payload) => {
-  const meta = extractMetaContainer(payload);
-  const value = findNumberDeep(meta, ['per_page', 'perPage']) ?? findNumberDeep(payload, ['per_page', 'perPage']);
-  return value != null ? Number(value) : null;
-};
-
-const extractTotal = (payload) => {
-  const meta = extractMetaContainer(payload);
-  const value = findNumberDeep(meta, ['total']) ?? findNumberDeep(payload, ['total']);
-  return value != null ? Number(value) : null;
-};
-
 const findFirstValue = (inputValue, preferredKeys = []) => {
   if (inputValue == null) return null;
 
@@ -4193,324 +4040,6 @@ const mapStatusLabel = (status) => {
   }
 };
 
-const normalizeBrowserAuth = (input) => {
-  if (!input || typeof input !== 'object') return null;
-
-  const baseUrlRaw = String(input.baseUrl || '').trim();
-  const token = String(input.token || '').trim();
-  if (!baseUrlRaw || !token) return null;
-
-  return {
-    baseUrl: normalizeBaseUrl(baseUrlRaw),
-    token,
-    capturedAt: String(input.capturedAt || nowIso()).trim() || nowIso(),
-    source: String(input.source || 'browser-login').trim() || 'browser-login',
-  };
-};
-
-const extractToken = (payload) => {
-  if (!payload || typeof payload !== 'object') return null;
-
-  return (
-    payload.token ||
-    payload.accessToken ||
-    payload.access_token ||
-    payload.jwt ||
-    (payload.data && typeof payload.data === 'object' ? payload.data.token : null) ||
-    (payload.data && typeof payload.data === 'object' ? payload.data.accessToken : null) ||
-    (payload.data && typeof payload.data === 'object' ? payload.data.access_token : null) ||
-    null
-  );
-};
-
-const buildNewbrHeaders = (baseUrl, token = '', session = {}) => {
-  const headers = {
-    Accept: 'application/json, text/plain, */*',
-    'Content-Type': 'application/json',
-    'User-Agent': String(session?.userAgent || USER_AGENT).trim() || USER_AGENT,
-    Origin: baseUrl,
-    Referer: `${baseUrl}/`,
-    locale: 'pt',
-  };
-
-  if (session?.appVersion) {
-    headers['x-app-version'] = String(session.appVersion).trim();
-  }
-
-  if (session?.cookieHeader) {
-    headers.Cookie = String(session.cookieHeader).trim();
-  }
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  return headers;
-};
-
-const getNewbrConfig = () => ({
-  baseUrl: normalizeBaseUrl(NEWBR_SYNC_BASE_URL),
-  username: String(NEWBR_SYNC_USERNAME || '').trim(),
-  password: String(NEWBR_SYNC_PASSWORD || ''),
-  perPage: Number.isFinite(NEWBR_SYNC_PER_PAGE) && NEWBR_SYNC_PER_PAGE > 0 ? NEWBR_SYNC_PER_PAGE : 100,
-  maxPages: Number.isFinite(NEWBR_SYNC_MAX_PAGES) && NEWBR_SYNC_MAX_PAGES > 0 ? NEWBR_SYNC_MAX_PAGES : 500,
-});
-
-const mergeNewbrConfig = (overrides = {}) => {
-  const base = getNewbrConfig();
-  const credentials = overrides?.credentials && typeof overrides.credentials === 'object' ? overrides.credentials : {};
-  const session = overrides?.session && typeof overrides.session === 'object' ? overrides.session : {};
-  const cookieHeader = String(session.cookieHeader || '').trim();
-  const cfClearance = String(session.cfClearance || '').trim();
-
-  return {
-    ...base,
-    baseUrl: normalizeBaseUrl(credentials.baseUrl || base.baseUrl),
-    username: String(credentials.username || base.username || '').trim(),
-    password: String(credentials.password || base.password || ''),
-    session: {
-      userAgent: String(session.userAgent || '').trim(),
-      appVersion: String(session.appVersion || '').trim(),
-      cookieHeader: cookieHeader || (cfClearance ? `cf_clearance=${cfClearance}` : ''),
-      cfClearance,
-    },
-  };
-};
-
-const getPythonBinary = () => {
-  if (process.env.PYTHON_BIN) return process.env.PYTHON_BIN;
-  return process.platform === 'win32' ? 'python' : 'python3';
-};
-
-const loginToNewbr = async (config) => {
-  if (!config.username || !config.password) {
-    throw new SyncError('Credenciais do NewBr nao configuradas na VPS.', 500, 'config');
-  }
-
-  const loginUrl = `${config.baseUrl}/api/auth/login`;
-  const candidatePayloads = [
-    {
-      captcha: 'not-a-robot',
-      captchaChecked: true,
-      username: config.username,
-      password: config.password,
-      twofactor_code: '',
-      twofactor_recovery_code: '',
-      twofactor_trusted_device_id: '',
-    },
-    { username: config.username, password: config.password, captchaToken: '', twofactor: '' },
-    { username: config.username, password: config.password, captcha: null, twofactor: null },
-  ];
-
-  let lastError = null;
-
-  for (const payload of candidatePayloads) {
-    const response = await fetchWithTimeout(
-      loginUrl,
-      {
-        method: 'POST',
-        headers: buildNewbrHeaders(config.baseUrl, '', config.session),
-        body: JSON.stringify(payload),
-      },
-      NEWBR_SYNC_TIMEOUT_MS,
-    );
-
-    if (response.status >= 400) {
-      let detail = null;
-      try {
-        detail = await parseJsonResponse(response);
-      } catch (error) {
-        detail = error?.payload || null;
-      }
-      lastError = new SyncError('Falha no login do NewBr.', response.status, response.status === 401 || response.status === 403 ? 'auth' : 'login_failed', {
-        detail,
-      });
-      continue;
-    }
-
-    const data = await parseJsonResponse(response);
-    const token = extractToken(data);
-    if (!token) {
-      lastError = new SyncError('Login do NewBr respondeu sem token reconhecivel.', 502, 'auth', { raw: data });
-      continue;
-    }
-
-    return token;
-  }
-
-  throw lastError || new SyncError('Falha no login do NewBr.', 401, 'auth');
-};
-
-const getNewbrJson = async (config, token, endpoint) => {
-  const response = await fetchWithTimeout(
-    `${config.baseUrl}${endpoint}`,
-    {
-      method: 'GET',
-      headers: buildNewbrHeaders(config.baseUrl, token, config.session),
-    },
-    NEWBR_SYNC_TIMEOUT_MS,
-  );
-
-  if (response.status >= 400) {
-    let payload = null;
-    try {
-      payload = await parseJsonResponse(response);
-    } catch (error) {
-      payload = error?.payload || null;
-    }
-    throw new SyncError(`Falha ao consultar ${endpoint}`, response.status, response.status === 401 || response.status === 403 ? 'auth' : 'request_failed', payload);
-  }
-
-  return await parseJsonResponse(response);
-};
-
-const fetchAllCustomersWithToken = async (config, token) => {
-  const allRows = [];
-  let pagesLoaded = 0;
-  let lastPageSeen = null;
-
-  for (let page = 1; page <= config.maxPages; page += 1) {
-    const params = new URLSearchParams({
-      page: String(page),
-      username: '',
-      serverId: '',
-      packageId: '',
-      expiryFrom: '',
-      expiryTo: '',
-      status: '',
-      isTrial: '',
-      connections: '',
-      perPage: String(config.perPage),
-    });
-
-    const payload = await getNewbrJson(config, token, `/api/customers?${params.toString()}`);
-    const pageRows = extractRows(payload);
-    allRows.push(...pageRows);
-    pagesLoaded += 1;
-
-    const currentPage = extractCurrentPage(payload) || page;
-    lastPageSeen = extractLastPage(payload) || lastPageSeen;
-    const totalSeen = extractTotal(payload);
-    const perPageSeen = extractPerPage(payload) || config.perPage;
-
-    if (lastPageSeen && currentPage >= lastPageSeen) break;
-    if (totalSeen != null && allRows.length >= totalSeen) break;
-    if (pageRows.length === 0 || pageRows.length < perPageSeen) break;
-  }
-
-  return {
-    rows: allRows,
-    pagesLoaded,
-    lastPage: lastPageSeen,
-    totalRows: allRows.length,
-  };
-};
-
-const readPersistedBrowserAuth = async (baseUrl) => {
-  const store = await readStore();
-  const auth = normalizeBrowserAuth(store.customerSyncContext?.browserAuth);
-  if (!auth) return null;
-  return auth.baseUrl === normalizeBaseUrl(baseUrl) ? auth : null;
-};
-
-const fetchAllCustomersFromNewbr = async (overrides = {}) => {
-  const config = mergeNewbrConfig(overrides);
-  const explicitBrowserAuth = normalizeBrowserAuth(overrides?.auth);
-
-  if (explicitBrowserAuth?.token && explicitBrowserAuth.baseUrl === normalizeBaseUrl(config.baseUrl)) {
-    try {
-      log('trying browser token supplied by manual sync');
-      return await fetchAllCustomersWithToken(config, explicitBrowserAuth.token);
-    } catch (error) {
-      const tokenError = classifySyncError(error);
-      log(`supplied browser token rejected (${tokenError.code}); falling back to persisted token/login`);
-    }
-  }
-
-  const persistedBrowserAuth = await readPersistedBrowserAuth(config.baseUrl);
-
-  if (persistedBrowserAuth?.token) {
-    try {
-      log('trying persisted browser token for automatic NewBr sync');
-      return await fetchAllCustomersWithToken(config, persistedBrowserAuth.token);
-    } catch (error) {
-      const tokenError = classifySyncError(error);
-      log(`persisted browser token rejected (${tokenError.code}); falling back to login`);
-    }
-  }
-
-  try {
-    const token = await loginToNewbr(config);
-    return await fetchAllCustomersWithToken(config, token);
-  } catch (error) {
-    const syncError = classifySyncError(error);
-    const shouldUsePythonFallback =
-      syncError.code === 'auth' ||
-      syncError.code === 'invalid_response' ||
-      String(syncError.message || '').toLowerCase().includes('cloudflare');
-
-    if (!shouldUsePythonFallback) {
-      throw syncError;
-    }
-
-    log(`native NewBr sync blocked (${syncError.code}); trying python fallback`);
-    return await fetchAllCustomersFromPythonBridge(config);
-  }
-};
-
-const fetchAllCustomersFromPythonBridge = async (config) => {
-  try {
-    const { stdout } = await execFileAsync(
-      getPythonBinary(),
-      [PYTHON_SYNC_BRIDGE_PATH],
-      {
-        cwd: path.resolve(__dirname, '..'),
-        env: {
-          ...process.env,
-          NEWBR_SYNC_BASE_URL: config.baseUrl,
-          NEWBR_SYNC_USERNAME: config.username,
-          NEWBR_SYNC_PASSWORD: config.password,
-          NEWBR_SYNC_PER_PAGE: String(config.perPage),
-          NEWBR_SYNC_MAX_PAGES: String(config.maxPages),
-          NEWBR_SYNC_TIMEOUT_MS: String(NEWBR_SYNC_TIMEOUT_MS),
-          NEWBR_SYNC_USER_AGENT: String(config.session?.userAgent || ''),
-          NEWBR_SYNC_APP_VERSION: String(config.session?.appVersion || ''),
-          NEWBR_SYNC_COOKIE_HEADER: String(config.session?.cookieHeader || ''),
-          NEWBR_SYNC_CF_CLEARANCE: String(config.session?.cfClearance || ''),
-        },
-        timeout: Math.max(NEWBR_SYNC_TIMEOUT_MS * 2, 120000),
-        maxBuffer: 50 * 1024 * 1024,
-      },
-    );
-
-    const parsed = JSON.parse(stdout || '{}');
-    return {
-      rows: Array.isArray(parsed?.rows) ? parsed.rows : [],
-      pagesLoaded: Number(parsed?.pagesLoaded || 0),
-      lastPage: Number.isFinite(Number(parsed?.lastPage)) ? Number(parsed.lastPage) : null,
-      totalRows: Number(parsed?.totalRows || 0),
-    };
-  } catch (error) {
-    const stderr = String(error?.stderr || '').trim();
-    if (stderr) {
-      try {
-        const payload = JSON.parse(stderr);
-        throw new SyncError(payload?.error || 'Falha na sincronizacao Python do NewBr.', Number(payload?.status || 500), payload?.code || 'python_sync', payload);
-      } catch (parseError) {
-        if (parseError instanceof SyncError) {
-          throw parseError;
-        }
-      }
-    }
-
-    if (error?.code === 'ENOENT') {
-      throw new SyncError('Python nao encontrado no servidor para o fallback da sincronizacao NewBr.', 500, 'python_missing');
-    }
-
-    throw new SyncError(error?.message || 'Falha na sincronizacao Python do NewBr.', 500, 'python_sync');
-  }
-};
-
 const buildCustomerStableKey = (customer, fallbackIndex) => {
   const explicitId = extractCustomerField(customer, ['Codigo', 'UsuCodigo', 'id', 'customer_id', 'customerId', 'uuid', '_id']);
   if (explicitId) return explicitId;
@@ -4537,7 +4066,7 @@ const normalizeCustomerRow = (customer, index, syncedAt) => {
     raw.UltimaVisita = raw.UltimoAgendamento;
   }
 
-  const sourcePrefix = customer?.Nome || customer?.Codigo || customer?.UsuCodigo ? 'appbarber' : 'newbr';
+  const sourcePrefix = customer?.Nome || customer?.Codigo || customer?.UsuCodigo ? 'appbarber' : 'customer';
   const expiresAt = findExpiryDate(customer);
   const status = extractCustomerField(customer, ['status', 'situation', 'state']).trim().toUpperCase();
   const username = extractCustomerField(customer, ['Login', 'username', 'user_name', 'login', 'user', 'nome', 'name']);
@@ -7207,20 +6736,10 @@ const getRoutineFailedCustomerIdsForRun = async (routineId, runId) => {
 };
 
 const getPublicCustomerSyncState = (state) => {
-  const config = (() => {
-    try {
-      const settings = getNewbrConfig();
-      return {
-        configured: Boolean(settings.username && settings.password),
-        baseUrl: settings.baseUrl,
-      };
-    } catch {
-      return {
-        configured: false,
-        baseUrl: '',
-      };
-    }
-  })();
+  const config = {
+    configured: Boolean(String(process.env.APPBARBER_USER || '').trim() && String(process.env.APPBARBER_PASSWORD || '')),
+    baseUrl: 'https://sistema.appbarber.com.br',
+  };
 
   return {
     ...CUSTOMER_SYNC_DEFAULT_STATE,
@@ -7287,7 +6806,7 @@ const isAppBarberSyncMode = (mode) => String(mode || '').toLowerCase().includes(
 const finishCustomerSyncSuccess = async (mode, startedAt, result) => {
   const finishedAt = nowIso();
   const incomingCustomers = result.rows.map((row, index) => normalizeCustomerRow(row, index, finishedAt));
-  const source = String(result.source || (isAppBarberSyncMode(mode) ? 'appbarber' : 'newbr')).trim();
+  const source = String(result.source || (isAppBarberSyncMode(mode) ? 'appbarber' : 'manual')).trim();
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   let autoSyncIntervalMs = CUSTOMER_SYNC_SETTINGS_DEFAULT.autoSyncIntervalMinutes * 60 * 1000;
   let customers = incomingCustomers;
@@ -7341,7 +6860,7 @@ const finishCustomerSyncFailure = async (mode, startedAt, error) => {
   const finishedAt = nowIso();
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   let autoSyncIntervalMs = CUSTOMER_SYNC_SETTINGS_DEFAULT.autoSyncIntervalMinutes * 60 * 1000;
-  const providerName = isAppBarberSyncMode(mode) ? 'AppBarber' : 'NewBr';
+  const providerName = isAppBarberSyncMode(mode) ? 'AppBarber' : 'sincronizacao de clientes';
   const syncAuthMessage =
     syncError.code === 'auth'
       ? `Falha de autorizacao na sincronizacao ${providerName}. Revise as credenciais configuradas.`
@@ -7391,12 +6910,11 @@ const finishCustomerSyncImportedSuccess = async (payload = {}) => {
   let customers = incomingCustomers;
   let summary = buildCustomerSyncSummary(customers);
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
-  const source = String(payload.source || 'browser-newbr').trim() || 'browser-newbr';
+  const source = String(payload.source || 'browser-import').trim() || 'browser-import';
   const pagesLoaded = Number.parseInt(String(payload.pagesLoaded ?? ''), 10);
   const totalRows = Number.parseInt(String(payload.totalRows ?? ''), 10);
   const lastPageValue = Number.parseInt(String(payload.lastPage ?? ''), 10);
   const mode = String(payload.mode || 'browser_manual').trim() || 'browser_manual';
-  const browserAuth = normalizeBrowserAuth(payload.auth);
   let autoSyncIntervalMs = CUSTOMER_SYNC_SETTINGS_DEFAULT.autoSyncIntervalMinutes * 60 * 1000;
 
   const store = await updateStore((current) => {
@@ -7404,10 +6922,6 @@ const finishCustomerSyncImportedSuccess = async (payload = {}) => {
     customers = mergeCustomerRows(current.customers, incomingCustomers);
     summary = buildCustomerSyncSummary(customers);
     current.customers = customers;
-    current.customerSyncContext = {
-      ...current.customerSyncContext,
-      browserAuth: browserAuth || current.customerSyncContext?.browserAuth || null,
-    };
     current.customerSync = {
       ...current.customerSync,
       status: 'success',
@@ -7454,7 +6968,7 @@ const finishCustomerSyncBrowserFailure = async (payload = {}) => {
   const message = String(payload.error || 'Nao foi possivel sincronizar clientes pelo navegador.').trim();
   const errorCode = String(payload.errorCode || 'browser').trim() || 'browser';
   const authErrorMessage = payload.authErrorMessage ? String(payload.authErrorMessage).trim() : null;
-  const source = String(payload.source || 'browser-newbr').trim() || 'browser-newbr';
+  const source = String(payload.source || 'browser-import').trim() || 'browser-import';
   const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   let retryDelayMs = CUSTOMER_SYNC_RETRY_INTERVAL_MS;
 
@@ -7492,18 +7006,6 @@ const finishCustomerSyncBrowserFailure = async (payload = {}) => {
 
   customerSyncRunning = false;
   return store.customerSync;
-};
-
-const executeCustomerSync = async (mode, startedAt, overrides = {}) => {
-  try {
-    const result = await fetchAllCustomersFromNewbr(overrides);
-    return await finishCustomerSyncSuccess(mode, startedAt, result);
-  } catch (error) {
-    await finishCustomerSyncFailure(mode, startedAt, error);
-    throw classifySyncError(error);
-  } finally {
-    customerSyncRunning = false;
-  }
 };
 
 const executeAppBarberCustomerSync = async (mode, startedAt, overrides = {}) => {
@@ -7558,39 +7060,6 @@ const startAppBarberDailyAppointmentSync = async () =>
     },
     'appbarber_daily_agendamentos',
   );
-
-const startCustomerSync = async (mode = 'manual', overrides = {}) => {
-  if (customerSyncRunning) {
-    const store = await readStore();
-    return {
-      started: false,
-      sync: store.customerSync,
-    };
-  }
-
-  customerSyncRunning = true;
-
-  const providedBrowserAuth = normalizeBrowserAuth(overrides?.auth);
-  if (providedBrowserAuth) {
-    await updateStore((current) => {
-      current.customerSyncContext = {
-        ...current.customerSyncContext,
-        browserAuth: providedBrowserAuth,
-      };
-      return current;
-    });
-  }
-
-  const { startedAt, sync } = await markCustomerSyncRunning(mode);
-  void executeCustomerSync(mode, startedAt, overrides).catch((error) => {
-    log(`Falha na sincronizacao de clientes: ${error?.message || error}`);
-  });
-
-  return {
-    started: true,
-    sync,
-  };
-};
 
 const recoverCustomerSyncStateOnBoot = async () => {
   const store = await updateStore((current) => {
@@ -8271,7 +7740,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/local/customers/sync') {
       const payload = await readBody(req);
-      const result = await startCustomerSync('manual', payload);
+      const result = await startAppBarberManualCustomerSync(payload);
       if (!result.started) {
         return sendJson(res, 409, {
           error: 'Ja existe uma sincronizacao de clientes em andamento.',
@@ -8344,7 +7813,7 @@ const server = http.createServer(async (req, res) => {
         pagesLoaded: payload?.pagesLoaded,
         lastPage: payload?.lastPage,
         totalRows: payload?.totalRows,
-        source: payload?.source || 'browser-newbr',
+        source: payload?.source || 'browser-import',
         mode: payload?.mode || 'browser_manual',
         startedAt: payload?.startedAt || nowIso(),
       });
