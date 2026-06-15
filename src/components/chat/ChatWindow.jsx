@@ -311,6 +311,68 @@ function buildTemplatePreview(template) {
 function getTemplateButtons(template = {}) {
   if (Array.isArray(template.buttons) && template.buttons.length) return template.buttons;
   if (Array.isArray(template.buttonConfig) && template.buttonConfig.length) return template.buttonConfig;
+  const buttonsComponent = Array.isArray(template.components)
+    ? template.components.find((component) => String(component?.type || '').toUpperCase() === 'BUTTONS')
+    : null;
+  if (Array.isArray(buttonsComponent?.buttons) && buttonsComponent.buttons.length) {
+    return buttonsComponent.buttons
+      .map((button, index) => {
+        const metaType = String(button?.type || '').toUpperCase();
+        const label = String(button?.text || '').trim();
+        if (!label && metaType !== 'ORDER_DETAILS') return null;
+        if (metaType === 'URL') {
+          return {
+            id: `button-${index}`,
+            type: 'url',
+            label,
+            text: label,
+            url: button?.url || '',
+          };
+        }
+        if (metaType === 'PHONE_NUMBER') {
+          return {
+            id: `button-${index}`,
+            type: 'phone',
+            label,
+            text: label,
+            phoneNumber: button?.phone_number || '',
+          };
+        }
+        if (metaType === 'COPY_CODE' || metaType === 'COPY_OFFER_CODE') {
+          return {
+            id: `button-${index}`,
+            type: 'copy_code',
+            label: label || 'Copiar codigo',
+            text: label || 'Copiar codigo',
+            offerCode: button?.example || '',
+          };
+        }
+        if (metaType === 'FLOW') {
+          return {
+            id: `button-${index}`,
+            type: 'flow',
+            label,
+            text: label,
+            flowId: button?.flow_id || '',
+          };
+        }
+        if (metaType === 'ORDER_DETAILS') {
+          return {
+            id: `button-${index}`,
+            type: 'order',
+            label: label || 'Ver pedido',
+            text: label || 'Ver pedido',
+          };
+        }
+        return {
+          id: `button-${index}`,
+          type: 'quick_reply',
+          label,
+          text: label,
+        };
+      })
+      .filter(Boolean);
+  }
   return [];
 }
 

@@ -5,16 +5,20 @@ import {
   Bot,
   Check,
   CheckCheck,
+  Copy,
   ExternalLink,
   FileText,
   Forward,
   Headphones,
   Info,
   LoaderCircle,
+  MessageSquare,
+  Phone,
   Plus,
   RotateCcw,
   Reply,
   SmilePlus,
+  ShoppingCart,
   Trash2,
   UserRound,
 } from 'lucide-react';
@@ -462,6 +466,47 @@ function TemplateButtons({ buttons, isAgent }) {
           <span className="truncate">{button.label || button.text || 'Botão'}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TemplateButtonsPreview({ buttons, isAgent }) {
+  const safeButtons = Array.isArray(buttons) ? buttons.filter((button) => button?.label || button?.text) : [];
+  if (!safeButtons.length) return null;
+
+  const getButtonMeta = (button = {}) => {
+    const type = String(button.type || button.buttonType || '').trim().toLowerCase();
+    if (['url', 'website', 'acessar_site'].includes(type)) return { icon: ExternalLink, label: 'Abrir link' };
+    if (['phone', 'phone_number', 'ligar'].includes(type)) return { icon: Phone, label: 'Ligar' };
+    if (['copy_code', 'copy_offer_code', 'copiar_codigo'].includes(type)) return { icon: Copy, label: 'Copiar codigo' };
+    if (['flow', 'fluxo_whatsapp'].includes(type)) return { icon: MessageSquare, label: 'Fluxo' };
+    if (['order', 'order_details', 'pedido'].includes(type)) return { icon: ShoppingCart, label: 'Pedido' };
+    return { icon: MessageSquare, label: 'Resposta rapida' };
+  };
+
+  return (
+    <div className={cn('mt-2 overflow-hidden rounded-xl border', isAgent ? 'border-primary-foreground/15 bg-primary-foreground/8' : 'border-border bg-muted/45')}>
+      {safeButtons.map((button, index) => {
+        const { icon: Icon, label } = getButtonMeta(button);
+        return (
+          <div
+            key={button.id || `${button.label || button.text}-${index}`}
+            className={cn(
+              'flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium',
+              isAgent ? 'text-primary-foreground' : 'text-primary',
+              index !== safeButtons.length - 1 && (isAgent ? 'border-b border-primary-foreground/15' : 'border-b border-border'),
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Icon className="h-3.5 w-3.5 shrink-0 opacity-75" />
+              <span className="truncate">{button.label || button.text || 'Botao'}</span>
+            </span>
+            <span className={cn('shrink-0 text-[10px] uppercase tracking-[0.06em]', isAgent ? 'text-primary-foreground/65' : 'text-muted-foreground')}>
+              {label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1129,7 +1174,7 @@ export default function ChatMessage({
               </p>
               )}
 
-              <TemplateButtons buttons={message.template_buttons || message.templateButtons} isAgent={isAgent} />
+              <TemplateButtonsPreview buttons={message.template_buttons || message.templateButtons} isAgent={isAgent} />
 
               <UploadState message={message} isAgent={isAgent} onRetry={() => onRetry?.(message)} />
 

@@ -3643,6 +3643,77 @@ const buildTemplatePreviewText = async ({
   }
 };
 
+const normalizeMetaTemplatePreviewButton = (button = {}, index = 0) => {
+  const type = String(button?.type || "").trim().toUpperCase();
+  const label = String(button?.text || "").trim();
+  if (!label && type !== "ORDER_DETAILS") return null;
+  if (type === "URL") {
+    return {
+      id: `template-button-${index}`,
+      type: "url",
+      label,
+      text: label,
+      url: String(button?.url || "").trim() || undefined,
+    };
+  }
+  if (type === "PHONE_NUMBER") {
+    return {
+      id: `template-button-${index}`,
+      type: "phone",
+      label,
+      text: label,
+      phoneNumber: String(button?.phone_number || button?.phoneNumber || "").trim() || undefined,
+    };
+  }
+  if (type === "COPY_CODE" || type === "COPY_OFFER_CODE") {
+    return {
+      id: `template-button-${index}`,
+      type: "copy_code",
+      label: label || "Copiar codigo",
+      text: label || "Copiar codigo",
+      offerCode: String(button?.example || button?.offer_code || button?.offerCode || "").trim() || undefined,
+    };
+  }
+  if (type === "FLOW") {
+    return {
+      id: `template-button-${index}`,
+      type: "flow",
+      label,
+      text: label,
+      flowId: String(button?.flow_id || button?.flowId || "").trim() || undefined,
+    };
+  }
+  if (type === "ORDER_DETAILS") {
+    return {
+      id: `template-button-${index}`,
+      type: "order",
+      label: label || "Ver pedido",
+      text: label || "Ver pedido",
+    };
+  }
+  return {
+    id: `template-button-${index}`,
+    type: "quick_reply",
+    label,
+    text: label,
+  };
+};
+
+const getMetaTemplatePreviewButtons = async ({ templateName, language }) => {
+  try {
+    const template = await findMetaTemplateForPreview({ templateName, language });
+    const buttonsComponent = template?.components?.find(
+      (component) => String(component?.type || "").toUpperCase() === "BUTTONS",
+    );
+    return Array.isArray(buttonsComponent?.buttons)
+      ? buttonsComponent.buttons.map(normalizeMetaTemplatePreviewButton).filter(Boolean)
+      : [];
+  } catch (error) {
+    console.warn("[templates] button preview fallback:", error?.message || error);
+    return [];
+  }
+};
+
 const persistTemplateMessageAsAgent = async ({
   phone,
   text,
@@ -3682,12 +3753,14 @@ const persistTemplateMessageAsAgent = async ({
     }));
   const persistedText =
     renderedPreviewText || (templateLabel ? `Template: ${templateLabel}` : "Template enviado");
+  const templateButtons = await getMetaTemplatePreviewButtons({ templateName, language });
 
   await upsertAgentMessage({
     to: normalizePhone(phone) || phone,
     text: persistedText,
     messageId: responseMessageId || null,
     attachments: templateAttachments,
+    templateButtons,
     origin: "routine",
   });
   await markRoutineConversationAsBroadcast(phone);
@@ -18757,6 +18830,83 @@ const buildConversation = ({ waId, name }) => {
 
 
 
+const normalizeTemplateButtonParameterInput = (buttonParameters = []) => {
+  if (!Array.isArray(buttonParameters)) return [];
+  return buttonParameters
+    .map((item) => {
+      if (item && typeof item === "object") {
+        const rawIndex = item.index ?? item.buttonIndex ?? item.position;
+        const index = Number.isFinite(Number(rawIndex)) ? Number(rawIndex) : null;
+        return {
+          index,
+          type: String(item.type || item.buttonType || item.sub_type || "").trim().toUpperCase(),
+          value: String(item.value ?? item.text ?? item.payload ?? item.urlSuffix ?? "").trim(),
+        };
+      }
+      return {
+        index: null,
+        type: "",
+        value: String(item || "").trim(),
+      };
+    })
+    .filter((item) => item.value.length > 0);
+};
+
+const buildTemplateButtonComponents = async ({ templateName, language, buttonParameters = [] }) => {
+  const normalizedParams = normalizeTemplateButtonParameterInput(buttonParameters);
+  if (!normalizedParams.length) return [];
+
+  let templateButtons = [];
+  try {
+    const template = await findMetaTemplateForPreview({ templateName, language });
+    const buttonsComponent = template?.components?.find(
+      (component) => String(component?.type || "").toUpperCase() === "BUTTONS",
+    );
+    templateButtons = Array.isArray(buttonsComponent?.buttons) ? buttonsComponent.buttons : [];
+  } catch (error) {
+    console.warn("[templates] button component lookup fallback:", error?.message || error);
+  }
+
+  if (!templateButtons.length) {
+    return [
+      {
+        type: "button",
+        sub_type: "url",
+        index: "0",
+        parameters: [{ type: "text", text: normalizedParams[0].value }],
+      },
+    ];
+  }
+
+  return normalizedParams
+    .map((item, fallbackIndex) => {
+      const buttonIndex = item.index !== null ? item.index : fallbackIndex;
+      const button = templateButtons[buttonIndex] || {};
+      const metaType = item.type || String(button?.type || "").trim().toUpperCase();
+
+      if (metaType === "QUICK_REPLY") {
+        return {
+          type: "button",
+          sub_type: "quick_reply",
+          index: String(buttonIndex),
+          parameters: [{ type: "payload", payload: item.value }],
+        };
+      }
+
+      if (metaType === "URL") {
+        return {
+          type: "button",
+          sub_type: "url",
+          index: String(buttonIndex),
+          parameters: [{ type: "text", text: item.value }],
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+};
+
 const sendTemplateMessage = async ({
   to,
   parameters,
@@ -18908,17 +19058,12 @@ const sendTemplateMessage = async ({
   } else if (normalizedHeaderFormat && normalizedHeaderFormat !== "TEXT") {
     throw new Error("Missing header media URL");
   }
-  const normalizedButtonParams = (buttonParameters || [])
-    .map((text) => String(text || "").trim())
-    .filter((text) => text.length > 0);
-  if (normalizedButtonParams.length > 0) {
-    components.push({
-      type: "button",
-      sub_type: "url",
-      index: "0",
-      parameters: normalizedButtonParams.map((text) => ({ type: "text", text })),
-    });
-  }
+  const buttonComponents = await buildTemplateButtonComponents({
+    templateName: templateName || DEFAULT_TEMPLATE_NAME,
+    language,
+    buttonParameters,
+  });
+  components.push(...buttonComponents);
   const payload = {
 
 
@@ -51701,7 +51846,12 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         text,
         messageId: responseMessageId,
         attachments: templateAttachments,
-        templateButtons: normalizeTemplatePreviewButtons(templateButtons),
+        templateButtons: normalizeTemplatePreviewButtons(templateButtons).length
+          ? normalizeTemplatePreviewButtons(templateButtons)
+          : await getMetaTemplatePreviewButtons({
+              templateName: templateName || DEFAULT_TEMPLATE_NAME,
+              language,
+            }),
         replyTo,
         origin: origin || "panel",
         senderName: senderName || agentName || null,
