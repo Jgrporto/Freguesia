@@ -151,17 +151,17 @@ const DEFAULT_LABEL_GREETINGS = {
   'system-new-customer': {
     enabled: true,
     message: 'Olá! Seja bem-vindo à Barbearia Freguesia. Quer agendar seu corte?',
-    repeatMode: 'once_per_day',
+    repeatMode: 'once_per_open_conversation',
   },
   'system-customer': {
     enabled: true,
     message: 'Fala! Bom te ver por aqui de novo. Quer agendar seu próximo corte?',
-    repeatMode: 'once_per_day',
+    repeatMode: 'once_per_open_conversation',
   },
   'system-recovery': {
     enabled: true,
     message: 'Fala! Já tem um tempinho desde seu último corte. Quer reservar um horário essa semana?',
-    repeatMode: 'once_per_day',
+    repeatMode: 'once_per_open_conversation',
   },
 };
 
@@ -254,13 +254,6 @@ const routineLogClients = new Set();
 const localEventClients = new Set();
 
 const nowIso = () => new Date().toISOString();
-const getGreetingDateKey = (date = new Date()) =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(date);
 const nowMs = () => Date.now();
 
 const hashToken = (value) => crypto.createHash('sha256').update(String(value || '')).digest('hex');
@@ -517,7 +510,7 @@ const normalizeLabelGreeting = (value = {}, fallback = {}) => {
   return {
     enabled: Boolean(source.enabled ?? base.enabled ?? false),
     message: String(source.message ?? base.message ?? '').trim(),
-    repeatMode: String(source.repeatMode || source.mode || base.repeatMode || 'once_per_day').trim() || 'once_per_day',
+    repeatMode: String(source.repeatMode || source.mode || base.repeatMode || 'once_per_open_conversation').trim() || 'once_per_open_conversation',
     updatedAt: source.updatedAt || source.updated_at || base.updatedAt || null,
   };
 };
@@ -892,7 +885,7 @@ const resolveAutomaticSystemLabelId = (store = {}, conversation = {}) => {
 
 const isOpenConversationForGreeting = (conversation = {}) => {
   const status = String(conversation.status || conversation.queue_status || '').trim().toLowerCase();
-  return !['resolved', 'closed', 'fechada', 'encerrada'].includes(status);
+  return !['closed', 'fechada', 'encerrada'].includes(status);
 };
 
 const getLabelCatalogForGreeting = (labelsState = LABELS_DEFAULT_STATE) => [
@@ -931,15 +924,52 @@ const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   return resolveAutomaticSystemLabelId(store, conversation);
 };
 
-const hasGreetingAlreadySent = (store = {}, conversationId = '', labelId = '', dateKey = getGreetingDateKey()) => {
+const resolveConversationPreference = (store = {}, conversationId = '') => {
+  const safeConversationId = String(conversationId || '').trim();
+  if (!safeConversationId) return null;
+  return (Array.isArray(store.conversationPreferences) ? store.conversationPreferences : []).find(
+    (preference) => {
+      const sourceIds = [
+        ...(Array.isArray(preference?.sourceConversationIds) ? preference.sourceConversationIds : []),
+        ...(Array.isArray(preference?.source_conversation_ids) ? preference.source_conversation_ids : []),
+      ];
+      return (
+        String(preference?.conversation_id || preference?.id || '').trim() === safeConversationId ||
+        sourceIds.some((id) => String(id || '').trim() === safeConversationId)
+      );
+    },
+  ) || null;
+};
+
+const shouldResetGreetingAfterResolution = (store = {}, conversation = {}, sentAt = '') => {
+  const preference = resolveConversationPreference(store, conversation.id);
+  if (!preference || String(preference.resolution_status || '').trim() !== 'resolved') return false;
+
+  const sentAtMs = Date.parse(String(sentAt || ''));
+  const resolvedAtMs = Date.parse(String(preference.resolved_at || ''));
+  const lastClientMs = Date.parse(
+    String(conversation.last_client_message_time || conversation.last_received_at || conversation.lastMessageTime || ''),
+  );
+
+  return (
+    Number.isFinite(sentAtMs) &&
+    Number.isFinite(resolvedAtMs) &&
+    Number.isFinite(lastClientMs) &&
+    sentAtMs <= resolvedAtMs &&
+    lastClientMs > resolvedAtMs
+  );
+};
+
+const hasGreetingAlreadySent = (store = {}, conversation = {}, labelId = '') => {
+  const conversationId = String(conversation.id || '').trim();
   const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
   const sent = greetings.sent && typeof greetings.sent === 'object' ? greetings.sent : {};
   const record = sent?.[conversationId]?.[labelId] || {};
   if (!record?.sentAt) return false;
-  return String(record.dateKey || getGreetingDateKey(new Date(record.sentAt))) === String(dateKey);
+  return !shouldResetGreetingAfterResolution(store, conversation, record.sentAt);
 };
 
-const markGreetingSent = (store = {}, { conversationId, labelId, messageKey, message, dateKey = getGreetingDateKey() }) => {
+const markGreetingSent = (store = {}, { conversationId, labelId, messageKey, message }) => {
   const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
   const sent = greetings.sent && typeof greetings.sent === 'object' ? greetings.sent : {};
   store.chatbotGreetings = {
@@ -950,7 +980,6 @@ const markGreetingSent = (store = {}, { conversationId, labelId, messageKey, mes
         ...(sent[conversationId] || {}),
         [labelId]: {
           sentAt: nowIso(),
-          dateKey,
           messageKey,
           message,
         },
@@ -962,12 +991,10 @@ const markGreetingSent = (store = {}, { conversationId, labelId, messageKey, mes
 const isActiveOutboundOrTemplateConversation = (conversation = {}) => {
   const type = String(conversation.last_message_type || conversation.messageType || '').trim().toLowerCase();
   const origin = String(conversation.origin || conversation.last_message_origin || conversation.source || '').trim().toLowerCase();
-  const lastSentMs = Date.parse(conversation.last_sent_at || '');
-  const lastClientMs = Date.parse(conversation.last_client_message_time || conversation.last_received_at || '');
 
   if (['template', 'hsm'].includes(type)) return true;
   if (['template', 'hsm', 'campaign', 'routine', 'label-campaign', 'active'].includes(origin)) return true;
-  return Number.isFinite(lastSentMs) && Number.isFinite(lastClientMs) && lastSentMs >= lastClientMs;
+  return false;
 };
 
 const runChatbotGreetingFallback = async (store, conversation = {}, options = {}) => {
@@ -992,8 +1019,7 @@ const runChatbotGreetingFallback = async (store, conversation = {}, options = {}
     return { ok: true, skipped: true, reason: 'fallback_greeting_disabled', labelId };
   }
 
-  const greetingDateKey = getGreetingDateKey();
-  if (hasGreetingAlreadySent(store, conversationId, labelId, greetingDateKey)) {
+  if (hasGreetingAlreadySent(store, conversation, labelId)) {
     chatbotDebugLog(`skipped fallback_greeting_already_sent conversationId=${conversationId} labelId=${labelId}`);
     return { ok: true, skipped: true, reason: 'fallback_greeting_already_sent', labelId };
   }
@@ -1004,7 +1030,7 @@ const runChatbotGreetingFallback = async (store, conversation = {}, options = {}
 
   try {
     await sendChatbotText(conversation, greeting.message);
-    markGreetingSent(store, { conversationId, labelId, messageKey, message: greeting.message, dateKey: greetingDateKey });
+    markGreetingSent(store, { conversationId, labelId, messageKey, message: greeting.message });
     appendChatbotEvent(store, {
       conversationId,
       flowId: `greeting:${labelId}`,
@@ -8142,7 +8168,7 @@ const server = http.createServer(async (req, res) => {
             {
               enabled: Boolean(payload?.enabled),
               message: payload?.message,
-              repeatMode: payload?.repeatMode || payload?.mode || 'once_per_day',
+              repeatMode: payload?.repeatMode || payload?.mode || 'once_per_open_conversation',
               updatedAt: nowIso(),
             },
             DEFAULT_LABEL_GREETINGS[labelId] || {},

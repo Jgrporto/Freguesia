@@ -197,7 +197,7 @@ export default function Labels() {
       config: {
         enabled: Boolean(greetingDraft.enabled),
         message: String(greetingDraft.message || '').trim(),
-        repeatMode: 'once_per_day',
+        repeatMode: 'once_per_open_conversation',
       },
     });
   }, [greetingDraft.enabled, greetingDraft.message, greetingLabel, greetingMutation]);
@@ -495,7 +495,7 @@ export default function Labels() {
           <DialogHeader>
             <DialogTitle>Configurar etiqueta</DialogTitle>
             <DialogDescription>
-              Defina a saudacao enviada na primeira mensagem do dia para esta etiqueta.
+              Defina a saudacao enviada quando a conversa entra no atendimento por esta etiqueta.
             </DialogDescription>
           </DialogHeader>
 
