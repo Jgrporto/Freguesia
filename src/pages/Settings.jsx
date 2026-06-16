@@ -65,6 +65,7 @@ import {
   normalizeNavigationPermissions,
 } from '@/lib/navigation-permissions';
 import { deleteService, fetchAvailableWhatsappNumbers, fetchServices, saveService } from '@/lib/services-api';
+import { fetchRoutines } from '@/lib/routines-api';
 import { normalizeService } from '@/lib/services';
 import { cn } from '@/lib/utils';
 import {
@@ -231,6 +232,87 @@ function SectionHeading({ icon: Icon, title, description, action }) {
   );
 }
 
+function DashboardValueList({
+  label,
+  description,
+  values = [],
+  disabled = false,
+  inputValue = '',
+  inputPlaceholder = '',
+  onInputChange,
+  onAddValue,
+  onRemoveValue,
+  options = [],
+  optionPlaceholder = 'Selecionar',
+  isLoadingOptions = false,
+  emptyLabel = 'Nenhum valor configurado.',
+}) {
+  const normalizedValues = Array.isArray(values) ? values.filter(Boolean) : [];
+  const availableOptions = Array.isArray(options)
+    ? options.filter((option) => option?.value && !normalizedValues.includes(option.value))
+    : [];
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium text-foreground">{label}</label>
+      {onInputChange ? (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            value={inputValue}
+            onChange={(event) => onInputChange(event.target.value)}
+            disabled={disabled}
+            placeholder={inputPlaceholder}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onAddValue(inputValue)}
+            disabled={disabled || !String(inputValue || '').trim()}
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar
+          </Button>
+        </div>
+      ) : (
+        <Select value="" onValueChange={onAddValue} disabled={disabled || isLoadingOptions || availableOptions.length === 0}>
+          <SelectTrigger>
+            <SelectValue placeholder={isLoadingOptions ? 'Carregando...' : optionPlaceholder} />
+          </SelectTrigger>
+          <SelectContent>
+            {availableOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+
+      <div className="flex min-h-11 flex-wrap gap-2 rounded-xl border border-border bg-background p-2">
+        {normalizedValues.length ? (
+          normalizedValues.map((value) => (
+            <Badge key={value} variant="secondary" className="gap-2 px-2.5 py-1">
+              <span className="max-w-[240px] truncate">{value}</span>
+              <button
+                type="button"
+                className="rounded-full text-muted-foreground hover:text-foreground disabled:opacity-50"
+                onClick={() => onRemoveValue(value)}
+                disabled={disabled}
+                aria-label={`Remover ${value}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </Badge>
+          ))
+        ) : (
+          <span className="px-1 py-1.5 text-xs text-muted-foreground">{emptyLabel}</span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { theme, setTheme } = useTheme();
   const { effectiveUser } = useAuth();
@@ -250,6 +332,7 @@ export default function Settings() {
   const [notificationSettings, setNotificationSettings] = useState(DEFAULT_NOTIFICATION_SETTINGS);
   const [customerSyncSettings, setCustomerSyncSettings] = useState(DEFAULT_CUSTOMER_SYNC_SETTINGS);
   const [dashboardSettings, setDashboardSettings] = useState(DEFAULT_DASHBOARD_SETTINGS);
+  const [dashboardAdKeywordInput, setDashboardAdKeywordInput] = useState('');
   const [settingsAudit, setSettingsAudit] = useState(() => readJsonStorage(SETTINGS_AUDIT_STORAGE_KEY, []));
   const [activeSettingsTab, setActiveSettingsTab] = useState('profile');
   const [confirmDialog, setConfirmDialog] = useState({
@@ -321,6 +404,12 @@ export default function Settings() {
     staleTime: 10000,
   });
 
+  const { data: routinesData, isLoading: routinesLoading } = useQuery({
+    queryKey: ['settings', 'dashboard-routines'],
+    queryFn: fetchRoutines,
+    staleTime: 10000,
+  });
+
   useEffect(() => {
     if (!notificationSettingsData) {
       return;
@@ -350,6 +439,35 @@ export default function Settings() {
 
     setDashboardSettings(readDashboardSettings(dashboardSettingsData));
   }, [dashboardSettingsData]);
+
+  const dashboardRoleOptions = useMemo(
+    () =>
+      (Array.isArray(roles) ? roles : [])
+        .map((role) => String(role?.name || role?.role_name || '').trim())
+        .filter(Boolean)
+        .map((name) => ({ value: name, label: name })),
+    [roles],
+  );
+
+  const dashboardRoutineOptions = useMemo(() => {
+    const items = Array.isArray(routinesData?.items)
+      ? routinesData.items
+      : Array.isArray(routinesData)
+        ? routinesData
+        : [];
+    return items
+      .map((routine) =>
+        String(
+          routine?.name ||
+            routine?.title ||
+            routine?.templateName ||
+            routine?.details?.templateName ||
+            '',
+        ).trim(),
+      )
+      .filter(Boolean)
+      .map((name) => ({ value: name, label: name }));
+  }, [routinesData]);
 
   useEffect(() => {
     if (!notificationSettingsHydratedRef.current) {
@@ -680,14 +798,27 @@ export default function Settings() {
     }));
   };
 
-  const handleDashboardListChange = (field, value) => {
-    const items = String(value || '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean);
+  const handleDashboardListAdd = (field, value) => {
+    const nextValue = String(value || '').trim();
+    if (!nextValue) return;
     setDashboardSettings((current) => ({
       ...current,
-      [field]: items,
+      [field]: Array.from(
+        new Map([...(Array.isArray(current[field]) ? current[field] : []), nextValue].map((item) => [String(item).trim().toLowerCase(), String(item).trim()])).values(),
+      ).filter(Boolean),
+    }));
+    if (field === 'adKeywords') {
+      setDashboardAdKeywordInput('');
+    }
+  };
+
+  const handleDashboardListRemove = (field, value) => {
+    const target = String(value || '').trim().toLowerCase();
+    setDashboardSettings((current) => ({
+      ...current,
+      [field]: (Array.isArray(current[field]) ? current[field] : []).filter(
+        (item) => String(item || '').trim().toLowerCase() !== target,
+      ),
     }));
   };
 
@@ -1446,29 +1577,30 @@ export default function Settings() {
           />
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Palavras-chave de anuncios</label>
-              <Textarea
-                value={dashboardSettings.adKeywords.join(', ')}
-                onChange={(event) => handleDashboardListChange('adKeywords', event.target.value)}
-                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
-                rows={3}
-                placeholder="anuncio, instagram, facebook, utm_, fbclid"
-              />
-              <p className="text-xs text-muted-foreground">Usadas quando nao houver dado direto da Meta para identificar conversas vindas de anuncio.</p>
-            </div>
+            <DashboardValueList
+              label="Palavras-chave de anuncios"
+              description="Usadas quando nao houver dado direto da Meta para identificar conversas vindas de anuncio."
+              values={dashboardSettings.adKeywords}
+              inputValue={dashboardAdKeywordInput}
+              inputPlaceholder="Ex.: instagram, facebook, fbclid"
+              onInputChange={setDashboardAdKeywordInput}
+              onAddValue={(value) => handleDashboardListAdd('adKeywords', value)}
+              onRemoveValue={(value) => handleDashboardListRemove('adKeywords', value)}
+              disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+            />
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Funcoes consideradas atendente</label>
-              <Textarea
-                value={dashboardSettings.attendantRoleKeywords.join(', ')}
-                onChange={(event) => handleDashboardListChange('attendantRoleKeywords', event.target.value)}
-                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
-                rows={3}
-                placeholder="atendente, comercial"
-              />
-              <p className="text-xs text-muted-foreground">A conversao por atendente considera usuarios cuja funcao contenha esses termos.</p>
-            </div>
+            <DashboardValueList
+              label="Funcoes consideradas atendente"
+              description="A conversao por atendente considera somente usuarios vinculados as funcoes selecionadas."
+              values={dashboardSettings.attendantRoleKeywords}
+              options={dashboardRoleOptions}
+              optionPlaceholder={rolesLoading ? 'Carregando funcoes...' : 'Adicionar funcao cadastrada'}
+              isLoadingOptions={rolesLoading}
+              onAddValue={(value) => handleDashboardListAdd('attendantRoleKeywords', value)}
+              onRemoveValue={(value) => handleDashboardListRemove('attendantRoleKeywords', value)}
+              disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+              emptyLabel="Nenhuma funcao selecionada."
+            />
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
@@ -1480,7 +1612,9 @@ export default function Settings() {
                   onChange={(event) => handleDashboardNumberChange('appointmentAttributionWindowDays', event.target.value)}
                   disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
                 />
-                <p className="text-xs text-muted-foreground">Dias maximos entre conversa de anuncio e agendamento realizado.</p>
+                <p className="text-xs text-muted-foreground">
+                  Define ate quantos dias depois da conversa de anuncio um agendamento ainda sera atribuido ao anuncio. Evita contar cortes muito distantes como resultado daquela campanha.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -1492,7 +1626,9 @@ export default function Settings() {
                   onChange={(event) => handleDashboardNumberChange('newCustomerWindowDays', event.target.value)}
                   disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
                 />
-                <p className="text-xs text-muted-foreground">Dias de cadastro usados para separar novo e antigo.</p>
+                <p className="text-xs text-muted-foreground">
+                  Define por quantos dias apos o cadastro o cliente entra como novo. Depois desse limite ele passa a ser tratado como antigo nas metricas comparativas.
+                </p>
               </div>
             </div>
 
@@ -1506,7 +1642,9 @@ export default function Settings() {
                   onChange={(event) => handleDashboardNumberChange('templateResponseWindowDays', event.target.value)}
                   disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
                 />
-                <p className="text-xs text-muted-foreground">Dias apos envio para atribuir resposta ao template.</p>
+                <p className="text-xs text-muted-foreground">
+                  Define a janela para ligar uma resposta do cliente ao template enviado. Respostas fora desse prazo nao entram na taxa daquele template.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -1518,20 +1656,25 @@ export default function Settings() {
                   onChange={(event) => handleDashboardNumberChange('templateRecoveryWindowDays', event.target.value)}
                   disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
                 />
-                <p className="text-xs text-muted-foreground">Dias apos envio para atribuir agendamento realizado.</p>
+                <p className="text-xs text-muted-foreground">
+                  Define a janela para ligar um corte realizado ao template enviado. Evita atribuir recuperacoes antigas ou sem relacao com o disparo.
+                </p>
               </div>
             </div>
 
-            <div className="space-y-2 lg:col-span-2">
-              <label className="text-sm font-medium text-foreground">Rotinas/templates de follow-up</label>
-              <Textarea
-                value={dashboardSettings.followUpRoutineNameKeywords.join(', ')}
-                onChange={(event) => handleDashboardListChange('followUpRoutineNameKeywords', event.target.value)}
+            <div className="lg:col-span-2">
+              <DashboardValueList
+                label="Rotinas/templates de follow-up"
+                description="Os disparos enviados no painel de follow-up somam somente as rotinas/templates selecionados."
+                values={dashboardSettings.followUpRoutineNameKeywords}
+                options={dashboardRoutineOptions}
+                optionPlaceholder={routinesLoading ? 'Carregando rotinas...' : 'Adicionar rotina cadastrada'}
+                isLoadingOptions={routinesLoading}
+                onAddValue={(value) => handleDashboardListAdd('followUpRoutineNameKeywords', value)}
+                onRemoveValue={(value) => handleDashboardListRemove('followUpRoutineNameKeywords', value)}
                 disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
-                rows={3}
-                placeholder="follow, recuper, retorno, corte"
+                emptyLabel="Nenhuma rotina selecionada."
               />
-              <p className="text-xs text-muted-foreground">Os disparos enviados no painel de follow-up somam rotinas cujos nomes contenham esses termos.</p>
             </div>
           </div>
         </PageSectionCard>
