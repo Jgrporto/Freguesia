@@ -1,4 +1,4 @@
-import { CHATBOT_START_NODE_ID } from '@/lib/chatbot-flows-api';
+import { CHATBOT_START_NODE_ID, normalizeStartTriggerValues } from '@/lib/chatbot-flows-api';
 
 export const normalizeChatbotText = (value) =>
   String(value || '')
@@ -33,6 +33,17 @@ export const evaluateChatbotRule = (rule, sourceValue, expectedValue) => {
   return left.includes(right);
 };
 
+export const evaluateChatbotRuleValues = (rule, sourceValue, expectedValues = []) => {
+  const values = normalizeStartTriggerValues({
+    triggerValues: Array.isArray(expectedValues) ? expectedValues : [expectedValues],
+  });
+  if (!values.length) return false;
+  if (String(rule || 'contains').trim() === 'not_equal') {
+    return values.every((value) => evaluateChatbotRule(rule, sourceValue, value));
+  }
+  return values.some((value) => evaluateChatbotRule(rule, sourceValue, value));
+};
+
 export const buildConversationMessageKey = (conversation = {}) =>
   [
     conversation.id,
@@ -43,10 +54,10 @@ export const buildConversationMessageKey = (conversation = {}) =>
 
 export const getMatchingActiveFlow = (activeFlows = [], message = '') =>
   activeFlows.find((flow) =>
-    evaluateChatbotRule(
+    evaluateChatbotRuleValues(
       flow.startRule || flow.rule || 'contains',
       message,
-      flow.triggerValue || flow.startTriggerValue || '',
+      flow.triggerValues || [flow.triggerValue || flow.startTriggerValue || ''],
     ),
   ) || null;
 

@@ -26,7 +26,7 @@ Permitir criar, importar, editar, ativar, baixar, excluir e executar fluxos visu
   - Servico
   - Horario
   - Code
-- Todo flow possui o componente fixo `inicio fluxo`, com icone de robo, regra de comparacao e valor gatilho. Ele nao pode ser removido.
+- Todo flow possui o componente fixo `inicio fluxo`, com icone de robo, regra de comparacao e um ou mais valores gatilho. Ele nao pode ser removido.
 - O editor aceita clique para adicionar componentes e arrastar da barra superior para o canvas.
 - A tecla `Delete` remove componentes selecionados; `Backspace` nao e usado para exclusao.
 - Ao existir alteracao nao salva, a tela bloqueia a saida e exibe aviso para salvar antes.
@@ -40,7 +40,7 @@ Permitir criar, importar, editar, ativar, baixar, excluir e executar fluxos visu
 
 ## Componentes do editor
 
-- Inicio: define regra e palavra/valor que dispara o flow.
+- Inicio: define regra e palavra/valor que dispara o flow. Pode ter valores adicionais; se qualquer valor configurado bater com a mensagem do cliente, o mesmo flow e iniciado.
 - Mensagem: envia texto e, quando houver header, envia imagem, video ou documento com upload e preview.
 - Audio: envia audio com upload e preview para ouvir.
 - Etiqueta: adiciona ou remove etiquetas personalizadas independentes.

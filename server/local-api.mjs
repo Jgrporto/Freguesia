@@ -365,6 +365,14 @@ const normalizeStringArray = (value) =>
     ),
   );
 
+const normalizeChatbotTriggerValues = (data = {}) => {
+  const source = data && typeof data === 'object' ? data : {};
+  return normalizeStringArray([
+    ...(Array.isArray(source.triggerValues) ? source.triggerValues : []),
+    source.triggerValue,
+  ]);
+};
+
 const sameStringArrayValues = (left = [], right = []) => {
   const normalizedLeft = normalizeStringArray(left);
   const normalizedRight = normalizeStringArray(right);
@@ -542,6 +550,7 @@ const normalizeChatbotFlowState = (state = {}) => {
     (node) => node?.id === CHATBOT_START_NODE_ID || node?.data?.componentType === 'start',
   );
   const startSource = startIndex >= 0 ? sourceNodes[startIndex] : {};
+  const triggerValues = normalizeChatbotTriggerValues(startSource.data);
   const startNode = {
     id: CHATBOT_START_NODE_ID,
     type: 'chatbotNode',
@@ -556,7 +565,8 @@ const normalizeChatbotFlowState = (state = {}) => {
       componentType: 'start',
       name: String(startSource.data?.name || 'inicio fluxo').trim() || 'inicio fluxo',
       rule: String(startSource.data?.rule || 'contains').trim() || 'contains',
-      triggerValue: String(startSource.data?.triggerValue || '').trim(),
+      triggerValue: triggerValues[0] || '',
+      triggerValues,
     },
   };
   const nodes = [
@@ -646,7 +656,8 @@ const buildChatbotRuntimeState = (store = {}) => {
         code: flow.code,
         name: flow.name,
         startRule: String(startNode?.data?.rule || 'contains').trim() || 'contains',
-        triggerValue: String(startNode?.data?.triggerValue || '').trim(),
+        triggerValue: normalizeChatbotTriggerValues(startNode?.data)[0] || '',
+        triggerValues: normalizeChatbotTriggerValues(startNode?.data),
         updated_date: flow.updated_date,
       };
     });
@@ -1283,6 +1294,15 @@ const evaluateChatbotRule = (rule, sourceValue, expectedValue) => {
   return left.includes(right);
 };
 
+const evaluateChatbotRuleValues = (rule, sourceValue, expectedValues = []) => {
+  const values = normalizeStringArray(Array.isArray(expectedValues) ? expectedValues : [expectedValues]);
+  if (!values.length) return false;
+  if (String(rule || 'contains').trim() === 'not_equal') {
+    return values.every((value) => evaluateChatbotRule(rule, sourceValue, value));
+  }
+  return values.some((value) => evaluateChatbotRule(rule, sourceValue, value));
+};
+
 const interpolateChatbotText = (template = '', variables = {}) =>
   String(template || '').replace(/\{#([A-Za-z0-9_]+)\}/g, (_, key) => {
     const normalizedKey = normalizeChatbotVariableKey(key);
@@ -1827,7 +1847,11 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
 
   const matchedFlow = flows.find((flow) => {
     const startNode = getNodeById(flow, CHATBOT_START_NODE_ID);
-    return evaluateChatbotRule(startNode?.data?.rule || 'contains', lastMessage, startNode?.data?.triggerValue || '');
+    return evaluateChatbotRuleValues(
+      startNode?.data?.rule || 'contains',
+      lastMessage,
+      normalizeChatbotTriggerValues(startNode?.data),
+    );
   });
   if (!matchedFlow) {
     chatbotDebugLog(`no trigger matched conversationId=${conversationId}; checking fallback greeting`);
@@ -1980,7 +2004,11 @@ const runChatbotBackendRuntimeOnce = async (options = {}) => {
       }
     } else if (hasNewClientChatbotMessage(conversation)) {
       const matchedFlow = runtimeState.activeFlows.find((flow) =>
-        evaluateChatbotRule(flow.startRule || 'contains', conversation.last_message, flow.triggerValue || ''),
+        evaluateChatbotRuleValues(
+          flow.startRule || 'contains',
+          conversation.last_message,
+          flow.triggerValues || [flow.triggerValue || ''],
+        ),
       );
       candidates.push({ conversation, messageKey });
     }

@@ -15,6 +15,20 @@ export const EMPTY_FLOW_STATE = {
   viewport: { x: 0, y: 0, zoom: 1 },
 };
 
+export const normalizeStartTriggerValues = (data = {}) => {
+  const source = data && typeof data === 'object' ? data : {};
+  return Array.from(
+    new Set(
+      [
+        ...(Array.isArray(source.triggerValues) ? source.triggerValues : []),
+        source.triggerValue,
+      ]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean),
+    ),
+  );
+};
+
 const requestChatbotJson = async (path = '', options = {}) => {
   const response = await requestLocalApi(`/chatbot/flows${path}`, options);
   const data = await parseJsonResponse(response);
@@ -36,9 +50,12 @@ export const createStartNode = (node = {}) => ({
     name: 'inicio fluxo',
     rule: 'contains',
     triggerValue: '',
+    triggerValues: [],
     ...(node.data && typeof node.data === 'object' ? node.data : {}),
     componentType: 'start',
     name: String(node.data?.name || 'inicio fluxo').trim() || 'inicio fluxo',
+    triggerValue: normalizeStartTriggerValues(node.data)[0] || String(node.data?.triggerValue || '').trim(),
+    triggerValues: normalizeStartTriggerValues(node.data),
   },
 });
 

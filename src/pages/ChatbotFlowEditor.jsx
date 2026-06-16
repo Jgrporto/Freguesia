@@ -32,6 +32,7 @@ import {
   ensureStartNode,
   exportChatbotFlowJson,
   getChatbotFlow,
+  normalizeStartTriggerValues,
   normalizeFlowState,
   updateChatbotFlow,
   uploadChatbotAsset,
@@ -111,7 +112,7 @@ const createNodeData = (type, nodes) => {
     name,
   };
 
-  if (type === 'start') return { componentType: 'start', name: 'inicio fluxo', rule: 'contains', triggerValue: '' };
+  if (type === 'start') return { componentType: 'start', name: 'inicio fluxo', rule: 'contains', triggerValue: '', triggerValues: [] };
   if (type === 'message') return { ...base, headerType: 'none', text: '' };
   if (type === 'audio') return { ...base, audioName: '', audioAsset: null };
   if (type === 'label') return { ...base, addLabelId: '', removeLabelId: '', removeAllCustom: false };
@@ -127,6 +128,32 @@ const createNodeData = (type, nodes) => {
 const getNodeLabel = (node) => {
   const meta = COMPONENTS_BY_TYPE.get(node?.data?.componentType) || COMPONENTS[0];
   return node?.data?.name || meta.label;
+};
+
+const getEditableTriggerValues = (data = {}) => {
+  if (Array.isArray(data.triggerValues) && data.triggerValues.length) {
+    return data.triggerValues.map((item) => String(item ?? ''));
+  }
+  const normalized = normalizeStartTriggerValues(data);
+  return normalized.length ? normalized : [''];
+};
+
+const buildTriggerValuesPatch = (values = []) => {
+  const seen = new Set();
+  const triggerValues = values
+    .map((item) => String(item ?? ''))
+    .filter((item) => {
+      const normalized = item.trim();
+      if (!normalized) return true;
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+  const firstFilledValue = triggerValues.find((item) => item.trim())?.trim() || '';
+  return {
+    triggerValue: firstFilledValue,
+    triggerValues,
+  };
 };
 
 function ChatbotNode({ data, selected }) {
@@ -233,6 +260,7 @@ function PropertyPanel({
   }
 
   const data = selectedNode.data || {};
+  const triggerValues = data.componentType === 'start' ? getEditableTriggerValues(data) : [];
 
   return (
     <aside className="nodrag nopan w-[380px] flex-shrink-0 overflow-y-auto border-l border-border bg-card p-5" onPointerDownCapture={(event) => event.stopPropagation()}>
@@ -265,9 +293,42 @@ function PropertyPanel({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               <FieldLabel>Valor</FieldLabel>
-              <Input value={data.triggerValue || ''} onChange={(event) => onNodeChange(selectedNode.id, { triggerValue: event.target.value })} placeholder="Ex.: oi, suporte, renovar" />
+              {triggerValues.map((value, index) => (
+                <div key={`${index}-${triggerValues.length}`} className="flex items-center gap-2">
+                  <Input
+                    value={value}
+                    onChange={(event) => {
+                      const nextValues = [...triggerValues];
+                      nextValues[index] = event.target.value;
+                      onNodeChange(selectedNode.id, buildTriggerValuesPatch(nextValues));
+                    }}
+                    placeholder={index === 0 ? 'Ex.: Quero agendar meu corte na Freguesia!' : 'Outro valor reconhecido'}
+                  />
+                  {triggerValues.length > 1 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => onNodeChange(selectedNode.id, buildTriggerValuesPatch(triggerValues.filter((_, itemIndex) => itemIndex !== index)))}
+                      aria-label="Remover valor"
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full justify-center gap-2"
+                onClick={() => onNodeChange(selectedNode.id, buildTriggerValuesPatch([...triggerValues, '']))}
+              >
+                <Plus className="h-4 w-4" />
+                Adicionar valor
+              </Button>
             </div>
           </>
         ) : null}
