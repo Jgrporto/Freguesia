@@ -869,23 +869,70 @@ const hasEnabledGreetingFallback = (store = {}) => {
   });
 };
 
+const getGreetingConversationIdCandidates = (conversation = {}) => {
+  const ids = new Set();
+  const addId = (value) => {
+    const safeValue = String(value || '').trim();
+    if (safeValue) ids.add(safeValue);
+  };
+  const addPhoneIds = (value) => {
+    const phone = normalizePhone(value);
+    if (!phone) return;
+    addId(`agg-${phone}`);
+    addId(`wa-${phone}`);
+    addId(phone);
+  };
+
+  addId(conversation.id);
+  addId(conversation.conversationId);
+  addId(conversation.conversation_id);
+  addId(conversation.aggregate_conversation_id);
+  addId(conversation.aggregateConversationId);
+  addId(conversation.customer?.id);
+  addId(conversation.customer_id);
+  addId(conversation.source_conversation_id);
+  addId(conversation.sourceConversationId);
+
+  if (Array.isArray(conversation.source_conversation_ids)) {
+    conversation.source_conversation_ids.forEach(addId);
+  }
+  if (Array.isArray(conversation.sourceConversationIds)) {
+    conversation.sourceConversationIds.forEach(addId);
+  }
+
+  addPhoneIds(conversation.contact_phone);
+  addPhoneIds(conversation.phone);
+  addPhoneIds(conversation.customer?.phone);
+  addPhoneIds(conversation.customer?.jid);
+
+  return Array.from(ids);
+};
+
+const labelHasEnabledGreeting = (labelsState, labelId) => {
+  const config = getLabelGreetingConfig(labelsState, labelId);
+  return Boolean(config.enabled && config.message);
+};
+
 const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   const labelsState = normalizeLabelsState(store.labels);
-  const conversationId = String(conversation.id || '').trim();
+  const conversationIdCandidates = getGreetingConversationIdCandidates(conversation);
   const catalog = getLabelCatalogForGreeting(labelsState);
   const catalogIds = new Set(catalog.map((label) => String(label.id)));
-
-  const stageLabelId = String(labelsState.stageAssignments?.[conversationId] || '').trim();
-  if (stageLabelId && catalogIds.has(stageLabelId)) return stageLabelId;
-
-  const manualIds = Array.isArray(labelsState.assignments?.[conversationId]) ? labelsState.assignments[conversationId] : [];
-  const manualWithGreeting = manualIds.find((labelId) => {
+  const isUsableGreetingLabel = (labelId) => {
     const safeLabelId = String(labelId || '').trim();
-    if (!catalogIds.has(safeLabelId)) return false;
-    const config = getLabelGreetingConfig(labelsState, safeLabelId);
-    return config.enabled && config.message;
-  });
-  if (manualWithGreeting) return String(manualWithGreeting);
+    return safeLabelId && catalogIds.has(safeLabelId) && labelHasEnabledGreeting(labelsState, safeLabelId);
+  };
+
+  for (const conversationId of conversationIdCandidates) {
+    const stageLabelId = String(labelsState.stageAssignments?.[conversationId] || '').trim();
+    if (isUsableGreetingLabel(stageLabelId)) return stageLabelId;
+  }
+
+  for (const conversationId of conversationIdCandidates) {
+    const manualIds = Array.isArray(labelsState.assignments?.[conversationId]) ? labelsState.assignments[conversationId] : [];
+    const manualWithGreeting = manualIds.find(isUsableGreetingLabel);
+    if (manualWithGreeting) return String(manualWithGreeting);
+  }
 
   const conversationLabelIds = [
     conversation.stage_label_id,
@@ -894,7 +941,7 @@ const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   ]
     .map((labelId) => String(labelId || '').trim())
     .filter(Boolean);
-  const conversationKnownLabel = conversationLabelIds.find((labelId) => catalogIds.has(labelId));
+  const conversationKnownLabel = conversationLabelIds.find(isUsableGreetingLabel);
   if (conversationKnownLabel) return conversationKnownLabel;
 
   return resolveAutomaticSystemLabelId(store, conversation);
@@ -1058,6 +1105,14 @@ const normalizeWhatsappConversationForChatbot = (conversation = {}) => {
 
   return {
     id: String(conversation.id || '').trim(),
+    conversation_id: conversation.conversation_id || conversation.conversationId || '',
+    aggregate_conversation_id: conversation.aggregate_conversation_id || conversation.aggregateConversationId || '',
+    source_conversation_id: conversation.source_conversation_id || conversation.sourceConversationId || '',
+    source_conversation_ids: Array.isArray(conversation.source_conversation_ids)
+      ? conversation.source_conversation_ids
+      : Array.isArray(conversation.sourceConversationIds)
+        ? conversation.sourceConversationIds
+        : [],
     contact_name: customer.name || conversation.contact_name || '',
     contact_phone: customer.phone || conversation.contact_phone || conversation.phone || '',
     phone_number_id: conversation.phone_number_id || conversation.phoneNumberId || customer.phone_number_id || null,
