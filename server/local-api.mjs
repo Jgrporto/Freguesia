@@ -918,9 +918,14 @@ const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   const conversationIdCandidates = getGreetingConversationIdCandidates(conversation);
   const catalog = getLabelCatalogForGreeting(labelsState);
   const catalogIds = new Set(catalog.map((label) => String(label.id)));
+  const systemLabelIds = new Set(SYSTEM_LABEL_IDS);
   const isUsableGreetingLabel = (labelId) => {
     const safeLabelId = String(labelId || '').trim();
     return safeLabelId && catalogIds.has(safeLabelId) && labelHasEnabledGreeting(labelsState, safeLabelId);
+  };
+  const isUsableConversationLabel = (labelId) => {
+    const safeLabelId = String(labelId || '').trim();
+    return isUsableGreetingLabel(safeLabelId) && !systemLabelIds.has(safeLabelId);
   };
 
   for (const conversationId of conversationIdCandidates) {
@@ -941,7 +946,7 @@ const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   ]
     .map((labelId) => String(labelId || '').trim())
     .filter(Boolean);
-  const conversationKnownLabel = conversationLabelIds.find(isUsableGreetingLabel);
+  const conversationKnownLabel = conversationLabelIds.find(isUsableConversationLabel);
   if (conversationKnownLabel) return conversationKnownLabel;
 
   return resolveAutomaticSystemLabelId(store, conversation);
