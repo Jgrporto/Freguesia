@@ -5222,8 +5222,6 @@ const getCustomerLastResolvedAppointmentDateKey = (customer = {}) =>
     getObjectField(customer, [
       'UltimoAgendamentoResolvido',
       'ultimoAgendamentoResolvido',
-      'UltimoAgendamentoEncerrado',
-      'ultimoAgendamentoEncerrado',
       'lastResolvedAppointmentAt',
       'lastAppointmentResolvedAt',
     ]),
