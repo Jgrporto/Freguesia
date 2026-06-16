@@ -913,6 +913,41 @@ const labelHasEnabledGreeting = (labelsState, labelId) => {
   return Boolean(config.enabled && config.message);
 };
 
+const resolveGreetingVariableValues = (store = {}, conversation = {}) => {
+  const customer = findCustomerForConversation(store, conversation);
+  const conversationCustomer = conversation.customer && typeof conversation.customer === 'object' ? conversation.customer : {};
+  const name = String(
+    getObjectField(customer, ['Nome', 'nome', 'name', 'display_name', 'displayName', 'username', 'usuario']) ||
+      conversation.contact_name ||
+      conversationCustomer.name ||
+      conversationCustomer.username ||
+      '',
+  ).trim();
+  const phone = String(
+    resolveConversationPhone(conversation) ||
+      getObjectField(customer, ['Celular', 'Telefone', 'whatsapp', 'telefone', 'phone', 'mobile', 'cellphone']) ||
+      '',
+  ).trim();
+
+  return {
+    nome: name,
+    name,
+    cliente: name,
+    telefone: phone,
+    phone,
+    whatsapp: phone,
+    atendente: '',
+  };
+};
+
+const renderGreetingMessage = (message = '', store = {}, conversation = {}) => {
+  const variables = resolveGreetingVariableValues(store, conversation);
+  return String(message || '').replace(/\{#([^}]+)\}/g, (_, key) => {
+    const normalizedKey = String(key || '').trim().toLowerCase();
+    return variables[normalizedKey] ?? '';
+  });
+};
+
 const resolveGreetingLabelId = (store = {}, conversation = {}) => {
   const labelsState = normalizeLabelsState(store.labels);
   const conversationIdCandidates = getGreetingConversationIdCandidates(conversation);
@@ -1065,8 +1100,9 @@ const runChatbotGreetingFallback = async (store, conversation = {}, options = {}
   }
 
   try {
-    await sendChatbotText(conversation, greeting.message);
-    markGreetingSent(store, { conversationId, labelId, messageKey, message: greeting.message });
+    const renderedGreetingMessage = renderGreetingMessage(greeting.message, store, conversation);
+    await sendChatbotText(conversation, renderedGreetingMessage);
+    markGreetingSent(store, { conversationId, labelId, messageKey, message: renderedGreetingMessage });
     appendChatbotEvent(store, {
       conversationId,
       flowId: `greeting:${labelId}`,
