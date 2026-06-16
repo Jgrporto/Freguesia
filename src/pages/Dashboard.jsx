@@ -847,7 +847,7 @@ export default function Dashboard() {
           return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Cliques/conversas retornados pela Meta' };
         }
         if (card.title === 'Agendamentos do anúncio') {
-          return { ...card, value: formatInteger(metrics.adAppointments), subtitle: 'Leads de anúncio com agendamento' };
+          return { ...card, value: formatInteger(metrics.adAppointments), subtitle: 'Agendados ou realizados' };
         }
         if (card.title === 'CAC por agendamento') {
           return { ...card, value: formatCurrency(metrics.cacPerAppointment), subtitle: 'Spend / agendamentos' };
@@ -889,7 +889,7 @@ export default function Dashboard() {
     const receivedConversations = attendanceMetrics?.attendance?.receivedConversations;
     const firstResponseSeconds = attendanceMetrics?.firstResponse?.seconds;
     const tmrSeconds = attendanceMetrics?.tmr?.seconds;
-    const appointments = attendanceMetrics?.commerce?.appointments?.count;
+    const appointments = attendanceMetrics?.commerce?.conversions?.count;
     const conversionRate = attendanceMetrics?.rates?.finalConversionRate;
 
     return current.cards.map((card) => {

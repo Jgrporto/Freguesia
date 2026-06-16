@@ -7224,6 +7224,47 @@ const getDashboardCustomerLastResolvedAppointmentMs = (customer = {}) =>
     ]),
   );
 
+const getDashboardCustomerPendingAppointmentMs = (customer = {}) =>
+  parseDashboardCustomerDateMs(
+    getDashboardField(customer, [
+      "AgendamentoPendenteData",
+      "agendamentoPendenteData",
+      "ProximoAgendamento",
+      "proximoAgendamento",
+      "pendingAppointmentAt",
+      "nextAppointmentAt",
+    ]),
+  );
+
+const dashboardCustomerHasPendingAppointment = (customer = {}) => {
+  const pendingTotal = Number(
+    getDashboardField(customer, [
+      "AgendamentoPendenteTotal",
+      "agendamentoPendenteTotal",
+      "pendingAppointmentsTotal",
+    ]),
+  );
+  if (Number.isFinite(pendingTotal) && pendingTotal > 0) return true;
+  const pendingFlag = normalizeDashboardText(
+    getDashboardField(customer, [
+      "AgendamentoPendente",
+      "agendamentoPendente",
+      "pendingAppointment",
+      "hasPendingAppointment",
+    ]),
+  );
+  return ["sim", "yes", "true", "1", "agendado", "pendente"].includes(pendingFlag);
+};
+
+const getDashboardCustomerAppointmentStatusDates = (customer = {}) => {
+  const pendingMs = getDashboardCustomerPendingAppointmentMs(customer);
+  const resolvedMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
+  return {
+    pendingMs: dashboardCustomerHasPendingAppointment(customer) ? pendingMs : null,
+    resolvedMs,
+  };
+};
+
 const getDashboardCustomerRegistrationMs = (customer = {}) =>
   parseDashboardCustomerDateMs(
     getDashboardField(customer, ["Cadastro", "cadastro", "created_at", "createdAt", "created_date"]),
@@ -7467,17 +7508,22 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     firstResponseCount > 0 ? Math.round(totalFirstResponseSeconds / firstResponseCount) : 0;
 
   const appointmentPhones = new Set();
+  const conversionPhones = new Set();
   const agentConversions = new Map();
   for (const conversationId of conversationIdsWithClientMessages) {
     const conversation = conversationsById[conversationId] || {};
     const phone = resolveDashboardConversationPhone(conversation, conversationId);
     const customer = findDashboardCustomerByPhone(customerIndex, phone);
-    const appointmentMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
-    if (!customer || !isWithinDashboardRange(appointmentMs, normalizedStartMs, normalizedEndMs)) continue;
-
     const normalizedPhone = getDashboardCustomerPhone(customer) || phone;
-    if (!normalizedPhone || appointmentPhones.has(normalizedPhone)) continue;
-    appointmentPhones.add(normalizedPhone);
+    if (!customer || !normalizedPhone) continue;
+
+    const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
+    if (isWithinDashboardRange(pendingMs, normalizedStartMs, normalizedEndMs)) {
+      appointmentPhones.add(normalizedPhone);
+    }
+    if (!isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)) continue;
+    if (conversionPhones.has(normalizedPhone)) continue;
+    conversionPhones.add(normalizedPhone);
 
     const agentRef = {
       id: conversation.assigned_agent_id || conversation.assignedAgentId || "",
@@ -7500,7 +7546,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   }
 
   const appointments = appointmentPhones.size;
-  const conversions = appointments;
+  const conversions = conversionPhones.size;
   const appointmentRate = receivedConversations > 0 ? appointments / receivedConversations : 0;
   const appointmentToConversionRate = appointments > 0 ? conversions / appointments : 0;
   const finalConversionRate = receivedConversations > 0 ? conversions / receivedConversations : 0;
@@ -7536,7 +7582,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       receivedConversations,
       firstResponseAverageSeconds,
       tmrSeconds,
-      appointments,
+      appointments: conversions,
       conversionRate: finalConversionRate,
     },
     attendance: {
@@ -7558,7 +7604,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     commerce: {
       appointments: {
         count: appointments,
-        source: "appbarber_resolved",
+        source: "appbarber_scheduled",
       },
       conversions: {
         count: conversions,
@@ -7864,14 +7910,16 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
     if (customer) {
       customerPhones.add(phone);
-      const appointmentMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
+      const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
       const attributionStartMs = adSignal.firstSignalAtMs || normalizedStartMs;
-      const insideAttributionWindow =
-        Number.isFinite(appointmentMs) &&
-        appointmentMs >= attributionStartMs &&
-        appointmentMs <= attributionStartMs + appointmentWindowMs &&
-        appointmentMs >= normalizedStartMs &&
-        appointmentMs <= normalizedEndMs;
+      const insideAttributionWindow = [pendingMs, resolvedMs].some(
+        (appointmentMs) =>
+          Number.isFinite(appointmentMs) &&
+          appointmentMs >= attributionStartMs &&
+          appointmentMs <= attributionStartMs + appointmentWindowMs &&
+          appointmentMs >= normalizedStartMs &&
+          appointmentMs <= normalizedEndMs,
+      );
       if (insideAttributionWindow) appointmentPhones.add(getDashboardCustomerPhone(customer) || phone);
     }
     const keywords = adSignal.keywords.length ? adSignal.keywords : ["sem-palavra-chave"];
@@ -54484,9 +54532,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
 
 
 

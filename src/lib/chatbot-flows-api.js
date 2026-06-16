@@ -29,6 +29,14 @@ export const normalizeStartTriggerValues = (data = {}) => {
   );
 };
 
+const preserveEditableStartTriggerValues = (data = {}) => {
+  const source = data && typeof data === 'object' ? data : {};
+  if (Array.isArray(source.triggerValues) && source.triggerValues.length) {
+    return source.triggerValues.map((item) => String(item ?? ''));
+  }
+  return normalizeStartTriggerValues(source);
+};
+
 const requestChatbotJson = async (path = '', options = {}) => {
   const response = await requestLocalApi(`/chatbot/flows${path}`, options);
   const data = await parseJsonResponse(response);
@@ -55,7 +63,7 @@ export const createStartNode = (node = {}) => ({
     componentType: 'start',
     name: String(node.data?.name || 'inicio fluxo').trim() || 'inicio fluxo',
     triggerValue: normalizeStartTriggerValues(node.data)[0] || String(node.data?.triggerValue || '').trim(),
-    triggerValues: normalizeStartTriggerValues(node.data),
+    triggerValues: preserveEditableStartTriggerValues(node.data),
   },
 });
 
