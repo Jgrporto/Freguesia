@@ -2472,7 +2472,17 @@ const normalizeRoutineType = (value) => {
 
 const normalizeRoutineRule = (value) => {
   const rule = String(value || '').trim().toLowerCase();
-  return ['before_due', 'after_due', 'after_installation'].includes(rule) ? rule : 'before_due';
+  return [
+    'before_cut',
+    'after_cut',
+    'before_birthday',
+    'after_birthday',
+    'before_due',
+    'after_due',
+    'after_installation',
+  ].includes(rule)
+    ? rule
+    : 'before_cut';
 };
 
 const normalizeRoutineWeeklySchedule = (value = {}, legacyWeekdays = [], legacyTime = '09:00') => {
@@ -5150,6 +5160,15 @@ const parseDateOnly = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
+  if (brDate) {
+    const [, day, month, year] = brDate;
+    const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0));
+    if (!Number.isNaN(parsed.getTime()) && parsed.getUTCMonth() === Number(month) - 1 && parsed.getUTCDate() === Number(day)) {
+      return parsed.toISOString().slice(0, 10);
+    }
+    return null;
+  }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString().slice(0, 10);
@@ -5186,20 +5205,71 @@ const getCustomerCreatedDateKey = (customer = {}) =>
       customer.synced_at,
   );
 
-const getRoutineCustomerTargetDateKey = (routine = {}, customer = {}) => {
-  const ruleDays = Math.max(0, Number.parseInt(String(routine.ruleDays ?? 0), 10) || 0);
-  if (routine.rule === 'after_installation') {
-    const createdDate = getCustomerCreatedDateKey(customer);
-    return createdDate ? addDaysToDateKey(createdDate, ruleDays) : null;
-  }
+const getCustomerNextAppointmentDateKey = (customer = {}) =>
+  parseDateOnly(
+    getObjectField(customer, [
+      'ProximoAgendamento',
+      'AgendamentoPendenteData',
+      'proximoAgendamento',
+      'agendamentoPendenteData',
+      'pendingAppointmentAt',
+      'nextAppointmentAt',
+    ]),
+  );
 
-  const dueDate = getCustomerDueDateKey(customer);
-  if (!dueDate) return null;
-  return addDaysToDateKey(dueDate, routine.rule === 'before_due' ? -ruleDays : ruleDays);
+const getCustomerLastResolvedAppointmentDateKey = (customer = {}) =>
+  parseDateOnly(
+    getObjectField(customer, [
+      'UltimoAgendamentoResolvido',
+      'ultimoAgendamentoResolvido',
+      'UltimoAgendamentoEncerrado',
+      'ultimoAgendamentoEncerrado',
+      'lastResolvedAppointmentAt',
+      'lastAppointmentResolvedAt',
+    ]),
+  );
+
+const getCustomerBirthDateParts = (customer = {}) => {
+  const rawValue = getObjectField(customer, ['Nascimento', 'nascimento', 'birth_date', 'birthDate', 'dataNascimento']);
+  const parsed = parseFallbackDate(rawValue);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) return null;
+  return {
+    month: parsed.getMonth() + 1,
+    day: parsed.getDate(),
+  };
+};
+
+const getCustomerBirthdayDateKey = (customer = {}, referenceDateKey = getSaoPauloDateParts().dateKey) => {
+  const parts = getCustomerBirthDateParts(customer);
+  if (!parts) return null;
+  const referenceYear = Number(String(referenceDateKey || '').slice(0, 4)) || new Date().getFullYear();
+  const birthday = new Date(Date.UTC(referenceYear, parts.month - 1, parts.day, 12, 0, 0));
+  if (birthday.getUTCMonth() !== parts.month - 1 || birthday.getUTCDate() !== parts.day) return null;
+  return birthday.toISOString().slice(0, 10);
+};
+
+const getRoutineRuleDirection = (rule) =>
+  ['before_cut', 'before_birthday', 'before_due'].includes(rule) ? -1 : 1;
+
+const getRoutineBaseDateKey = (routine = {}, customer = {}, referenceDateKey = getSaoPauloDateParts().dateKey) => {
+  const rule = normalizeRoutineRule(routine?.rule);
+  if (rule === 'before_cut') return getCustomerNextAppointmentDateKey(customer);
+  if (rule === 'after_cut') return getCustomerLastResolvedAppointmentDateKey(customer);
+  if (rule === 'before_birthday' || rule === 'after_birthday') return getCustomerBirthdayDateKey(customer, referenceDateKey);
+  if (rule === 'after_installation') return getCustomerCreatedDateKey(customer);
+  return getCustomerDueDateKey(customer);
+};
+
+const getRoutineCustomerTargetDateKey = (routine = {}, customer = {}, referenceDateKey = getSaoPauloDateParts().dateKey) => {
+  const rule = normalizeRoutineRule(routine?.rule);
+  const ruleDays = Math.max(0, Number.parseInt(String(routine.ruleDays ?? 0), 10) || 0);
+  const baseDate = getRoutineBaseDateKey({ ...routine, rule }, customer, referenceDateKey);
+  if (!baseDate) return null;
+  return addDaysToDateKey(baseDate, getRoutineRuleDirection(rule) * ruleDays);
 };
 
 const filterRoutineCustomersForToday = (customers = [], routine = {}, dateKey = getSaoPauloDateParts().dateKey) =>
-  customers.filter((customer) => getRoutineCustomerTargetDateKey(routine, customer) === dateKey);
+  customers.filter((customer) => getRoutineCustomerTargetDateKey(routine, customer, dateKey) === dateKey);
 
 const resolveManualRoutineCustomers = (store, customerIds = []) => {
   const allowedIds = new Set(normalizeRoutineArray(customerIds));
@@ -5232,13 +5302,13 @@ const getRoutineCustomerDisplayName = (customer = {}) =>
 const getRoutineCustomerPhone = (customer = {}) =>
   normalizePhone(customer?.whatsapp || customer?.phone_digits || customer?.raw?.whatsapp || customer?.raw?.telefone || customer?.raw?.phone || '');
 
-const getRoutineBaseDateKey = (routine = {}, customer = {}) =>
-  routine.rule === 'after_installation' ? getCustomerCreatedDateKey(customer) : getCustomerDueDateKey(customer);
-
 const getRoutineReferenceTargetDateKey = (routine = {}, referenceDateKey = getSaoPauloDateParts().dateKey) => {
+  const rule = normalizeRoutineRule(routine?.rule);
   const ruleDays = Math.max(0, Number.parseInt(String(routine.ruleDays ?? 0), 10) || 0);
-  if (routine.rule === 'before_due') return addDaysToDateKey(referenceDateKey, ruleDays);
-  if (routine.rule === 'after_due' || routine.rule === 'after_installation') return addDaysToDateKey(referenceDateKey, -ruleDays);
+  if (getRoutineRuleDirection(rule) < 0) return addDaysToDateKey(referenceDateKey, ruleDays);
+  if (['after_cut', 'after_birthday', 'after_due', 'after_installation'].includes(rule)) {
+    return addDaysToDateKey(referenceDateKey, -ruleDays);
+  }
   return referenceDateKey;
 };
 
@@ -5293,8 +5363,8 @@ const buildRoutineDispatchForecast = (store, routine, options = {}) => {
       return;
     }
     seenPhones.add(phone);
-    const baseDate = getRoutineBaseDateKey(routine, customer);
-    const executionDate = getRoutineCustomerTargetDateKey(routine, customer);
+    const baseDate = getRoutineBaseDateKey(routine, customer, referenceDate);
+    const executionDate = getRoutineCustomerTargetDateKey(routine, customer, referenceDate);
     if (!baseDate || !executionDate) {
       ignored.missingDate += 1;
       return;
@@ -6440,7 +6510,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
         });
         continue;
       }
-      if (customerHasAppBarberPendingAppointment(customer)) {
+      if (routine.rule !== 'before_cut' && customerHasAppBarberPendingAppointment(customer)) {
         skipped += 1;
         await persistRoutineLog({
           routineId: id,

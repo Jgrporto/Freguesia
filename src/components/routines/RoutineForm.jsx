@@ -20,6 +20,7 @@ import {
   getEnabledScheduleText,
   getFollowUpLimitText,
   getFollowUpScheduleText,
+  getRoutineRuleLabel,
   getTemplateButtons,
   getTemplateLanguage,
   getTemplateName,
@@ -295,12 +296,17 @@ export default function RoutineForm({
   const buttons = selectedTemplate ? getTemplateButtons(selectedTemplate) : [];
   const preview = selectedTemplate ? buildPreviewFromTemplate(selectedTemplate, draft, sampleCustomer) : null;
   const modalTitle = routine?.id ? 'Editar rotina' : 'Nova rotina';
-  const ruleHelper =
-    draft.rule === 'before_due'
-      ? `A rotina será executada ${draft.ruleDays || 0} dia(s) antes do vencimento do cliente.`
-      : draft.rule === 'after_due'
-        ? `A rotina será executada ${draft.ruleDays || 0} dia(s) após o vencimento do cliente.`
-        : `A rotina será executada ${draft.ruleDays || 0} dia(s) após a data de criação do cliente.`;
+  const ruleDaysLabel = draft.ruleDays || 0;
+  const ruleHelperByType = {
+    before_cut: `A rotina será executada ${ruleDaysLabel} dia(s) antes da data do próximo agendamento do cliente.`,
+    after_cut: `A rotina será executada ${ruleDaysLabel} dia(s) após o último agendamento resolvido do cliente.`,
+    before_birthday: `A rotina será executada ${ruleDaysLabel} dia(s) antes do aniversário do cliente.`,
+    after_birthday: `A rotina será executada ${ruleDaysLabel} dia(s) após o aniversário do cliente.`,
+    before_due: `Regra legada: a rotina será executada ${ruleDaysLabel} dia(s) antes do vencimento do cliente.`,
+    after_due: `Regra legada: a rotina será executada ${ruleDaysLabel} dia(s) após o vencimento do cliente.`,
+    after_installation: `Regra legada: a rotina será executada ${ruleDaysLabel} dia(s) após a data de criação do cliente.`,
+  };
+  const ruleHelper = ruleHelperByType[draft.rule] || ruleHelperByType.before_cut;
 
   const updateDraft = (patch) => setDraft((current) => ({ ...current, ...patch }));
   const updateHsm = (patch) => setDraft((current) => ({ ...current, hsm: { ...current.hsm, ...patch } }));
@@ -529,6 +535,9 @@ export default function RoutineForm({
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field label="Regra">
                     <SelectInput value={draft.rule} onChange={(event) => updateDraft({ rule: event.target.value })}>
+                      {!ROUTINE_RULES[draft.rule] && draft.rule ? (
+                        <option value={draft.rule}>{getRoutineRuleLabel(draft.rule)}</option>
+                      ) : null}
                       {Object.entries(ROUTINE_RULES).map(([key, label]) => (
                         <option key={key} value={key}>
                           {label}
@@ -1049,7 +1058,7 @@ export default function RoutineForm({
                       </span>
                     ) : (
                       <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        {ROUTINE_RULES[draft.rule]} | {draft.ruleDays} dias
+                        {getRoutineRuleLabel(draft.rule)} | {draft.ruleDays} dias
                       </span>
                     )}
                   </div>

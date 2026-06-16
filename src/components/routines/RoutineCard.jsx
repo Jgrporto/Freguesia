@@ -10,7 +10,6 @@ import {
 
 import StatusBadge from './StatusBadge';
 import {
-  ROUTINE_RULES,
   ROUTINE_TYPES,
   WEEKDAY_KEYS,
   WEEKDAY_LABELS,
@@ -19,6 +18,7 @@ import {
   getFollowUpScheduleText,
   getFollowUpTargetLabelText,
   getNextRoutineRunAt,
+  getRoutineRuleLabel,
   normalizeFollowUpConfig,
 } from './utils';
 
@@ -77,7 +77,7 @@ export default function RoutineCard({ routine, templateName, labels = [], isRunn
 
   const ruleText =
     type === 'disparo'
-      ? `${ROUTINE_RULES[routine.rule] || '-'} | ${Number.isFinite(Number(routine.ruleDays)) ? Number(routine.ruleDays) : 0} dias`
+      ? `${getRoutineRuleLabel(routine.rule)} | ${Number.isFinite(Number(routine.ruleDays)) ? Number(routine.ruleDays) : 0} dias`
       : null;
   const labelsText = `${routine.labelActions?.add?.length || 0} add / ${routine.labelActions?.remove?.length || 0} rem`;
   const actionsText = [addLabels ? `Adicionar ${addLabels}` : '', removeLabels ? `Remover ${removeLabels}` : ''].filter(Boolean).join(' | ') || 'Nenhuma ação configurada';

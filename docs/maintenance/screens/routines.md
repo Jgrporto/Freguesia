@@ -43,22 +43,29 @@ O timezone fica fixo internamente como `America/Sao_Paulo` e nao aparece no form
 
 Regras suportadas:
 
-- `before_due`: envio antes do vencimento.
-- `after_due`: envio apos vencimento.
-- `after_installation`: envio apos instalacao.
+- `before_cut`: envio antes do corte, usando a data do proximo agendamento.
+- `after_cut`: envio apos corte, usando o ultimo agendamento resolvido.
+- `before_birthday`: envio antes do aniversario, usando a data de nascimento.
+- `after_birthday`: envio apos aniversario, usando a data de nascimento.
+
+As regras legadas `before_due`, `after_due` e `after_installation` ainda podem ser lidas pelo backend para compatibilidade com rotinas antigas, mas nao devem ser usadas em novas rotinas.
 
 `ruleDays = 0` significa no proprio dia base.
 
 Campos usados na base de clientes:
 
-- Vencimento: `expires_at`, com fallback para `due_date`, `raw.vencimento`, `raw.due_date`, `raw.expiration_date` e `raw.expires_at`.
-- Criacao/instalacao: `created_at`, `createdAt`, `created_date`, com fallback para `raw.created_at`, `raw.createdAt`, `raw.createdDate`, `raw.dataCriacao`, `raw.installationDate`, `raw.installedAt` e, por ultimo, `synced_at`.
+- Proximo agendamento/corte futuro: `ProximoAgendamento`, com fallback para `AgendamentoPendenteData`.
+- Ultimo corte realizado: `UltimoAgendamentoResolvido`.
+- Aniversario: `Nascimento`.
 
 Na execucao agendada, o backend calcula a data alvo por cliente:
 
-- `before_due`: vencimento menos `ruleDays`.
-- `after_due`: vencimento mais `ruleDays`.
-- `after_installation`: criacao/instalacao mais `ruleDays`.
+- `before_cut`: proximo agendamento menos `ruleDays`.
+- `after_cut`: ultimo agendamento resolvido mais `ruleDays`.
+- `before_birthday`: aniversario do ano corrente menos `ruleDays`.
+- `after_birthday`: aniversario do ano corrente mais `ruleDays`.
+
+Para `before_cut`, a protecao generica contra clientes com agendamento pendente nao bloqueia o disparo, porque o agendamento pendente e a propria referencia da regra.
 
 ## Agenda semanal e excecoes
 

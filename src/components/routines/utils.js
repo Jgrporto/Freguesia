@@ -48,10 +48,19 @@ export const ROUTINE_TYPES = {
 };
 
 export const ROUTINE_RULES = {
+  before_cut: 'Envio antes do corte',
+  after_cut: 'Envio após corte',
+  before_birthday: 'Envio antes do aniversário',
+  after_birthday: 'Envio após aniversário',
+};
+
+export const LEGACY_ROUTINE_RULES = {
   before_due: 'Envio antes do vencimento',
   after_due: 'Envio após vencimento',
   after_installation: 'Envio após instalação',
 };
+
+export const getRoutineRuleLabel = (rule) => ROUTINE_RULES[rule] || LEGACY_ROUTINE_RULES[rule] || '-';
 
 export const WEEKDAY_LABELS = {
   mon: 'Seg',
@@ -229,7 +238,7 @@ export const normalizeRoutineForForm = (routine = null) => {
     description: routine?.description || '',
     type,
     status: routine?.status === 'inactive' || routine?.status === 'paused' ? 'inactive' : 'active',
-    rule: routine?.rule || 'before_due',
+    rule: routine?.rule || 'before_cut',
     ruleDays: Number.isFinite(Number(routine?.ruleDays)) ? Number(routine.ruleDays) : 0,
     weeklySchedule: {
       ...createDefaultWeeklySchedule(routine?.scheduledTime || '08:00'),
