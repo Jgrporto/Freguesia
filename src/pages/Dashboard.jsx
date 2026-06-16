@@ -69,25 +69,21 @@ const dashboardTabs = [
 const dashboards = {
   atendimento: {
     title: 'Atendimento e Conversão',
-    subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em agendamentos.',
+    subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em cortes.',
     cards: [
       { title: 'Conversas recebidas', value: '0', subtitle: 'Volume total no período', icon: MessageSquare },
       { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
       { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock3 },
-      { title: 'Agendamentos realizados', value: '0', subtitle: 'Conversas que viraram agenda', icon: CalendarDays },
+      { title: 'Cortes realizados', value: '0', subtitle: 'Conversas que viraram corte', icon: Scissors },
       { title: 'Taxa de conversão', value: '0%', subtitle: 'Cortes / conversas', icon: Target },
     ],
     main: {
       title: 'Funil de conversão',
-      description: 'Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.',
+      description: 'Acompanhe a passagem de conversas para cortes realizados.',
       type: 'atendimentoFunnel',
       values: {
         conversations: 0,
-        bookings: 0,
         conversions: 0,
-        bookingDelta: '0,0 pp',
-        conversionDelta: '0,0 pp',
-        finalDelta: '0,0 pp',
       },
     },
     sideCharts: [
@@ -95,7 +91,7 @@ const dashboards = {
         title: 'Conversão por atendente',
         type: 'bars',
         labels: ['Juliana A.', 'Atendente 2'],
-        helper: 'Agendamentos e taxa por responsável.',
+        helper: 'Cortes realizados por responsável.',
       },
       {
         title: 'Tempo de resposta por dia',
@@ -374,13 +370,13 @@ function EmptyLineChart({ labels = days, values = [], secondValues = [], secondL
           <div key={label} className="flex min-w-0 flex-1 items-end justify-center gap-1">
             <div
               className="w-full max-w-[18px] rounded-t-md bg-primary/70"
-              style={{ height: `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` }}
+              style={{ height: numericValues[index] > 0 ? `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
               title={`${label}: ${formatDurationSeconds(numericValues[index])}`}
             />
             {secondLine ? (
               <div
                 className="w-full max-w-[18px] rounded-t-md bg-primary/25"
-                style={{ height: `${Math.max(6, (numericSecondValues[index] / maxValue) * 100)}%` }}
+                style={{ height: numericSecondValues[index] > 0 ? `${Math.max(6, (numericSecondValues[index] / maxValue) * 100)}%` : '0%' }}
                 title={`${label}: ${formatDurationSeconds(numericSecondValues[index])}`}
               />
             ) : null}
@@ -404,7 +400,10 @@ function EmptyBars({ labels = [], values = [], horizontal = false }) {
           <div key={label} className="grid grid-cols-[64px_minmax(0,1fr)_28px] items-center gap-3 text-xs">
             <span className="font-medium text-muted-foreground">{label}</span>
             <div className="h-4 rounded-full bg-primary/10">
-              <div className="h-4 rounded-full bg-primary/50" style={{ width: `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` }} />
+              <div
+                className="h-4 rounded-full bg-primary/50"
+                style={{ width: numericValues[index] > 0 ? `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
+              />
             </div>
             <span className="text-right font-semibold text-foreground">{numericValues[index]}</span>
           </div>
@@ -419,7 +418,7 @@ function EmptyBars({ labels = [], values = [], horizontal = false }) {
         <div key={label} className="flex flex-1 flex-col items-center gap-2">
           <div
             className="w-full rounded-t-lg bg-primary/45"
-            style={{ height: `${Math.max(8, (numericValues[index] / maxValue) * 100)}%` }}
+            style={{ height: numericValues[index] > 0 ? `${Math.max(8, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
           />
           <span className="text-[10px] text-muted-foreground">{label}</span>
         </div>
@@ -519,16 +518,11 @@ function StageIconBox({ icon: Icon, tone = 'light' }) {
 
 function AtendimentoConversionFunnel({ values }) {
   const conversations = Number(values?.conversations ?? 0);
-  const bookings = Number(values?.bookings ?? 0);
   const conversions = Number(values?.conversions ?? 0);
 
-  const loss1 = Math.max(conversations - bookings, 0);
-  const loss2 = Math.max(bookings - conversions, 0);
-  const rateConversationToBooking = safeRate(bookings, conversations);
-  const rateBookingToConversion = safeRate(conversions, bookings);
+  const loss = Math.max(conversations - conversions, 0);
   const rateFinal = safeRate(conversions, conversations);
-  const loss1Rate = safeRate(loss1, conversations);
-  const loss2Rate = safeRate(loss2, bookings);
+  const lossRate = safeRate(loss, conversations);
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
@@ -539,7 +533,7 @@ function AtendimentoConversionFunnel({ values }) {
 
       <div className="rounded-2xl border border-[#efe5e5] bg-white p-3">
         <div className="relative hidden overflow-visible rounded-2xl lg:flex">
-          <div className="relative z-[1] w-[44%]">
+          <div className="relative z-[1] w-[56%]">
             <div
               className="flex min-h-[136px] items-center px-10 py-7 text-white"
               style={{
@@ -557,41 +551,22 @@ function AtendimentoConversionFunnel({ values }) {
             </div>
           </div>
 
-          <LossBubble value={loss1} percent={formatPercent(loss1Rate)} leftClassName="left-[35.5%]" />
+          <LossBubble value={loss} percent={formatPercent(lossRate)} leftClassName="left-[48%]" />
 
-          <div className="relative z-[2] -ml-8 w-[33.5%]">
+          <div className="relative z-[2] -ml-8 w-[48%]">
             <div
-              className="flex min-h-[136px] items-center px-10 py-7 text-white"
-              style={{
-                background: 'linear-gradient(90deg, #eb8b90 0%, #e58187 38%, #d87078 100%)',
-                clipPath: 'polygon(7% 0, 90% 0, 96.5% 50%, 90% 100%, 7% 100%, 0 50%)',
-              }}
-            >
-              <StageIconBox icon={CalendarDays} tone="dark" />
-              <div>
-                <div className="text-[15px] font-bold">Agendamentos</div>
-                <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em]">{bookings}</div>
-                <div className="mt-2 text-[15px] font-semibold text-white/95">{formatPercent(rateConversationToBooking)} do total</div>
-              </div>
-            </div>
-          </div>
-
-          <LossBubble value={loss2} percent={formatPercent(loss2Rate)} leftClassName="left-[61.8%]" />
-
-          <div className="relative z-[3] -ml-8 w-[28%]">
-            <div
-              className="flex min-h-[136px] items-center px-10 py-7 text-[#111827]"
+              className="flex min-h-[136px] items-center px-10 py-7 text-foreground"
               style={{
                 background: 'linear-gradient(90deg, #f3e2e3 0%, #efdddd 100%)',
-                clipPath: 'polygon(10% 0, 100% 0, 100% 100%, 10% 100%, 0 50%)',
+                clipPath: 'polygon(8% 0, 100% 0, 100% 100%, 8% 100%, 0 50%)',
                 borderRadius: '0 16px 16px 0',
               }}
             >
               <StageIconBox icon={Scissors} tone="light" />
               <div>
-                <div className="text-[15px] font-bold text-foreground">Conversão (foi cortar)</div>
+                <div className="text-[15px] font-bold text-foreground">Cortes realizados</div>
                 <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em] text-foreground">{conversions}</div>
-                <div className="mt-2 text-[15px] font-semibold text-muted-foreground">{formatPercent(rateFinal)} do total</div>
+                <div className="mt-2 text-[15px] font-semibold text-muted-foreground">Conversão: {formatPercent(rateFinal)}</div>
               </div>
             </div>
           </div>
@@ -603,26 +578,18 @@ function AtendimentoConversionFunnel({ values }) {
             <div className="mt-1 text-4xl font-bold">{conversations}</div>
             <div className="mt-1 text-sm text-white/85">100% do total</div>
           </div>
-          <div className="rounded-xl bg-primary/70 p-4 text-white">
-            <div className="text-sm font-bold">Agendamentos</div>
-            <div className="mt-1 text-4xl font-bold">{bookings}</div>
-            <div className="mt-1 text-sm text-white/85">{formatPercent(rateConversationToBooking)} do total</div>
-          </div>
           <div className="rounded-xl bg-primary/10 p-4 text-foreground">
-            <div className="text-sm font-bold">Conversão (foi cortar)</div>
+            <div className="text-sm font-bold">Cortes realizados</div>
             <div className="mt-1 text-4xl font-bold">{conversions}</div>
-            <div className="mt-1 text-sm text-muted-foreground">{formatPercent(rateFinal)} do total</div>
+            <div className="mt-1 text-sm text-muted-foreground">Conversão: {formatPercent(rateFinal)}</div>
           </div>
         </div>
       </div>
 
-      <div className="mt-3 grid overflow-hidden rounded-xl border border-[#ece7e7] bg-white lg:grid-cols-3">
-        <MetricTrend title="Taxa conversa > agendamento" value={formatPercent(rateConversationToBooking)} trend={values?.bookingDelta || '0,0 pp'} />
+      <div className="mt-3 grid overflow-hidden rounded-xl border border-[#ece7e7] bg-white lg:grid-cols-2">
+        <MetricTrend title="Cortes realizados" value={formatInteger(conversions)} trend={`${formatPercent(rateFinal)} das conversas`} />
         <div className="border-t border-[#ece7e7] lg:border-l lg:border-t-0">
-          <MetricTrend title="Taxa agendamento > conversão" value={formatPercent(rateBookingToConversion)} trend={values?.conversionDelta || '0,0 pp'} />
-        </div>
-        <div className="border-t border-[#ece7e7] lg:border-l lg:border-t-0">
-          <MetricTrend title="Taxa final (conversa > conversão)" value={formatPercent(rateFinal)} trend={values?.finalDelta || '0,0 pp'} />
+          <MetricTrend title="Conversas sem corte" value={formatInteger(loss)} trend={`${formatPercent(lossRate)} das conversas`} />
         </div>
       </div>
     </section>
@@ -917,7 +884,7 @@ export default function Dashboard() {
         };
       }
 
-      if (card.title === 'Agendamentos realizados') {
+      if (card.title === 'Cortes realizados') {
         return {
           ...card,
           value: formatInteger(appointments),
@@ -943,11 +910,7 @@ export default function Dashboard() {
     return {
       ...currentMain.values,
       conversations: attendanceMetrics?.funnel?.conversations ?? 0,
-      bookings: attendanceMetrics?.funnel?.appointments ?? 0,
       conversions: attendanceMetrics?.funnel?.conversions ?? 0,
-      bookingDelta: '0,0 pp',
-      conversionDelta: '0,0 pp',
-      finalDelta: '0,0 pp',
     };
   }, [activeDashboard, attendanceMetrics, currentMain.values]);
 
@@ -975,20 +938,20 @@ export default function Dashboard() {
 
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
-      const byAgent = Array.isArray(attendanceMetrics?.byAgent) ? attendanceMetrics.byAgent.slice(0, 8) : [];
-      const byDay = Array.isArray(attendanceMetrics?.byDay) ? attendanceMetrics.byDay.slice(-7) : [];
+      const byAgent = Array.isArray(attendanceMetrics?.byAgent) ? attendanceMetrics.byAgent : [];
+      const byDay = Array.isArray(attendanceMetrics?.byDay) ? attendanceMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Conversão por atendente') {
           return {
             ...chart,
-            labels: byAgent.length ? byAgent.map((item) => item.name || 'Sem atendente') : chart.labels,
+            labels: byAgent.map((item) => item.name || 'Sem atendente'),
             values: byAgent.length ? byAgent.map((item) => item.appointments || 0) : [],
           };
         }
         if (chart.title === 'Tempo de resposta por dia') {
           return {
             ...chart,
-            labels: byDay.length ? byDay.map((item) => String(item.date || '').slice(5) || '-') : chart.labels,
+            labels: byDay.map((item) => String(item.date || '').slice(5) || '-'),
             values: byDay.length ? byDay.map((item) => item.firstResponseAverageSeconds || 0) : [],
             secondValues: byDay.length ? byDay.map((item) => item.tmrSeconds || 0) : [],
           };

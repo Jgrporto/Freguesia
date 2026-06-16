@@ -7386,6 +7386,26 @@ const isDashboardAttendantUser = (operationStore = {}, userRef = {}, settings = 
   return keywords.some((keyword) => haystack.includes(keyword));
 };
 
+const resolveDashboardMessageAgentRef = (message = {}, fallback = {}) => ({
+  id: message.agent_id || message.agentId || message.user_id || message.userId || fallback.id || "",
+  email:
+    message.agent_email ||
+    message.agentEmail ||
+    message.sender_email ||
+    message.senderEmail ||
+    fallback.email ||
+    "",
+  name:
+    message.agentName ||
+    message.agent_name ||
+    message.senderName ||
+    message.sender_name ||
+    fallback.name ||
+    "Sem atendente",
+  role: message.agent_role || message.agentRole || fallback.role || "",
+  role_name: message.agent_role_name || message.agentRoleName || fallback.role_name || "",
+});
+
 const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore = {} } = {}) => {
   const fallbackRange = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : fallbackRange.startMs;
@@ -7394,7 +7414,34 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
 
   const normalizeDashboardMessageType = (message = {}) => {
-    const type = String(message?.type || message?.direction || message?.origin || "").trim().toLowerCase();
+    if (
+      message?.fromMe === true ||
+      message?.from_me === true ||
+      message?.isFromMe === true ||
+      message?.is_from_me === true
+    ) {
+      return "agent";
+    }
+    if (
+      message?.fromMe === false ||
+      message?.from_me === false ||
+      message?.isFromMe === false ||
+      message?.is_from_me === false
+    ) {
+      return "client";
+    }
+    const type = String(
+      message?.sender_type ||
+        message?.senderType ||
+        message?.type ||
+        message?.direction ||
+        message?.origin ||
+        message?.from ||
+        message?.role ||
+        "",
+    )
+      .trim()
+      .toLowerCase();
     if (["client", "customer", "inbound", "received", "user"].includes(type)) return "client";
     if (["agent", "attendant", "operator", "outbound", "sent", "system"].includes(type)) return "agent";
     return type;
@@ -7435,6 +7482,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const respondedConversationIds = new Set();
   const conversationIdsWithClientMessages = new Set();
   const firstClientMessageByConversationId = new Map();
+  const firstAgentResponseByConversationId = new Map();
   const conversationsById = store?.conversations && typeof store.conversations === "object" ? store.conversations : {};
 
   for (const [conversationId, rawMessages] of Object.entries(store?.messages || {})) {
@@ -7466,6 +7514,9 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
           0,
           Math.round((nextAgentMessage.__ts - firstClientMessage.__ts) / 1000),
         );
+        if (!firstAgentResponseByConversationId.has(conversationId)) {
+          firstAgentResponseByConversationId.set(conversationId, nextAgentMessage);
+        }
         totalFirstResponseSeconds += firstResponseSeconds;
         firstResponseCount += 1;
         ensureDayStats(dayKeyFromMs(firstClientMessage.__ts)).firstResponseTotalSeconds += firstResponseSeconds;
@@ -7492,6 +7543,9 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       }
 
       const responseSeconds = Math.max(0, Math.round((nextAgentMessage.__ts - message.__ts) / 1000));
+      if (!firstAgentResponseByConversationId.has(conversationId)) {
+        firstAgentResponseByConversationId.set(conversationId, nextAgentMessage);
+      }
       totalResponseSeconds += responseSeconds;
       respondedMessages += 1;
       respondedConversationIds.add(conversationId);
@@ -7510,8 +7564,37 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const appointmentPhones = new Set();
   const conversionPhones = new Set();
   const agentConversions = new Map();
+  const ensureAgentConversionStats = (agentRef = {}) => {
+    if (!isDashboardAttendantUser(operationStore, agentRef, dashboardSettings)) return null;
+    const agentKey = String(agentRef.id || agentRef.email || agentRef.name || "sem-atendente").trim();
+    const current = agentConversions.get(agentKey) || {
+      id: agentKey,
+      name: String(agentRef.name || "Sem atendente").trim() || "Sem atendente",
+      appointments: 0,
+      conversations: 0,
+    };
+    agentConversions.set(agentKey, current);
+    return current;
+  };
+
   for (const conversationId of conversationIdsWithClientMessages) {
     const conversation = conversationsById[conversationId] || {};
+    const assignedAgentRef = {
+      id: conversation.assigned_agent_id || conversation.assignedAgentId || "",
+      email: conversation.assigned_agent_email || conversation.assigned_agent || conversation.assignedAgent || "",
+      name: conversation.assigned_agent_name || conversation.assignedAgentName || conversation.assigned_agent || "Sem atendente",
+      role: conversation.assigned_agent_role || conversation.assignedAgentRole || "",
+      role_name: conversation.assigned_agent_role_name || conversation.assignedAgentRoleName || "",
+    };
+    const agentRef = resolveDashboardMessageAgentRef(
+      firstAgentResponseByConversationId.get(conversationId),
+      assignedAgentRef,
+    );
+    const agentStats = firstAgentResponseByConversationId.has(conversationId)
+      ? ensureAgentConversionStats(agentRef)
+      : null;
+    if (agentStats) agentStats.conversations += 1;
+
     const phone = resolveDashboardConversationPhone(conversation, conversationId);
     const customer = findDashboardCustomerByPhone(customerIndex, phone);
     const normalizedPhone = getDashboardCustomerPhone(customer) || phone;
@@ -7524,25 +7607,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     if (!isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)) continue;
     if (conversionPhones.has(normalizedPhone)) continue;
     conversionPhones.add(normalizedPhone);
-
-    const agentRef = {
-      id: conversation.assigned_agent_id || conversation.assignedAgentId || "",
-      email: conversation.assigned_agent_email || conversation.assigned_agent || conversation.assignedAgent || "",
-      name: conversation.assigned_agent_name || conversation.assignedAgentName || conversation.assigned_agent || "Sem atendente",
-      role: conversation.assigned_agent_role || conversation.assignedAgentRole || "",
-      role_name: conversation.assigned_agent_role_name || conversation.assignedAgentRoleName || "",
-    };
-    if (!isDashboardAttendantUser(operationStore, agentRef, dashboardSettings)) continue;
-    const agentKey = String(agentRef.id || agentRef.email || agentRef.name || "sem-atendente").trim();
-    const current = agentConversions.get(agentKey) || {
-      id: agentKey,
-      name: String(agentRef.name || "Sem atendente").trim() || "Sem atendente",
-      appointments: 0,
-      conversations: 0,
-    };
-    current.appointments += 1;
-    current.conversations += 1;
-    agentConversions.set(agentKey, current);
+    if (agentStats) agentStats.appointments += 1;
   }
 
   const appointments = appointmentPhones.size;
@@ -54532,10 +54597,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
 
 
 
