@@ -1,18 +1,19 @@
 export const SETTINGS_SECTION_OPTIONS = [
-  ['profile', 'Perfil', 'Dados do usuário autenticado.'],
-  ['notifications', 'Notificações', 'Áudios, alertas e comportamento operacional.'],
-  ['appearance', 'Aparência', 'Tema claro/escuro e preferências visuais locais.'],
-  ['customerSync', 'Sincronização', 'Intervalo e agendamento da base de clientes.'],
-  ['team', 'Equipe', 'Usuários, sessões e permissões operacionais.'],
-  ['roles', 'Funções', 'Perfis, departamentos e acessos da plataforma.'],
-  ['services', 'Serviços', 'Filas, números e etiquetas por serviço.'],
-  ['audit', 'Auditoria', 'Registro local das ações administrativas.'],
+  ['profile', 'Perfil', 'Dados do usuario autenticado.'],
+  ['notifications', 'Notificacoes', 'Audios, alertas e comportamento operacional.'],
+  ['appearance', 'Aparencia', 'Tema claro/escuro e preferencias visuais locais.'],
+  ['customerSync', 'Sincronizacao', 'Intervalo e agendamento da base de clientes.'],
+  ['dashboard', 'Dashboard', 'Metricas, atribuicao e palavras-chave dos paineis.'],
+  ['team', 'Equipe', 'Usuarios, sessoes e permissoes operacionais.'],
+  ['roles', 'Funcoes', 'Perfis, departamentos e acessos da plataforma.'],
+  ['services', 'Servicos', 'Filas, numeros e etiquetas por servico.'],
+  ['audit', 'Auditoria', 'Registro local das acoes administrativas.'],
 ];
 
 export const SETTINGS_ACCESS_LEVELS = [
   ['hidden', 'Oculto'],
-  ['view', 'Somente visualização'],
-  ['edit', 'Visualização e edição'],
+  ['view', 'Somente visualizacao'],
+  ['edit', 'Visualizacao e edicao'],
 ];
 
 export const DEFAULT_ROLE_SETTINGS_ACCESS = {
@@ -20,6 +21,7 @@ export const DEFAULT_ROLE_SETTINGS_ACCESS = {
   notifications: 'edit',
   appearance: 'edit',
   customerSync: 'edit',
+  dashboard: 'edit',
   team: 'edit',
   roles: 'edit',
   services: 'edit',
@@ -31,6 +33,7 @@ export const HIDDEN_ROLE_SETTINGS_ACCESS = {
   notifications: 'hidden',
   appearance: 'hidden',
   customerSync: 'hidden',
+  dashboard: 'hidden',
   team: 'hidden',
   roles: 'hidden',
   services: 'hidden',

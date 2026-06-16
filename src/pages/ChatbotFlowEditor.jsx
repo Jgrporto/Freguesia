@@ -44,6 +44,7 @@ const COMPONENTS = [
   { type: 'message', label: 'Mensagem', icon: 'fa-solid fa-comment-dots', prefix: 'mensagem', color: '#2563EB' },
   { type: 'audio', label: 'Audio', icon: 'fa-solid fa-microphone-lines', prefix: 'audio', color: '#0891B2' },
   { type: 'label', label: 'Etiqueta', icon: 'fa-solid fa-tag', prefix: 'etiqueta', color: '#16A34A' },
+  { type: 'metric_tag', label: 'Tag Metrica', icon: 'fa-solid fa-chart-simple', prefix: 'metrica', color: '#0F766E' },
   { type: 'finish', label: 'Finalizacao', icon: 'fa-solid fa-flag-checkered', prefix: 'finalizacao', color: '#DC2626' },
   { type: 'service', label: 'Serviço', icon: 'fa-solid fa-user-astronaut', prefix: 'servico', color: '#64748B', disabled: true },
   { type: 'ura', label: 'URA', icon: 'fa-solid fa-sitemap', prefix: 'ura', color: '#7C3AED' },
@@ -114,6 +115,7 @@ const createNodeData = (type, nodes) => {
   if (type === 'message') return { ...base, headerType: 'none', text: '' };
   if (type === 'audio') return { ...base, audioName: '', audioAsset: null };
   if (type === 'label') return { ...base, addLabelId: '', removeLabelId: '', removeAllCustom: false };
+  if (type === 'metric_tag') return { ...base, metricTagId: '', metricTagName: '' };
   if (type === 'finish') return { ...base, finishType: 'resolved', surveyId: 'none' };
   if (type === 'ura') return { ...base, text: '', waitMinutes: 5, displayAs: 'buttons', listTitle: 'MENU' };
   if (type === 'variables') return { ...base, variables: [] };
@@ -341,6 +343,27 @@ function PropertyPanel({
                   {customLabelOptions.map((label) => <SelectItem key={label.id} value={label.id}>{label.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+          </>
+        ) : null}
+
+        {data.componentType === 'metric_tag' ? (
+          <>
+            <div className="space-y-2">
+              <FieldLabel>ID unico da tag</FieldLabel>
+              <Input
+                value={data.metricTagId || ''}
+                onChange={(event) => onNodeChange(selectedNode.id, { metricTagId: event.target.value })}
+                placeholder="ex.: resposta-template-d30"
+              />
+            </div>
+            <div className="space-y-2">
+              <FieldLabel>Nome da tag</FieldLabel>
+              <Input
+                value={data.metricTagName || ''}
+                onChange={(event) => onNodeChange(selectedNode.id, { metricTagName: event.target.value })}
+                placeholder="Ex.: Resposta Template D30"
+              />
             </div>
           </>
         ) : null}

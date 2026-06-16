@@ -355,7 +355,10 @@ function DashboardStatCard({ title, value, subtitle, icon: Icon }) {
   );
 }
 
-function EmptyLineChart({ labels = days, secondLine = false }) {
+function EmptyLineChart({ labels = days, values = [], secondValues = [], secondLine = false }) {
+  const numericValues = labels.map((_, index) => Number(values[index] || 0));
+  const numericSecondValues = labels.map((_, index) => Number(secondValues[index] || 0));
+  const maxValue = Math.max(1, ...numericValues, ...numericSecondValues);
   return (
     <div className="relative h-[220px] rounded-xl bg-gradient-to-b from-transparent to-muted/30 px-4 pb-7 pt-4">
       <div className="mb-3 flex items-center gap-5 text-xs text-muted-foreground">
@@ -366,9 +369,24 @@ function EmptyLineChart({ labels = days, secondLine = false }) {
       <div className="absolute inset-x-4 top-[38%] h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 top-[62%] h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 bottom-10 h-px border-t border-dashed border-border" />
-      <div className="absolute bottom-10 left-4 right-4 h-[2px] rounded-full bg-primary/15" />
-      <div className="absolute bottom-16 left-4 right-4 h-[2px] rounded-full bg-primary/40" />
-      {secondLine ? <div className="absolute bottom-[88px] left-4 right-4 h-[2px] rounded-full bg-primary/15" /> : null}
+      <div className="absolute bottom-9 left-4 right-4 top-12 flex items-end justify-between gap-2">
+        {labels.map((label, index) => (
+          <div key={label} className="flex min-w-0 flex-1 items-end justify-center gap-1">
+            <div
+              className="w-full max-w-[18px] rounded-t-md bg-primary/70"
+              style={{ height: `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` }}
+              title={`${label}: ${formatDurationSeconds(numericValues[index])}`}
+            />
+            {secondLine ? (
+              <div
+                className="w-full max-w-[18px] rounded-t-md bg-primary/25"
+                style={{ height: `${Math.max(6, (numericSecondValues[index] / maxValue) * 100)}%` }}
+                title={`${label}: ${formatDurationSeconds(numericSecondValues[index])}`}
+              />
+            ) : null}
+          </div>
+        ))}
+      </div>
       <div className="absolute bottom-2 left-4 right-4 flex justify-between text-[11px] text-muted-foreground">
         {labels.map((label) => <span key={label}>{label}</span>)}
       </div>
@@ -376,17 +394,19 @@ function EmptyLineChart({ labels = days, secondLine = false }) {
   );
 }
 
-function EmptyBars({ labels = [], horizontal = false }) {
+function EmptyBars({ labels = [], values = [], horizontal = false }) {
+  const numericValues = labels.map((_, index) => Number(values[index] || 0));
+  const maxValue = Math.max(1, ...numericValues);
   if (horizontal) {
     return (
       <div className="space-y-3">
-        {labels.map((label) => (
+        {labels.map((label, index) => (
           <div key={label} className="grid grid-cols-[64px_minmax(0,1fr)_28px] items-center gap-3 text-xs">
             <span className="font-medium text-muted-foreground">{label}</span>
             <div className="h-4 rounded-full bg-primary/10">
-              <div className="h-4 w-[6%] rounded-full bg-primary/50" />
+              <div className="h-4 rounded-full bg-primary/50" style={{ width: `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` }} />
             </div>
-            <span className="text-right font-semibold text-foreground">0</span>
+            <span className="text-right font-semibold text-foreground">{numericValues[index]}</span>
           </div>
         ))}
       </div>
@@ -395,9 +415,12 @@ function EmptyBars({ labels = [], horizontal = false }) {
 
   return (
     <div className="flex h-[200px] items-end gap-3 rounded-xl bg-muted/20 px-4 pb-7 pt-4">
-      {labels.map((label) => (
+      {labels.map((label, index) => (
         <div key={label} className="flex flex-1 flex-col items-center gap-2">
-          <div className="h-4 w-full rounded-t-lg bg-primary/20" />
+          <div
+            className="w-full rounded-t-lg bg-primary/45"
+            style={{ height: `${Math.max(8, (numericValues[index] / maxValue) * 100)}%` }}
+          />
           <span className="text-[10px] text-muted-foreground">{label}</span>
         </div>
       ))}
@@ -679,7 +702,7 @@ function AcquisitionFunnel({ values }) {
   );
 }
 
-function ChartCard({ title, description, type, labels = [], helper, className }) {
+function ChartCard({ title, description, type, labels = [], values = [], secondValues = [], helper, className }) {
   return (
     <section className={cn('rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]', className)}>
       <div className="mb-4">
@@ -688,12 +711,12 @@ function ChartCard({ title, description, type, labels = [], helper, className })
       </div>
 
       {type === 'funnel' ? <EmptyFunnel labels={labels} /> : null}
-      {type === 'line' ? <EmptyLineChart labels={labels} secondLine /> : null}
-      {type === 'combo' ? <EmptyLineChart labels={labels} secondLine /> : null}
-      {type === 'bars' ? <EmptyBars labels={labels} /> : null}
-      {type === 'stacked' ? <EmptyBars labels={labels} /> : null}
-      {type === 'horizontalBars' ? <EmptyBars labels={labels} horizontal /> : null}
-      {type === 'ranking' ? <EmptyBars labels={labels} horizontal /> : null}
+      {type === 'line' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine /> : null}
+      {type === 'combo' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine /> : null}
+      {type === 'bars' ? <EmptyBars labels={labels} values={values} /> : null}
+      {type === 'stacked' ? <EmptyBars labels={labels} values={values} /> : null}
+      {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal /> : null}
+      {type === 'ranking' ? <EmptyBars labels={labels} values={values} horizontal /> : null}
       {type === 'donut' ? <EmptyDonut labels={labels} /> : null}
       {type === 'donutLarge' ? <EmptyDonut labels={labels} large /> : null}
       {type === 'gauge' ? <EmptyGauge /> : null}
@@ -734,6 +757,7 @@ export default function Dashboard() {
   const [{ start, end }, setDateRange] = useState(() => getDefaultDateRange());
   const [attendanceMetrics, setAttendanceMetrics] = useState(null);
   const [acquisitionMetrics, setAcquisitionMetrics] = useState(null);
+  const [followUpMetrics, setFollowUpMetrics] = useState(null);
   const current = dashboards[activeDashboard];
   const currentMain = useMemo(() => current.main, [current]);
 
@@ -787,6 +811,31 @@ export default function Dashboard() {
     return () => controller.abort();
   }, [activeDashboard, start, end]);
 
+  useEffect(() => {
+    if (activeDashboard !== 'followup') return;
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams();
+    if (start) searchParams.set('start', start);
+    if (end) searchParams.set('end', end);
+
+    fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/followup?${searchParams.toString()}`), {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Falha ao carregar métricas de follow-up');
+        return response.json();
+      })
+      .then((payload) => setFollowUpMetrics(payload))
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.error('[dashboard] failed to load follow-up metrics:', error);
+        }
+      });
+
+    return () => controller.abort();
+  }, [activeDashboard, start, end]);
+
   const cards = useMemo(() => {
     if (activeDashboard === 'aquisicao') {
       const metrics = acquisitionMetrics?.cards || {};
@@ -808,6 +857,28 @@ export default function Dashboard() {
         }
         if (card.title === 'Anúncio → agendamento') {
           return { ...card, value: formatPercentCard(metrics.adToAppointmentRate), subtitle: 'Agendamentos / conversas' };
+        }
+        return card;
+      });
+    }
+
+    if (activeDashboard === 'followup') {
+      const metrics = followUpMetrics?.cards || {};
+      return current.cards.map((card) => {
+        if (card.title === 'Disparos enviados') {
+          return { ...card, value: formatInteger(metrics.sent), subtitle: 'Rotinas/templates configurados' };
+        }
+        if (card.title === 'Respostas recebidas') {
+          return { ...card, value: formatInteger(metrics.responses), subtitle: 'Tags de métrica do Chatbot' };
+        }
+        if (card.title === 'Agendamentos gerados') {
+          return { ...card, value: formatInteger(metrics.appointments), subtitle: 'Agendamentos realizados após disparo' };
+        }
+        if (card.title === 'Clientes recuperados') {
+          return { ...card, value: formatInteger(metrics.recoveredCustomers), subtitle: 'Clientes com agendamento realizado' };
+        }
+        if (card.title === 'Melhor template') {
+          return { ...card, value: metrics.bestTemplate || '—', subtitle: 'Mais recuperações atribuídas' };
         }
         return card;
       });
@@ -850,7 +921,7 @@ export default function Dashboard() {
         return {
           ...card,
           value: formatInteger(appointments),
-          subtitle: 'Pendente de fonte de agenda',
+          subtitle: 'Resolvidos no AppBarber',
         };
       }
 
@@ -864,7 +935,7 @@ export default function Dashboard() {
 
       return card;
     });
-  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, current.cards]);
+  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, current.cards, followUpMetrics]);
 
   const atendimentoFunnelValues = useMemo(() => {
     if (activeDashboard !== 'atendimento') return currentMain.values;
@@ -889,6 +960,66 @@ export default function Dashboard() {
       newCustomers: acquisitionMetrics?.funnel?.newCustomers ?? 0,
     };
   }, [activeDashboard, acquisitionMetrics]);
+
+  const mainChartProps = useMemo(() => {
+    if (activeDashboard !== 'followup') return currentMain;
+    const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
+    if (!byTemplate.length) return currentMain;
+    return {
+      ...currentMain,
+      labels: byTemplate.map((item) => item.templateName || 'Sem template'),
+      values: byTemplate.map((item) => item.recovered || 0),
+      description: 'Recuperacoes atribuidas por template/rotina no periodo selecionado.',
+    };
+  }, [activeDashboard, currentMain, followUpMetrics]);
+
+  const displaySideCharts = useMemo(() => {
+    if (activeDashboard === 'atendimento') {
+      const byAgent = Array.isArray(attendanceMetrics?.byAgent) ? attendanceMetrics.byAgent.slice(0, 8) : [];
+      const byDay = Array.isArray(attendanceMetrics?.byDay) ? attendanceMetrics.byDay.slice(-7) : [];
+      return current.sideCharts.map((chart) => {
+        if (chart.title === 'Conversão por atendente') {
+          return {
+            ...chart,
+            labels: byAgent.length ? byAgent.map((item) => item.name || 'Sem atendente') : chart.labels,
+            values: byAgent.length ? byAgent.map((item) => item.appointments || 0) : [],
+          };
+        }
+        if (chart.title === 'Tempo de resposta por dia') {
+          return {
+            ...chart,
+            labels: byDay.length ? byDay.map((item) => String(item.date || '').slice(5) || '-') : chart.labels,
+            values: byDay.length ? byDay.map((item) => item.firstResponseAverageSeconds || 0) : [],
+            secondValues: byDay.length ? byDay.map((item) => item.tmrSeconds || 0) : [],
+          };
+        }
+        return chart;
+      });
+    }
+
+    if (activeDashboard === 'followup') {
+      const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
+      return current.sideCharts.map((chart) => {
+        if (chart.title === 'Taxa de resposta por template') {
+          return {
+            ...chart,
+            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || 'Sem template') : chart.labels,
+            values: byTemplate.length ? byTemplate.map((item) => Math.round((Number(item.responseRate) || 0) * 100)) : [],
+          };
+        }
+        if (chart.title === 'Performance por régua de follow-up' || chart.title === 'Recuperação ao longo do tempo') {
+          return {
+            ...chart,
+            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || 'Sem template') : chart.labels,
+            values: byTemplate.length ? byTemplate.map((item) => item.recovered || 0) : [],
+          };
+        }
+        return chart;
+      });
+    }
+
+    return current.sideCharts;
+  }, [activeDashboard, attendanceMetrics, current.sideCharts, followUpMetrics]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">
@@ -925,17 +1056,18 @@ export default function Dashboard() {
         <AcquisitionFunnel values={acquisitionFunnelValues} />
       ) : (
         <ChartCard
-          title={currentMain.title}
-          description={currentMain.description}
-          type={currentMain.type}
-          labels={currentMain.labels}
+          title={mainChartProps.title}
+          description={mainChartProps.description}
+          type={mainChartProps.type}
+          labels={mainChartProps.labels}
+          values={mainChartProps.values}
           className="min-h-[260px]"
         />
       )}
 
-      {current.sideCharts.length ? (
-        <div className={cn('grid grid-cols-1 gap-4', current.sideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
-          {current.sideCharts.map((chart) => (
+      {displaySideCharts.length ? (
+        <div className={cn('grid grid-cols-1 gap-4', displaySideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
+          {displaySideCharts.map((chart) => (
             <ChartCard key={chart.title} {...chart} />
           ))}
         </div>

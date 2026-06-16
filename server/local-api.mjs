@@ -104,6 +104,18 @@ const LABELS_DEFAULT_STATE = {
   updatedAt: null,
 };
 
+const DASHBOARD_SETTINGS_DEFAULT = {
+  adKeywords: ['anuncio', 'anúncio', 'facebook', 'instagram', 'utm_', 'fbclid', 'ctwa'],
+  adAttributionWindowDays: 45,
+  appointmentAttributionWindowDays: 60,
+  attendantRoleKeywords: ['atendente'],
+  followUpRoutineNameKeywords: ['follow', 'recuper', 'retorno', 'corte'],
+  templateResponseWindowDays: 7,
+  templateRecoveryWindowDays: 30,
+  newCustomerWindowDays: 30,
+  updatedAt: null,
+};
+
 const SYSTEM_LABEL_IDS = ['system-new-customer', 'system-customer', 'system-recovery'];
 const SYSTEM_LABELS = [
   {
@@ -1590,6 +1602,7 @@ const appendChatbotEvent = (store, event = {}) => {
     flow_id: flowId,
     flowName: String(event.flowName || '').trim(),
     type,
+    metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : {},
     created_date: timestamp,
     updated_date: timestamp,
   };
@@ -1639,6 +1652,18 @@ const runChatbotFlow = async ({ store, flow, conversation, session }) => {
       await sendChatbotAudio(conversation, data);
     } else if (data.componentType === 'label') {
       applyChatbotLabels(store, conversationId, data);
+    } else if (data.componentType === 'metric_tag') {
+      appendChatbotEvent(store, {
+        conversationId,
+        flowId: flow.id,
+        flowName: flow.name,
+        type: 'metric_tag',
+        metadata: {
+          metricTagId: String(data.metricTagId || node.id || '').trim(),
+          metricTagName: String(data.metricTagName || data.name || 'Tag metrica').trim(),
+          nodeId: node.id,
+        },
+      });
     } else if (data.componentType === 'finish') {
       finishChatbotConversation(store, conversationId, data);
       appendChatbotEvent(store, {
@@ -2262,6 +2287,71 @@ const normalizeCustomerSyncSettings = (value) => {
   };
 };
 
+const normalizeDashboardStringList = (value, fallback = []) => {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '')
+        .split(',')
+        .map((item) => item.trim());
+  const normalized = source
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+  return normalized.length ? Array.from(new Set(normalized)) : [...fallback];
+};
+
+const normalizeDashboardPositiveInteger = (value, fallback, min = 1, max = 365) => {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < min) return fallback;
+  return Math.min(max, parsed);
+};
+
+const normalizeDashboardSettings = (value = {}) => {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    ...DASHBOARD_SETTINGS_DEFAULT,
+    adKeywords: normalizeDashboardStringList(source.adKeywords, DASHBOARD_SETTINGS_DEFAULT.adKeywords),
+    adAttributionWindowDays: normalizeDashboardPositiveInteger(
+      source.adAttributionWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.adAttributionWindowDays,
+      1,
+      365,
+    ),
+    appointmentAttributionWindowDays: normalizeDashboardPositiveInteger(
+      source.appointmentAttributionWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.appointmentAttributionWindowDays,
+      1,
+      365,
+    ),
+    attendantRoleKeywords: normalizeDashboardStringList(
+      source.attendantRoleKeywords,
+      DASHBOARD_SETTINGS_DEFAULT.attendantRoleKeywords,
+    ),
+    followUpRoutineNameKeywords: normalizeDashboardStringList(
+      source.followUpRoutineNameKeywords,
+      DASHBOARD_SETTINGS_DEFAULT.followUpRoutineNameKeywords,
+    ),
+    templateResponseWindowDays: normalizeDashboardPositiveInteger(
+      source.templateResponseWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.templateResponseWindowDays,
+      1,
+      90,
+    ),
+    templateRecoveryWindowDays: normalizeDashboardPositiveInteger(
+      source.templateRecoveryWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.templateRecoveryWindowDays,
+      1,
+      365,
+    ),
+    newCustomerWindowDays: normalizeDashboardPositiveInteger(
+      source.newCustomerWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.newCustomerWindowDays,
+      1,
+      365,
+    ),
+    updatedAt: String(source.updatedAt || '').trim() || null,
+  };
+};
+
 const getCustomerAutoSyncIntervalMs = (store) =>
   normalizeCustomerSyncSettings(store?.customerSyncSettings).autoSyncIntervalMinutes * 60 * 1000;
 
@@ -2698,6 +2788,7 @@ const normalizeStore = (store) => {
       ...(base.notificationSettings && typeof base.notificationSettings === 'object' ? base.notificationSettings : {}),
     },
     customerSyncSettings: normalizeCustomerSyncSettings(base.customerSyncSettings),
+    dashboardSettings: normalizeDashboardSettings(base.dashboardSettings),
     conversations: Array.isArray(base.conversations) ? base.conversations : [],
     conversationPreferences: Array.isArray(base.conversationPreferences) ? base.conversationPreferences : [],
     messages: Array.isArray(base.messages) ? base.messages : [],
@@ -8340,6 +8431,28 @@ const server = http.createServer(async (req, res) => {
         ...nextSettings,
         nextScheduledAt: store.customerSync?.nextScheduledAt || null,
       });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/local/settings/dashboard') {
+      const store = await readStore();
+      return sendJson(res, 200, normalizeDashboardSettings(store.dashboardSettings));
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/local/settings/dashboard') {
+      const payload = await readBody(req);
+      let nextSettings = null;
+
+      await updateStore((current) => {
+        nextSettings = {
+          ...normalizeDashboardSettings(current.dashboardSettings),
+          ...normalizeDashboardSettings(payload),
+          updatedAt: nowIso(),
+        };
+        current.dashboardSettings = nextSettings;
+        return current;
+      });
+
+      return sendJson(res, 200, nextSettings);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/local/chatbot/assets') {

@@ -76,6 +76,12 @@ import {
   saveCustomerSyncSettings,
 } from '@/lib/customer-sync-settings';
 import {
+  DEFAULT_DASHBOARD_SETTINGS,
+  fetchDashboardSettings,
+  readDashboardSettings,
+  saveDashboardSettings,
+} from '@/lib/dashboard-settings';
+import {
   DEFAULT_NOTIFICATION_SETTINGS,
   fetchNotificationSettings,
   MAX_NOTIFICATION_AUDIO_SIZE_BYTES,
@@ -243,6 +249,7 @@ export default function Settings() {
   const [historyDialog, setHistoryDialog] = useState({ open: false, entityType: 'user', entityId: '', label: '' });
   const [notificationSettings, setNotificationSettings] = useState(DEFAULT_NOTIFICATION_SETTINGS);
   const [customerSyncSettings, setCustomerSyncSettings] = useState(DEFAULT_CUSTOMER_SYNC_SETTINGS);
+  const [dashboardSettings, setDashboardSettings] = useState(DEFAULT_DASHBOARD_SETTINGS);
   const [settingsAudit, setSettingsAudit] = useState(() => readJsonStorage(SETTINGS_AUDIT_STORAGE_KEY, []));
   const [activeSettingsTab, setActiveSettingsTab] = useState('profile');
   const [confirmDialog, setConfirmDialog] = useState({
@@ -257,6 +264,7 @@ export default function Settings() {
   const [disconnectingUserId, setDisconnectingUserId] = useState('');
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isSavingRole, setIsSavingRole] = useState(false);
+  const [isSavingDashboardSettings, setIsSavingDashboardSettings] = useState(false);
   const { customLabels } = useLabelCatalog();
   const notificationSettingsHydratedRef = useRef(false);
   const lastSavedNotificationSettingsRef = useRef(JSON.stringify(DEFAULT_NOTIFICATION_SETTINGS));
@@ -307,6 +315,12 @@ export default function Settings() {
     refetchInterval: 15000,
   });
 
+  const { data: dashboardSettingsData } = useQuery({
+    queryKey: ['settings', 'dashboard-settings'],
+    queryFn: fetchDashboardSettings,
+    staleTime: 10000,
+  });
+
   useEffect(() => {
     if (!notificationSettingsData) {
       return;
@@ -328,6 +342,14 @@ export default function Settings() {
     customerSyncSettingsHydratedRef.current = true;
     setCustomerSyncSettings(normalized);
   }, [customerSyncSettingsData]);
+
+  useEffect(() => {
+    if (!dashboardSettingsData) {
+      return;
+    }
+
+    setDashboardSettings(readDashboardSettings(dashboardSettingsData));
+  }, [dashboardSettingsData]);
 
   useEffect(() => {
     if (!notificationSettingsHydratedRef.current) {
@@ -656,6 +678,39 @@ export default function Settings() {
       ...current,
       autoSyncIntervalMinutes: nextValue,
     }));
+  };
+
+  const handleDashboardListChange = (field, value) => {
+    const items = String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    setDashboardSettings((current) => ({
+      ...current,
+      [field]: items,
+    }));
+  };
+
+  const handleDashboardNumberChange = (field, value) => {
+    const nextValue = Number.parseInt(String(value || ''), 10);
+    setDashboardSettings((current) => ({
+      ...current,
+      [field]: Number.isFinite(nextValue) && nextValue > 0 ? nextValue : '',
+    }));
+  };
+
+  const handleSaveDashboardSettings = async () => {
+    setIsSavingDashboardSettings(true);
+    try {
+      const saved = await saveDashboardSettings(dashboardSettings);
+      setDashboardSettings(saved);
+      queryClient.invalidateQueries({ queryKey: ['settings', 'dashboard-settings'] });
+      toast.success('Configurações da dashboard salvas.');
+    } catch (error) {
+      toast.error(error?.message || 'Não foi possível salvar as configurações da dashboard.');
+    } finally {
+      setIsSavingDashboardSettings(false);
+    }
   };
 
   const handleAudioUpload = (fieldPrefix, successLabel) => (event) => {
@@ -1368,6 +1423,115 @@ export default function Settings() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        </PageSectionCard>
+        ) : null}
+
+        {canViewSettingsSection(currentSettingsAccess, 'dashboard') && activeSettingsTab === 'dashboard' ? (
+        <PageSectionCard className="p-5">
+          <SectionHeading
+            icon={Megaphone}
+            title="Dashboard"
+            description="Controle as regras usadas para atribuir anuncios, atendentes, templates e recuperacao."
+            action={
+              <Button
+                onClick={handleSaveDashboardSettings}
+                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard') || isSavingDashboardSettings}
+              >
+                {isSavingDashboardSettings ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Salvar
+              </Button>
+            }
+          />
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Palavras-chave de anuncios</label>
+              <Textarea
+                value={dashboardSettings.adKeywords.join(', ')}
+                onChange={(event) => handleDashboardListChange('adKeywords', event.target.value)}
+                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                rows={3}
+                placeholder="anuncio, instagram, facebook, utm_, fbclid"
+              />
+              <p className="text-xs text-muted-foreground">Usadas quando nao houver dado direto da Meta para identificar conversas vindas de anuncio.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Funcoes consideradas atendente</label>
+              <Textarea
+                value={dashboardSettings.attendantRoleKeywords.join(', ')}
+                onChange={(event) => handleDashboardListChange('attendantRoleKeywords', event.target.value)}
+                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                rows={3}
+                placeholder="atendente, comercial"
+              />
+              <p className="text-xs text-muted-foreground">A conversao por atendente considera usuarios cuja funcao contenha esses termos.</p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Janela anuncio para agenda</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.appointmentAttributionWindowDays}
+                  onChange={(event) => handleDashboardNumberChange('appointmentAttributionWindowDays', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">Dias maximos entre conversa de anuncio e agendamento realizado.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Cliente novo</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.newCustomerWindowDays}
+                  onChange={(event) => handleDashboardNumberChange('newCustomerWindowDays', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">Dias de cadastro usados para separar novo e antigo.</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Resposta por template</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.templateResponseWindowDays}
+                  onChange={(event) => handleDashboardNumberChange('templateResponseWindowDays', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">Dias apos envio para atribuir resposta ao template.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Recuperacao por template</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.templateRecoveryWindowDays}
+                  onChange={(event) => handleDashboardNumberChange('templateRecoveryWindowDays', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">Dias apos envio para atribuir agendamento realizado.</p>
+              </div>
+            </div>
+
+            <div className="space-y-2 lg:col-span-2">
+              <label className="text-sm font-medium text-foreground">Rotinas/templates de follow-up</label>
+              <Textarea
+                value={dashboardSettings.followUpRoutineNameKeywords.join(', ')}
+                onChange={(event) => handleDashboardListChange('followUpRoutineNameKeywords', event.target.value)}
+                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                rows={3}
+                placeholder="follow, recuper, retorno, corte"
+              />
+              <p className="text-xs text-muted-foreground">Os disparos enviados no painel de follow-up somam rotinas cujos nomes contenham esses termos.</p>
             </div>
           </div>
         </PageSectionCard>
