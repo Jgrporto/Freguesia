@@ -996,7 +996,7 @@ export default function Dashboard() {
         return {
           ...card,
           value: formatInteger(appointments),
-          subtitle: 'Resolvidos no AppBarber',
+          subtitle: 'Com conversa no WhatsApp + resolvidos',
         };
       }
 

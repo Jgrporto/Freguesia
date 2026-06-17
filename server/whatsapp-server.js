@@ -7579,6 +7579,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
 
   for (const conversationId of conversationIdsWithClientMessages) {
     const conversation = conversationsById[conversationId] || {};
+
     const assignedAgentRef = {
       id: conversation.assigned_agent_id || conversation.assignedAgentId || "",
       email: conversation.assigned_agent_email || conversation.assigned_agent || conversation.assignedAgent || "",
@@ -54705,8 +54706,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
 
 
 
