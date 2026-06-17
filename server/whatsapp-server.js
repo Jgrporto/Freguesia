@@ -8156,7 +8156,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs } =
   };
 };
 
-const buildConversationListResponse = (store, painelCustomers) => {
+const buildConversationListResponse = (store, painelCustomers, operationStore = null, mutationState = null) => {
   const painelCustomersByPhone = buildPainelCustomersPhoneIndex(painelCustomers);
   const conversations = Object.values(store?.conversations || {}).map((conversation) => {
     const item = {
@@ -8187,6 +8187,21 @@ const buildConversationListResponse = (store, painelCustomers) => {
 
     if (!item.lastClientMessageTime) {
       item.lastClientMessageTime = resolveLastClientMessageTime(store?.messages?.[item.id] || []);
+    }
+
+    if (operationStore) {
+      const { mutated, preference } = ensureBroadcastResolutionPreference(operationStore, item);
+      if (mutated && mutationState) {
+        mutationState.mutated = true;
+      }
+      if (preference) {
+        item.resolution_status = preference.resolution_status;
+        item.resolution_type = preference.resolution_type;
+        item.resolved_at = preference.resolved_at;
+        item.resolved_until = preference.resolved_until;
+        item.resolved_by_id = preference.resolved_by_id;
+        item.resolved_by_name = preference.resolved_by_name;
+      }
     }
 
     return item;
@@ -11689,6 +11704,84 @@ const buildPreferenceMap = (operationStore = {}) =>
       .map((preference) => [String(preference?.conversation_id || preference?.conversationId || preference?.id || "").trim(), preference])
       .filter(([id]) => id),
   );
+
+const hasBroadcastAwaitingCustomerReply = (conversation = {}) =>
+  (Array.isArray(conversation?.tags) ? conversation.tags : [])
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .includes("disparo");
+
+const resolveBroadcastResolvedAt = (conversation = {}, fallback = nowIso()) =>
+  String(
+    conversation?.last_sent_at ||
+      conversation?.lastMessageTime ||
+      conversation?.last_message_at ||
+      conversation?.updated_date ||
+      fallback ||
+      nowIso()
+  );
+
+const clearConversationAssignmentForResolvedState = (conversation = {}) => {
+  conversation.assigned_agent = "";
+  conversation.assigned_agent_id = "";
+  conversation.assigned_agent_email = "";
+  conversation.assigned_agent_name = "";
+  conversation.assigned_at = "";
+  conversation.assignment_source = "resolved";
+  conversation.queue_status = "resolved";
+  conversation.queued_at = "";
+};
+
+const ensureBroadcastResolutionPreference = (operationStore = {}, conversation = {}, timestamp = nowIso()) => {
+  const conversationId = String(conversation?.id || "").trim();
+  if (!conversationId || !hasBroadcastAwaitingCustomerReply(conversation)) return { mutated: false, preference: null };
+
+  const preferences = Array.isArray(operationStore.conversationPreferences)
+    ? operationStore.conversationPreferences
+    : [];
+  const index = preferences.findIndex(
+    (preference) =>
+      String(preference?.conversation_id || preference?.conversationId || preference?.id || "").trim() === conversationId,
+  );
+  const resolvedAt = resolveBroadcastResolvedAt(conversation, timestamp);
+  const current = index >= 0 ? preferences[index] : null;
+  const alreadyResolved =
+    String(current?.resolution_status || "").trim() === "resolved" &&
+    String(current?.resolution_type || "").trim() === "broadcast" &&
+    String(current?.resolved_at || "").trim() === resolvedAt;
+
+  const nextPreference = {
+    ...(current || {}),
+    id: current?.id || conversationId,
+    conversation_id: conversationId,
+    resolution_status: "resolved",
+    resolution_type: "broadcast",
+    resolved_at: resolvedAt,
+    resolved_until: "",
+    resolved_by_id: current?.resolved_by_id || "system",
+    resolved_by_name: current?.resolved_by_name || "Disparo automatico",
+    created_date: current?.created_date || timestamp,
+    updated_date: timestamp,
+  };
+
+  if (index >= 0) {
+    preferences[index] = nextPreference;
+  } else {
+    preferences.push(nextPreference);
+  }
+  operationStore.conversationPreferences = preferences;
+  clearConversationAssignmentForResolvedState(conversation);
+
+  return { mutated: !alreadyResolved, preference: nextPreference };
+};
+
+const buildConversationPreferencesRevision = (operationStore = {}) => {
+  const preferences = Array.isArray(operationStore.conversationPreferences) ? operationStore.conversationPreferences : [];
+  const latestUpdatedAt = preferences.reduce((latest, preference) => {
+    const updatedAt = String(preference?.updated_date || preference?.resolved_at || preference?.created_date || "");
+    return updatedAt > latest ? updatedAt : latest;
+  }, "");
+  return `${preferences.length}:${latestUpdatedAt}`;
+};
 
 const isResolutionPreferenceActive = (preference = null, conversation = {}) => {
   if (!preference || String(preference?.resolution_status || "").trim() !== "resolved") return false;
@@ -33671,8 +33764,11 @@ const server = http.createServer(async (req, res) => {
 
       const requestedLabelIds = normalizeRequestedLabelIds(url.searchParams.get("labels"));
       const persistedCustomerRows = await readPersistedCustomerRows();
+      const operationStore = await readOperationStore();
+      const operationMutationState = { mutated: false };
       const painelCustomers = buildPersistedCustomersObject(persistedCustomerRows);
-      const cacheKey = `${getMainStoreRevision()}|persisted:${persistedCustomerRows.length}|${
+      const preferencesRevision = buildConversationPreferencesRevision(operationStore);
+      const cacheKey = `${getMainStoreRevision()}|prefs:${preferencesRevision}|persisted:${persistedCustomerRows.length}|${
         persistedCustomerRows[persistedCustomerRows.length - 1]?.synced_at || "0"
       }`;
       let baseConversations = conversationsPayloadCache?.key === cacheKey
@@ -33680,7 +33776,10 @@ const server = http.createServer(async (req, res) => {
         : null;
       if (!Array.isArray(baseConversations)) {
         const store = await readStore({ mutable: false });
-        baseConversations = buildConversationListResponse(store, painelCustomers);
+        baseConversations = buildConversationListResponse(store, painelCustomers, operationStore, operationMutationState);
+        if (operationMutationState.mutated) {
+          await writeOperationStore(operationStore);
+        }
         conversationsPayloadCache = { key: cacheKey, conversations: baseConversations };
       }
       const conversations = await enrichConversationsWithLabels(
@@ -52451,8 +52550,17 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         const tags = new Set(conversation.tags || []);
         tags.add("disparo");
         conversation.tags = Array.from(tags);
+        const operationStore = await readOperationStore();
+        const { mutated: preferenceMutated } = ensureBroadcastResolutionPreference(
+          operationStore,
+          conversation,
+          nowIso(),
+        );
         store.conversations[conversationId] = conversation;
         await writeStore(store);
+        if (preferenceMutated) {
+          await writeOperationStore(operationStore);
+        }
       }
 
       await appendMessageDeliveryLog({
@@ -54597,11 +54705,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
 
 
 
