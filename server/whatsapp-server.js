@@ -7453,6 +7453,8 @@ const getDashboardUserRole = (operationStore = {}, userRef = {}) => {
 
 const isDashboardAttendantUser = (operationStore = {}, userRef = {}, settings = {}) => {
   const keywords = normalizeDashboardSettings(settings).attendantRoleKeywords.map(normalizeDashboardText).filter(Boolean);
+  const displayName = normalizeDashboardText(userRef.name || userRef.full_name || userRef.username || userRef.email || "");
+  if (!displayName || ["sem atendente", "sem-atendente"].includes(displayName)) return false;
   if (!keywords.length) return true;
   const { user, role } = getDashboardUserRole(operationStore, userRef);
   const haystack = normalizeDashboardText(
@@ -7683,6 +7685,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const ensureAgentConversionStats = (agentRef = {}) => {
     if (!isDashboardAttendantUser(operationStore, agentRef, dashboardSettings)) return null;
     const agentKey = String(agentRef.id || agentRef.email || agentRef.username || agentRef.name || "sem-atendente").trim();
+    if (!agentKey || ["sem-atendente", "sem atendente"].includes(normalizeDashboardText(agentKey))) return null;
     const current = agentConversions.get(agentKey) || {
       id: agentKey,
       name: String(agentRef.name || agentRef.full_name || agentRef.username || agentRef.email || "Sem atendente").trim() || "Sem atendente",
@@ -55031,7 +55034,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
 
 
 

@@ -445,13 +445,15 @@ function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatte
   }
 
   return (
-    <div className="flex h-[200px] items-end gap-3 rounded-xl bg-muted/20 px-4 pb-7 pt-4">
+    <div className="flex h-[200px] items-end gap-3 rounded-xl bg-muted/20 px-4 pb-4 pt-4">
       {labels.map((label, index) => (
-        <div key={label} className="flex flex-1 flex-col items-center gap-2">
-          <div
-            className="w-full rounded-t-lg bg-primary/45"
-            style={{ height: numericValues[index] > 0 ? `${Math.max(8, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
-          />
+        <div key={label} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+          <div className="flex h-32 w-full items-end justify-center">
+            <div
+              className="w-full max-w-16 rounded-t-lg bg-primary/55 shadow-[0_8px_18px_rgba(197,0,21,0.14)]"
+              style={{ height: numericValues[index] > 0 ? `${Math.max(8, (numericValues[index] / maxValue) * 128)}px` : '0px' }}
+            />
+          </div>
           <span className="max-w-full truncate text-[10px] text-muted-foreground" title={label}>{label}</span>
           <span className="text-[10px] font-semibold text-foreground">{valueFormatter(numericValues[index])}</span>
         </div>
@@ -1178,7 +1180,12 @@ export default function Dashboard() {
 
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
-      const byAgent = Array.isArray(attendanceMetrics?.byAgent) ? attendanceMetrics.byAgent : [];
+      const byAgent = Array.isArray(attendanceMetrics?.byAgent)
+        ? attendanceMetrics.byAgent.filter((item) => {
+            const name = String(item?.name || '').trim().toLowerCase();
+            return name && name !== 'sem atendente';
+          })
+        : [];
       const byDay = Array.isArray(attendanceMetrics?.byDay) ? attendanceMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Conversão por atendente') {
