@@ -117,7 +117,7 @@ const dashboards = {
     ],
     main: {
       title: 'Funil de aquisição',
-      description: 'Do clique no anúncio ao cliente novo e retorno para o próximo corte.',
+      description: 'Da conversa no anuncio ao cliente novo.',
       type: 'funnel',
       labels: ['Conversas', 'Agendamentos', 'Clientes novos'],
     },
@@ -142,12 +142,6 @@ const dashboards = {
     },
     sideCharts: [
       {
-        title: 'Novo x antigo',
-        type: 'stacked',
-        labels: ['Novos', 'Antigos'],
-        helper: 'Disparos, respostas e agendamentos por perfil.',
-      },
-      {
         title: 'Taxa de resposta por template',
         type: 'ranking',
         labels: ['Template D+20', 'Template D+30', 'Template D+40', 'Template D+50'],
@@ -157,7 +151,7 @@ const dashboards = {
         title: 'Recuperação ao longo do tempo',
         type: 'line',
         labels: days,
-        helper: 'Disparos, respostas, agendas e recuperados.',
+        helper: 'Agendamentos e clientes recuperados por dia.',
       },
     ],
   },
@@ -379,38 +373,48 @@ function DashboardStatCard({ title, value, subtitle, icon: Icon }) {
   );
 }
 
-function EmptyLineChart({ labels = days, values = [], secondValues = [], secondLine = false }) {
+function EmptyLineChart({
+  labels = days,
+  values = [],
+  secondValues = [],
+  secondLine = false,
+  firstLegend = '1ª resposta média',
+  secondLegend = 'TMR',
+}) {
   const numericValues = labels.map((_, index) => Number(values[index] || 0));
   const numericSecondValues = labels.map((_, index) => Number(secondValues[index] || 0));
   const maxValue = Math.max(1, ...numericValues, ...numericSecondValues);
+  const pointX = (index) => (labels.length <= 1 ? 50 : (index / (labels.length - 1)) * 100);
+  const pointY = (value) => 100 - (Number(value || 0) / maxValue) * 100;
+  const buildPath = (series) =>
+    series
+      .map((value, index) => `${index === 0 ? 'M' : 'L'} ${pointX(index).toFixed(2)} ${pointY(value).toFixed(2)}`)
+      .join(' ');
+
   return (
     <div className="relative h-[220px] rounded-xl bg-gradient-to-b from-transparent to-muted/30 px-4 pb-7 pt-4">
       <div className="mb-3 flex items-center gap-5 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary" />1ª resposta média</span>
-        {secondLine ? <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary/20" />TMR</span> : null}
+        <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary" />{firstLegend}</span>
+        {secondLine ? <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary/20" />{secondLegend}</span> : null}
       </div>
       <div className="absolute inset-x-4 top-11 h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 top-[38%] h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 top-[62%] h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 bottom-10 h-px border-t border-dashed border-border" />
-      <div className="absolute bottom-9 left-4 right-4 top-12 flex items-end justify-between gap-2">
-        {labels.map((label, index) => (
-          <div key={label} className="flex min-w-0 flex-1 items-end justify-center gap-1">
-            <div
-              className="w-full max-w-[18px] rounded-t-md bg-primary/70"
-              style={{ height: numericValues[index] > 0 ? `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
-              title={`${label}: ${formatDurationSeconds(numericValues[index])}`}
-            />
-            {secondLine ? (
-              <div
-                className="w-full max-w-[18px] rounded-t-md bg-primary/25"
-                style={{ height: numericSecondValues[index] > 0 ? `${Math.max(6, (numericSecondValues[index] / maxValue) * 100)}%` : '0%' }}
-                title={`${label}: ${formatDurationSeconds(numericSecondValues[index])}`}
-              />
-            ) : null}
-          </div>
+      <svg className="absolute bottom-10 left-4 right-4 top-12 h-[150px] w-[calc(100%-2rem)] overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <path d={buildPath(numericValues)} fill="none" stroke="hsl(var(--primary))" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        {secondLine ? (
+          <path d={buildPath(numericSecondValues)} fill="none" stroke="hsl(var(--primary) / 0.35)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        ) : null}
+        {numericValues.map((value, index) => (
+          <circle key={`a-${labels[index]}`} cx={pointX(index)} cy={pointY(value)} r="2.2" fill="hsl(var(--primary))" vectorEffect="non-scaling-stroke" />
         ))}
-      </div>
+        {secondLine
+          ? numericSecondValues.map((value, index) => (
+              <circle key={`b-${labels[index]}`} cx={pointX(index)} cy={pointY(value)} r="2.2" fill="hsl(var(--primary) / 0.45)" vectorEffect="non-scaling-stroke" />
+            ))
+          : null}
+      </svg>
       <div className="absolute bottom-2 left-4 right-4 flex justify-between text-[11px] text-muted-foreground">
         {labels.map((label) => <span key={label}>{label}</span>)}
       </div>
@@ -418,22 +422,22 @@ function EmptyLineChart({ labels = days, values = [], secondValues = [], secondL
   );
 }
 
-function EmptyBars({ labels = [], values = [], horizontal = false }) {
+function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatter = formatInteger }) {
   const numericValues = labels.map((_, index) => Number(values[index] || 0));
   const maxValue = Math.max(1, ...numericValues);
   if (horizontal) {
     return (
       <div className="space-y-3">
         {labels.map((label, index) => (
-          <div key={label} className="grid grid-cols-[64px_minmax(0,1fr)_28px] items-center gap-3 text-xs">
-            <span className="font-medium text-muted-foreground">{label}</span>
+          <div key={label} className="grid grid-cols-[minmax(92px,150px)_minmax(0,1fr)_48px] items-center gap-3 text-xs">
+            <span className="truncate font-medium text-muted-foreground" title={label}>{label}</span>
             <div className="h-4 rounded-full bg-primary/10">
               <div
                 className="h-4 rounded-full bg-primary/50"
                 style={{ width: numericValues[index] > 0 ? `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
               />
             </div>
-            <span className="text-right font-semibold text-foreground">{numericValues[index]}</span>
+            <span className="text-right font-semibold text-foreground">{valueFormatter(numericValues[index])}</span>
           </div>
         ))}
       </div>
@@ -448,7 +452,8 @@ function EmptyBars({ labels = [], values = [], horizontal = false }) {
             className="w-full rounded-t-lg bg-primary/45"
             style={{ height: numericValues[index] > 0 ? `${Math.max(8, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
           />
-          <span className="text-[10px] text-muted-foreground">{label}</span>
+          <span className="max-w-full truncate text-[10px] text-muted-foreground" title={label}>{label}</span>
+          <span className="text-[10px] font-semibold text-foreground">{valueFormatter(numericValues[index])}</span>
         </div>
       ))}
     </div>
@@ -648,7 +653,7 @@ function AcquisitionFunnel({ values }) {
             const isFirst = index === 0;
             const isLast = index === stages.length - 1;
             return (
-              <div key={stage.label} className={cn('relative', !isFirst && '-ml-8')} style={{ zIndex: index + 1, width: isFirst ? '30%' : '26%' }}>
+              <div key={stage.label} className={cn('relative min-w-0', !isFirst && '-ml-8')} style={{ zIndex: index + 1, flex: isFirst ? '1.12 1 0' : '1 1 0' }}>
                 <div
                   className={cn('flex min-h-[136px] items-center px-8 py-7', isLast ? 'text-[#111827]' : 'text-white')}
                   style={{
@@ -813,7 +818,19 @@ function AcquisitionCustomersTable({ items = [] }) {
   );
 }
 
-function ChartCard({ title, description, type, labels = [], values = [], secondValues = [], helper, className }) {
+function ChartCard({
+  title,
+  description,
+  type,
+  labels = [],
+  values = [],
+  secondValues = [],
+  helper,
+  className,
+  valueFormatter = formatInteger,
+  firstLegend,
+  secondLegend,
+}) {
   return (
     <section className={cn('rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]', className)}>
       <div className="mb-4">
@@ -822,16 +839,16 @@ function ChartCard({ title, description, type, labels = [], values = [], secondV
       </div>
 
       {type === 'funnel' ? <EmptyFunnel labels={labels} /> : null}
-      {type === 'line' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine /> : null}
-      {type === 'combo' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine /> : null}
-      {type === 'bars' ? <EmptyBars labels={labels} values={values} /> : null}
-      {type === 'stacked' ? <EmptyBars labels={labels} values={values} /> : null}
-      {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal /> : null}
-      {type === 'ranking' ? <EmptyBars labels={labels} values={values} horizontal /> : null}
+      {type === 'line' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine firstLegend={firstLegend} secondLegend={secondLegend} /> : null}
+      {type === 'combo' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine firstLegend={firstLegend} secondLegend={secondLegend} /> : null}
+      {type === 'bars' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
+      {type === 'stacked' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
+      {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
+      {type === 'ranking' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
       {type === 'donut' ? <EmptyDonut labels={labels} /> : null}
       {type === 'donutLarge' ? <EmptyDonut labels={labels} large /> : null}
       {type === 'gauge' ? <EmptyGauge /> : null}
-      {type === 'scoreBars' ? <EmptyBars labels={labels} /> : null}
+      {type === 'scoreBars' ? <EmptyBars labels={labels} valueFormatter={valueFormatter} /> : null}
     </section>
   );
 }
@@ -1168,7 +1185,9 @@ export default function Dashboard() {
           return {
             ...chart,
             labels: byAgent.map((item) => item.name || 'Sem atendente'),
-            values: byAgent.length ? byAgent.map((item) => item.appointments || 0) : [],
+            values: byAgent.length ? byAgent.map((item) => Math.round((Number(item.conversionRate) || 0) * 1000) / 10) : [],
+            helper: 'Percentual de conversas que viraram corte por atendente.',
+            valueFormatter: formatPercent,
           };
         }
         if (chart.title === 'Tempo de resposta por dia') {
@@ -1177,6 +1196,8 @@ export default function Dashboard() {
             labels: byDay.map((item) => String(item.date || '').slice(5) || '-'),
             values: byDay.length ? byDay.map((item) => item.firstResponseAverageSeconds || 0) : [],
             secondValues: byDay.length ? byDay.map((item) => item.tmrSeconds || 0) : [],
+            firstLegend: '1ª resposta média',
+            secondLegend: 'TMR',
           };
         }
         return chart;
@@ -1185,19 +1206,25 @@ export default function Dashboard() {
 
     if (activeDashboard === 'followup') {
       const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
+      const byDay = Array.isArray(followUpMetrics?.byDay) ? followUpMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Taxa de resposta por template') {
           return {
             ...chart,
             labels: byTemplate.length ? byTemplate.map((item) => item.templateName || item.routineName || 'Sem template') : chart.labels,
             values: byTemplate.length ? byTemplate.map((item) => Math.round((Number(item.responseRate) || 0) * 100)) : [],
+            valueFormatter: formatPercent,
           };
         }
-        if (chart.title === 'Performance por régua de follow-up' || chart.title === 'Recuperação ao longo do tempo') {
+        if (chart.title === 'Recuperação ao longo do tempo') {
           return {
             ...chart,
-            labels: byTemplate.length ? byTemplate.map((item) => item.routineName || item.templateName || 'Sem rotina') : chart.labels,
-            values: byTemplate.length ? byTemplate.map((item) => item.appointments || 0) : [],
+            labels: byDay.length ? byDay.map((item) => String(item.date || '').slice(5) || '-') : chart.labels,
+            values: byDay.length ? byDay.map((item) => item.recovered || 0) : [],
+            secondValues: byDay.length ? byDay.map((item) => item.appointments || 0) : [],
+            firstLegend: 'Recuperados',
+            secondLegend: 'Agendamentos',
+            className: 'xl:col-span-2',
           };
         }
         return chart;
@@ -1250,7 +1277,7 @@ export default function Dashboard() {
       )}
 
       {displaySideCharts.length ? (
-        <div className={cn('grid grid-cols-1 gap-4', displaySideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
+        <div className={cn('grid grid-cols-1 gap-4', activeDashboard === 'followup' ? 'xl:grid-cols-3' : displaySideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
           {displaySideCharts.map((chart) => (
             <ChartCard key={chart.title} {...chart} />
           ))}

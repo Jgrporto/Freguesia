@@ -7403,6 +7403,20 @@ const resolveDashboardConversationPhone = (conversation = {}, conversationId = "
 const isWithinDashboardRange = (timestampMs, startMs, endMs) =>
   Number.isFinite(timestampMs) && timestampMs >= startMs && timestampMs <= endMs;
 
+const enumerateDashboardDayKeys = (startMs, endMs) => {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return [];
+  const keys = [];
+  const cursor = new Date(startMs);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(endMs);
+  end.setUTCHours(0, 0, 0, 0);
+  while (cursor.getTime() <= end.getTime() && keys.length < 370) {
+    keys.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return keys;
+};
+
 const getDashboardUserRole = (operationStore = {}, userRef = {}) => {
   const users = Array.isArray(operationStore.users) ? operationStore.users : [];
   const roles = Array.isArray(operationStore.roles) ? operationStore.roles : [];
@@ -7457,6 +7471,35 @@ const isDashboardAttendantUser = (operationStore = {}, userRef = {}, settings = 
     ].join(" "),
   );
   return keywords.some((keyword) => haystack.includes(keyword));
+};
+
+const getDashboardAttendantUsers = (operationStore = {}, settings = {}) => {
+  const users = Array.isArray(operationStore.users) ? operationStore.users : [];
+  return users
+    .filter((user) =>
+      isDashboardAttendantUser(
+        operationStore,
+        {
+          id: user?.id,
+          email: user?.email,
+          username: user?.username,
+          name: user?.full_name || user?.name || user?.username,
+          full_name: user?.full_name,
+          role: user?.role,
+          role_name: user?.role_name,
+        },
+        settings,
+      ),
+    )
+    .map((user) => ({
+      id: user?.id || user?.email || user?.username || "",
+      email: user?.email || "",
+      username: user?.username || "",
+      name: user?.full_name || user?.name || user?.username || user?.email || "Sem atendente",
+      full_name: user?.full_name || "",
+      role: user?.role || "",
+      role_name: user?.role_name || "",
+    }));
 };
 
 const resolveDashboardMessageAgentRef = (message = {}, fallback = {}) => ({
@@ -7639,16 +7682,20 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const agentConversions = new Map();
   const ensureAgentConversionStats = (agentRef = {}) => {
     if (!isDashboardAttendantUser(operationStore, agentRef, dashboardSettings)) return null;
-    const agentKey = String(agentRef.id || agentRef.email || agentRef.name || "sem-atendente").trim();
+    const agentKey = String(agentRef.id || agentRef.email || agentRef.username || agentRef.name || "sem-atendente").trim();
     const current = agentConversions.get(agentKey) || {
       id: agentKey,
-      name: String(agentRef.name || "Sem atendente").trim() || "Sem atendente",
+      name: String(agentRef.name || agentRef.full_name || agentRef.username || agentRef.email || "Sem atendente").trim() || "Sem atendente",
       appointments: 0,
       conversations: 0,
     };
     agentConversions.set(agentKey, current);
     return current;
   };
+
+  getDashboardAttendantUsers(operationStore, dashboardSettings).forEach((agentRef) => {
+    ensureAgentConversionStats(agentRef);
+  });
 
   for (const conversationId of conversationIdsWithClientMessages) {
     const conversation = conversationsById[conversationId] || {};
@@ -7695,6 +7742,10 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       conversionRate: item.conversations > 0 ? item.appointments / item.conversations : 0,
     }))
     .sort((left, right) => right.appointments - left.appointments || left.name.localeCompare(right.name));
+
+  enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach((dayKey) => {
+    ensureDayStats(dayKey);
+  });
 
   const byDay = Array.from(dayStats.values())
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -8220,6 +8271,19 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const scheduledPhones = new Set();
   const recoveredPhones = new Set();
   const respondedEventIds = new Set();
+  const dayStats = new Map();
+  const ensureFollowUpDayStats = (dayKey) => {
+    if (!dayStats.has(dayKey)) {
+      dayStats.set(dayKey, {
+        date: dayKey,
+        sent: 0,
+        responses: 0,
+        appointments: 0,
+        recovered: 0,
+      });
+    }
+    return dayStats.get(dayKey);
+  };
 
   const isFollowUpLog = (entry = {}) => {
     const routineId = String(entry?.routineId || entry?.details?.routineId || "").trim();
@@ -8306,6 +8370,9 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     const row = routineRows.get(item.rowKey);
     if (!row) return;
     row.sent += 1;
+    const sentDay = new Date(item.sentAtMs).toISOString().slice(0, 10);
+    const dayEntry = ensureFollowUpDayStats(sentDay);
+    dayEntry.sent += 1;
 
     const customer = findDashboardCustomerByPhone(customerIndex, item.phone);
     const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
@@ -8321,10 +8388,12 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     if ((hasPendingAppointment || hasResolvedAppointment) && !scheduledPhones.has(`${item.rowKey}:${item.phone}`)) {
       scheduledPhones.add(`${item.rowKey}:${item.phone}`);
       row.appointments += 1;
+      dayEntry.appointments += 1;
     }
     if (hasResolvedAppointment && !recoveredPhones.has(`${item.rowKey}:${item.phone}`)) {
       recoveredPhones.add(`${item.rowKey}:${item.phone}`);
       row.recovered += 1;
+      dayEntry.recovered += 1;
     }
   });
 
@@ -8356,6 +8425,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     respondedEventIds.add(eventId);
     const row = routineRows.get(matchedSend.rowKey);
     if (row) row.responses += 1;
+    ensureFollowUpDayStats(new Date(eventAtMs).toISOString().slice(0, 10)).responses += 1;
   });
 
   const templateRows = Array.from(routineRows.values())
@@ -8370,6 +8440,10 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const totalResponses = respondedEventIds.size;
   const totalAppointments = templateRows.reduce((total, item) => total + Number(item.appointments || 0), 0);
   const totalRecovered = templateRows.reduce((total, item) => total + Number(item.recovered || 0), 0);
+  enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach((dayKey) => {
+    ensureFollowUpDayStats(dayKey);
+  });
+  const byDay = Array.from(dayStats.values()).sort((left, right) => left.date.localeCompare(right.date));
 
   return {
     period: {
@@ -8392,6 +8466,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       recoveredCustomers: totalRecovered,
     },
     byTemplate: templateRows,
+    byDay,
     settings: {
       followUpRoutineNameKeywords: dashboardSettings.followUpRoutineNameKeywords,
       followUpResponseMetricTagIds: dashboardSettings.followUpResponseMetricTagIds,
@@ -54956,8 +55031,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
 
 
 
