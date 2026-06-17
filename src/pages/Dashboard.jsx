@@ -3,7 +3,9 @@ import {
   Award,
   Calendar,
   CalendarDays,
+  ChevronDown,
   Clock3,
+  Filter,
   Gift,
   HeartHandshake,
   LineChart,
@@ -12,6 +14,7 @@ import {
   MessageSquare,
   PiggyBank,
   Repeat2,
+  RotateCcw,
   Scissors,
   Send,
   Sparkles,
@@ -268,6 +271,31 @@ const getDefaultDateRange = () => {
     end: toDateInputValue(end),
   };
 };
+
+const getDateRangeForLastDays = (daysCount) => {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - Math.max(0, Number(daysCount) - 1));
+  return {
+    start: toDateInputValue(start),
+    end: toDateInputValue(end),
+  };
+};
+
+const getCurrentMonthDateRange = () => {
+  const now = new Date();
+  return {
+    start: toDateInputValue(new Date(now.getFullYear(), now.getMonth(), 1)),
+    end: toDateInputValue(now),
+  };
+};
+
+const dashboardDatePresets = [
+  { id: 'today', label: 'Hoje', getRange: () => getDateRangeForLastDays(1) },
+  { id: '7days', label: '7 dias', getRange: () => getDateRangeForLastDays(7) },
+  { id: '30days', label: '30 dias', getRange: () => getDateRangeForLastDays(30) },
+  { id: 'month', label: 'Este mes', getRange: getCurrentMonthDateRange },
+];
 
 const formatDurationSeconds = (seconds) => {
   const totalSeconds = Math.max(0, Math.round(Number(seconds) || 0));
@@ -719,9 +747,89 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
   );
 }
 
+function DashboardFilters({
+  open,
+  onOpenChange,
+  startDate,
+  endDate,
+  onDateRangeChange,
+}) {
+  const activePreset = dashboardDatePresets.find((preset) => {
+    const range = preset.getRange();
+    return range.start === startDate && range.end === endDate;
+  })?.id || 'custom';
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-[0_10px_34px_rgba(15,23,42,0.06)]">
+      <button
+        type="button"
+        className={cn(
+          'flex min-h-[74px] w-full items-center justify-between gap-4 px-5 text-left transition-colors hover:bg-muted/40',
+          open && 'border-b border-border/80',
+        )}
+        onClick={() => onOpenChange(!open)}
+        aria-expanded={open}
+      >
+        <span className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-500/12 text-emerald-600">
+            <Filter className="h-5 w-5" />
+          </span>
+          <span className="text-[15px] font-black uppercase tracking-[0.18em] text-foreground">Filtros</span>
+        </span>
+        <ChevronDown className={cn('h-5 w-5 text-muted-foreground transition-transform', open && 'rotate-180')} />
+      </button>
+
+      {open ? (
+        <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_auto] lg:items-end">
+          <div>
+            <div className="mb-2 text-xs font-semibold text-muted-foreground">Pre filtros</div>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              {dashboardDatePresets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => onDateRangeChange(preset.getRange())}
+                  className={cn(
+                    'h-11 rounded-xl border px-4 text-sm font-semibold transition-colors',
+                    activePreset === preset.id
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-background text-foreground hover:bg-muted',
+                  )}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs font-semibold text-muted-foreground">Periodo</div>
+            <DateFilter
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
+              onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onDateRangeChange(getDefaultDateRange())}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-5 text-sm font-bold text-foreground transition-colors hover:bg-muted"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Limpar filtros
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
   const [{ start, end }, setDateRange] = useState(() => getDefaultDateRange());
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [attendanceMetrics, setAttendanceMetrics] = useState(null);
   const [acquisitionMetrics, setAcquisitionMetrics] = useState(null);
   const [followUpMetrics, setFollowUpMetrics] = useState(null);
@@ -992,20 +1100,15 @@ export default function Dashboard() {
         </div>
 
         <DashboardBrowserTabs activeTab={activeDashboard} onChange={setActiveDashboard} />
-
-        <div className="mt-5 flex flex-col gap-4 pt-1 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h2 className="text-lg font-bold text-foreground">{current.title}</h2>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{current.subtitle}</p>
-          </div>
-          <DateFilter
-            startDate={start}
-            endDate={end}
-            onStartDateChange={(nextStart) => setDateRange((currentRange) => ({ ...currentRange, start: nextStart }))}
-            onEndDateChange={(nextEnd) => setDateRange((currentRange) => ({ ...currentRange, end: nextEnd }))}
-          />
-        </div>
       </section>
+
+      <DashboardFilters
+        open={filtersOpen}
+        onOpenChange={setFiltersOpen}
+        startDate={start}
+        endDate={end}
+        onDateRangeChange={(nextRange) => setDateRange((currentRange) => ({ ...currentRange, ...nextRange }))}
+      />
 
       <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3', cards.length >= 5 ? '2xl:grid-cols-5' : '2xl:grid-cols-6')}>
         {cards.map((card) => (
