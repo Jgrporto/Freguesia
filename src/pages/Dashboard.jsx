@@ -771,7 +771,7 @@ function DashboardFilters({
         aria-expanded={open}
       >
         <span className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-500/12 text-emerald-600">
+          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-primary/10 text-primary">
             <Filter className="h-5 w-5" />
           </span>
           <span className="text-[15px] font-black uppercase tracking-[0.18em] text-foreground">Filtros</span>
