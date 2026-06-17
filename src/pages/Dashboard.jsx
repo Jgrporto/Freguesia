@@ -109,7 +109,7 @@ const dashboards = {
     subtitle: 'Mostra se o investimento em tráfego está trazendo clientes reais ou apenas conversas.',
     cards: [
       { title: 'Clientes vindos do anúncio', value: '0', subtitle: 'Novos clientes identificados', icon: Users },
-      { title: 'Conversas iniciadas', value: '0', subtitle: 'Cliques que abriram WhatsApp', icon: MessageCircle },
+      { title: 'Conversas iniciadas', value: '0', subtitle: 'Conversas vindas dos anúncios', icon: MessageCircle },
       { title: 'Agendamentos do anúncio', value: '0', subtitle: 'Gerados por mídia paga', icon: CalendarDays },
       { title: 'CAC por agendamento', value: 'R$ 0,00', subtitle: 'Investimento / agendas', icon: PiggyBank },
       { title: 'CAC por cliente novo', value: 'R$ 0,00', subtitle: 'Investimento / clientes', icon: UserCheck },
@@ -119,7 +119,7 @@ const dashboards = {
       title: 'Funil de aquisição',
       description: 'Do clique no anúncio ao cliente novo e retorno para o próximo corte.',
       type: 'funnel',
-      labels: ['Cliques', 'Conversas', 'Agendamentos', 'Clientes novos'],
+      labels: ['Conversas', 'Agendamentos', 'Clientes novos'],
     },
     sideCharts: [],
   },
@@ -625,22 +625,20 @@ function AtendimentoConversionFunnel({ values }) {
 }
 
 function AcquisitionFunnel({ values }) {
-  const clicks = Number(values?.clicks ?? 0);
   const conversations = Number(values?.conversations ?? 0);
   const bookings = Number(values?.appointments ?? 0);
   const newCustomers = Number(values?.newCustomers ?? 0);
   const stages = [
-    { label: 'Cliques', value: clicks, icon: Megaphone, tone: 'dark', rate: 100 },
-    { label: 'Conversas', value: conversations, icon: MessageSquare, tone: 'dark', rate: safeRate(conversations, clicks) },
-    { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'dark', rate: safeRate(bookings, conversations || clicks) },
-    { label: 'Clientes novos', value: newCustomers, icon: UserCheck, tone: 'light', rate: safeRate(newCustomers, conversations || clicks) },
+    { label: 'Conversas', value: conversations, icon: MessageSquare, tone: 'dark', rate: 100 },
+    { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'dark', rate: safeRate(bookings, conversations) },
+    { label: 'Clientes novos', value: newCustomers, icon: UserCheck, tone: 'light', rate: safeRate(newCustomers, conversations) },
   ];
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
       <div className="mb-3">
         <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">FUNIL DE AQUISIÇÃO</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Cliques da Meta, conversas iniciadas, agendamentos e clientes novos.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Conversas iniciadas por anuncio, agendamentos e clientes novos.</p>
       </div>
 
       <div className="rounded-2xl border border-[#efe5e5] bg-white p-3">
@@ -691,6 +689,124 @@ function AcquisitionFunnel({ values }) {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatDashboardDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function AcquisitionCustomersTable({ items = [] }) {
+  const [search, setSearch] = useState('');
+  const [stageFilter, setStageFilter] = useState('all');
+  const [periodDays, setPeriodDays] = useState('30');
+
+  const filteredItems = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const daysLimit = Number(periodDays);
+    const cutoffMs = Number.isFinite(daysLimit) && daysLimit > 0 ? Date.now() - daysLimit * 24 * 60 * 60 * 1000 : 0;
+
+    return (Array.isArray(items) ? items : []).filter((item) => {
+      const referenceMs = Date.parse(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt || '');
+      const matchesPeriod = !cutoffMs || (Number.isFinite(referenceMs) && referenceMs >= cutoffMs);
+      const matchesStage = stageFilter === 'all' || String(item.stageId || '') === stageFilter;
+      const haystack = [item.name, item.phone, item.stageLabel, ...(Array.isArray(item.keywords) ? item.keywords : [])]
+        .join(' ')
+        .toLowerCase();
+      const matchesSearch = !normalizedSearch || haystack.includes(normalizedSearch);
+      return matchesPeriod && matchesStage && matchesSearch;
+    });
+  }, [items, periodDays, search, stageFilter]);
+
+  return (
+    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">Clientes dos anuncios</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Lista persistida dos contatos identificados por anuncio e etapa atual.</p>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+            Periodo
+            <select
+              value={periodDays}
+              onChange={(event) => setPeriodDays(event.target.value)}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground"
+            >
+              <option value="30">30 dias</option>
+              <option value="7">7 dias</option>
+              <option value="90">90 dias</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+            Etapa
+            <select
+              value={stageFilter}
+              onChange={(event) => setStageFilter(event.target.value)}
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground"
+            >
+              <option value="all">Todas</option>
+              <option value="conversation">Conversa</option>
+              <option value="appointment">Agendamento</option>
+              <option value="new_customer">Cliente novo</option>
+            </select>
+          </label>
+          <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+            Buscar
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Nome ou telefone"
+              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground outline-none"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-xl border border-border">
+        <div className="max-h-[420px] overflow-auto">
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-bold">Cliente</th>
+                <th className="px-4 py-3 font-bold">Telefone</th>
+                <th className="px-4 py-3 font-bold">Etapa</th>
+                <th className="px-4 py-3 font-bold">Ultimo sinal</th>
+                <th className="px-4 py-3 font-bold">Palavras</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredItems.length ? (
+                filteredItems.map((item) => (
+                  <tr key={item.id || `${item.phone}-${item.conversationId}`} className="border-t border-border">
+                    <td className="px-4 py-3 font-semibold text-foreground">{item.name || 'Cliente sem nome'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{item.phone || '-'}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
+                        {item.stageLabel || 'Conversa'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{formatDashboardDate(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {Array.isArray(item.keywords) && item.keywords.length ? item.keywords.join(', ') : '-'}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    Nenhum cliente de anuncio encontrado para os filtros.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -919,7 +1035,7 @@ export default function Dashboard() {
           return { ...card, value: formatInteger(metrics.adCustomers), subtitle: 'Vieram de anúncio e entraram na base' };
         }
         if (card.title === 'Conversas iniciadas') {
-          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Cliques/conversas retornados pela Meta' };
+          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Conversas identificadas por anúncio' };
         }
         if (card.title === 'Agendamentos do anúncio') {
           return { ...card, value: formatInteger(metrics.adAppointments), subtitle: 'Agendados ou realizados' };
@@ -947,13 +1063,13 @@ export default function Dashboard() {
           return { ...card, value: formatInteger(metrics.responses), subtitle: 'Tags de métrica do Chatbot' };
         }
         if (card.title === 'Agendamentos gerados') {
-          return { ...card, value: formatInteger(metrics.appointments), subtitle: 'Agendamentos realizados após disparo' };
+          return { ...card, value: formatInteger(metrics.appointments), subtitle: 'Agendados + realizados após disparo' };
         }
         if (card.title === 'Clientes recuperados') {
           return { ...card, value: formatInteger(metrics.recoveredCustomers), subtitle: 'Clientes com agendamento realizado' };
         }
         if (card.title === 'Melhor template') {
-          return { ...card, value: metrics.bestTemplate || '—', subtitle: 'Mais recuperações atribuídas' };
+          return { ...card, value: metrics.bestTemplate || '—', subtitle: 'Mais respostas atribuídas' };
         }
         return card;
       });
@@ -1025,7 +1141,6 @@ export default function Dashboard() {
   const acquisitionFunnelValues = useMemo(() => {
     if (activeDashboard !== 'aquisicao') return null;
     return {
-      clicks: acquisitionMetrics?.funnel?.clicks ?? 0,
       conversations: acquisitionMetrics?.funnel?.conversations ?? 0,
       appointments: acquisitionMetrics?.funnel?.appointments ?? 0,
       newCustomers: acquisitionMetrics?.funnel?.newCustomers ?? 0,
@@ -1038,9 +1153,9 @@ export default function Dashboard() {
     if (!byTemplate.length) return currentMain;
     return {
       ...currentMain,
-      labels: byTemplate.map((item) => item.templateName || 'Sem template'),
-      values: byTemplate.map((item) => item.recovered || 0),
-      description: 'Recuperacoes atribuidas por template/rotina no periodo selecionado.',
+      labels: byTemplate.map((item) => item.routineName || item.templateName || 'Sem rotina'),
+      values: byTemplate.map((item) => item.appointments || 0),
+      description: 'Agendamentos atribuídos por rotina configurada no período selecionado.',
     };
   }, [activeDashboard, currentMain, followUpMetrics]);
 
@@ -1074,15 +1189,15 @@ export default function Dashboard() {
         if (chart.title === 'Taxa de resposta por template') {
           return {
             ...chart,
-            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || 'Sem template') : chart.labels,
+            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || item.routineName || 'Sem template') : chart.labels,
             values: byTemplate.length ? byTemplate.map((item) => Math.round((Number(item.responseRate) || 0) * 100)) : [],
           };
         }
         if (chart.title === 'Performance por régua de follow-up' || chart.title === 'Recuperação ao longo do tempo') {
           return {
             ...chart,
-            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || 'Sem template') : chart.labels,
-            values: byTemplate.length ? byTemplate.map((item) => item.recovered || 0) : [],
+            labels: byTemplate.length ? byTemplate.map((item) => item.routineName || item.templateName || 'Sem rotina') : chart.labels,
+            values: byTemplate.length ? byTemplate.map((item) => item.appointments || 0) : [],
           };
         }
         return chart;
@@ -1119,7 +1234,10 @@ export default function Dashboard() {
       {currentMain.type === 'atendimentoFunnel' ? (
         <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
       ) : activeDashboard === 'aquisicao' ? (
-        <AcquisitionFunnel values={acquisitionFunnelValues} />
+        <>
+          <AcquisitionFunnel values={acquisitionFunnelValues} />
+          <AcquisitionCustomersTable items={acquisitionMetrics?.adCustomers || []} />
+        </>
       ) : (
         <ChartCard
           title={mainChartProps.title}

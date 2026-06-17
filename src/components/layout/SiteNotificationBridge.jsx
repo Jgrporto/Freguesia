@@ -34,11 +34,32 @@ const CHATBOT_MAX_CONCURRENT_PROCESSING = 2;
 const CUSTOMER_CACHE_REFRESH_INTERVAL_MS = 60000;
 const CUSTOMER_SYNC_STATE_REFRESH_INTERVAL_MS = 30000;
 
-const buildUnreadSnapshot = (conversations = []) =>
+const resolveClientMessageTimestampMs = (conversation = {}) => {
+  const candidates = [
+    conversation.last_client_message_time,
+    conversation.lastClientMessageTime,
+    conversation.last_received_at,
+    conversation.lastReceivedAt,
+  ];
+
+  for (const candidate of candidates) {
+    const timestampMs = Date.parse(String(candidate || ''));
+    if (Number.isFinite(timestampMs)) {
+      return timestampMs;
+    }
+  }
+
+  return 0;
+};
+
+const buildNotificationSnapshot = (conversations = []) =>
   new Map(
     conversations.map((conversation) => [
       String(conversation?.id || ''),
-      Number.isFinite(Number(conversation?.unread_count)) ? Number(conversation.unread_count) : 0,
+      {
+        clientMessageTimestampMs: resolveClientMessageTimestampMs(conversation),
+        unreadCount: Number.isFinite(Number(conversation?.unread_count)) ? Number(conversation.unread_count) : 0,
+      },
     ]),
   );
 
@@ -285,7 +306,7 @@ export default function SiteNotificationBridge() {
   }, []);
 
   useEffect(() => {
-    const currentSnapshot = buildUnreadSnapshot(conversations);
+    const currentSnapshot = buildNotificationSnapshot(conversations);
     const previousSnapshot = previousUnreadSnapshotRef.current;
     previousUnreadSnapshotRef.current = currentSnapshot;
 
@@ -298,9 +319,17 @@ export default function SiteNotificationBridge() {
         return false;
       }
       const conversationId = String(conversation?.id || '');
-      const currentUnread = currentSnapshot.get(conversationId) || 0;
-      const previousUnread = previousSnapshot.get(conversationId) || 0;
-      return currentUnread > previousUnread && currentUnread > 0;
+      const currentState = currentSnapshot.get(conversationId) || {};
+      const previousState = previousSnapshot.get(conversationId) || {};
+      const currentUnread = currentState.unreadCount || 0;
+      const previousUnread = previousState.unreadCount || 0;
+      const currentClientMessageTimestampMs = currentState.clientMessageTimestampMs || 0;
+      const previousClientMessageTimestampMs = previousState.clientMessageTimestampMs || 0;
+
+      return (
+        (currentUnread > previousUnread && currentUnread > 0) ||
+        (currentClientMessageTimestampMs > previousClientMessageTimestampMs)
+      );
     });
 
     if (!triggeredConversation || isPlayingRef.current) {

@@ -7318,6 +7318,79 @@ const findDashboardCustomerByPhone = (index, phone) => {
   return null;
 };
 
+const getDashboardCustomerName = (customer = {}, fallback = "") =>
+  String(
+    customer?.display_name ||
+      customer?.displayName ||
+      customer?.name ||
+      customer?.usuario ||
+      customer?.user ||
+      customer?.username ||
+      customer?.raw?.Nome ||
+      customer?.raw?.Cliente ||
+      fallback ||
+      "Cliente sem nome",
+  ).trim() || "Cliente sem nome";
+
+const getDashboardConversationDisplayName = (conversation = {}, customer = null) =>
+  getDashboardCustomerName(
+    customer || {},
+    conversation?.contact_name || conversation?.customer?.name || conversation?.name || "",
+  );
+
+const getDashboardAppointmentStage = ({ hasAppointment = false, hasCustomer = false } = {}) => {
+  if (hasCustomer) return { id: "new_customer", label: "Cliente novo" };
+  if (hasAppointment) return { id: "appointment", label: "Agendamento" };
+  return { id: "conversation", label: "Conversa" };
+};
+
+const normalizeDashboardPersistedAdCustomers = (value = []) =>
+  (Array.isArray(value) ? value : [])
+    .map((item) => ({
+      id: String(item?.id || item?.phone || item?.conversationId || "").trim(),
+      phone: normalizePhone(item?.phone || ""),
+      name: String(item?.name || "Cliente sem nome").trim() || "Cliente sem nome",
+      conversationId: String(item?.conversationId || "").trim(),
+      stageId: String(item?.stageId || "conversation").trim(),
+      stageLabel: String(item?.stageLabel || "Conversa").trim(),
+      firstAdSeenAt: String(item?.firstAdSeenAt || "").trim(),
+      lastAdSeenAt: String(item?.lastAdSeenAt || "").trim(),
+      lastMessageAt: String(item?.lastMessageAt || "").trim(),
+      appointmentAt: String(item?.appointmentAt || "").trim(),
+      resolvedAt: String(item?.resolvedAt || "").trim(),
+      keywords: Array.isArray(item?.keywords) ? item.keywords.map((keyword) => String(keyword || "").trim()).filter(Boolean) : [],
+      updatedAt: String(item?.updatedAt || "").trim(),
+    }))
+    .filter((item) => item.id && item.phone);
+
+const upsertDashboardAdCustomerRecords = (operationStore = {}, records = []) => {
+  const existing = normalizeDashboardPersistedAdCustomers(operationStore.dashboardAdCustomers);
+  const byId = new Map(existing.map((item) => [item.id, item]));
+  let mutated = false;
+
+  for (const record of records) {
+    const normalized = normalizeDashboardPersistedAdCustomers([record])[0];
+    if (!normalized) continue;
+    const current = byId.get(normalized.id);
+    const next = {
+      ...(current || {}),
+      ...normalized,
+      firstAdSeenAt: current?.firstAdSeenAt && current.firstAdSeenAt < normalized.firstAdSeenAt ? current.firstAdSeenAt : normalized.firstAdSeenAt,
+      updatedAt: nowIso(),
+    };
+    if (JSON.stringify(current || null) !== JSON.stringify(next)) {
+      byId.set(normalized.id, next);
+      mutated = true;
+    }
+  }
+
+  const nextItems = Array.from(byId.values())
+    .sort((left, right) => Date.parse(right.lastAdSeenAt || right.updatedAt || "") - Date.parse(left.lastAdSeenAt || left.updatedAt || ""))
+    .slice(0, 2000);
+  operationStore.dashboardAdCustomers = nextItems;
+  return { mutated, items: nextItems };
+};
+
 const resolveDashboardConversationPhone = (conversation = {}, conversationId = "") =>
   normalizePhone(
     conversation?.customer?.phone ||
@@ -7702,6 +7775,7 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   appointmentAttributionWindowDays: 60,
   attendantRoleKeywords: ["atendente"],
   followUpRoutineNameKeywords: ["follow", "recuper", "retorno", "corte"],
+  followUpResponseMetricTagIds: ["follow_up_response"],
   templateResponseWindowDays: 7,
   templateRecoveryWindowDays: 30,
   newCustomerWindowDays: 30,
@@ -7754,6 +7828,10 @@ const normalizeDashboardSettings = (value = {}) => {
     followUpRoutineNameKeywords: normalizeDashboardStringList(
       source.followUpRoutineNameKeywords,
       DASHBOARD_SETTINGS_DEFAULT.followUpRoutineNameKeywords,
+    ),
+    followUpResponseMetricTagIds: normalizeDashboardStringList(
+      source.followUpResponseMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.followUpResponseMetricTagIds,
     ),
     templateResponseWindowDays: normalizeDashboardPositiveInteger(
       source.templateResponseWindowDays,
@@ -7934,7 +8012,7 @@ const resolveAdSignalDetails = (conversation = {}, messages = [], settings = {})
   };
 };
 
-const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operationStore = {} } = {}) => {
+const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operationStore = {}, mutationState = null } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
@@ -7957,10 +8035,15 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   const appointmentPhones = new Set();
   const customerPhones = new Set();
   const keywordStats = new Map();
+  const adCustomerRecords = [];
   const appointmentWindowMs = dashboardSettings.appointmentAttributionWindowDays * 24 * 60 * 60 * 1000;
 
   for (const [conversationId, conversation] of Object.entries(store?.conversations || {})) {
     const messages = getSortedMessages(conversationId, store?.messages?.[conversationId] || []);
+    const lastMessageAtMs = messages.reduce((latest, message) => {
+      const ts = resolveDashboardMessageTimestampMs(message);
+      return Number.isFinite(ts) && ts > latest ? ts : latest;
+    }, 0);
     const hasMessageInPeriod = messages.some((message) => {
       const ts = resolveDashboardMessageTimestampMs(message);
       return Number.isFinite(ts) && ts >= normalizedStartMs && ts <= normalizedEndMs;
@@ -7974,6 +8057,9 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     adConversationIds.add(conversationId);
     const phone = resolveDashboardConversationPhone(conversation, conversationId);
     const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
+    let hasAppointment = false;
+    let appointmentAt = "";
+    let resolvedAt = "";
     if (customer) {
       customerPhones.add(phone);
       const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
@@ -7986,7 +8072,30 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
           appointmentMs >= normalizedStartMs &&
           appointmentMs <= normalizedEndMs,
       );
-      if (insideAttributionWindow) appointmentPhones.add(getDashboardCustomerPhone(customer) || phone);
+      if (insideAttributionWindow) {
+        appointmentPhones.add(getDashboardCustomerPhone(customer) || phone);
+        hasAppointment = true;
+        appointmentAt = Number.isFinite(pendingMs) ? new Date(pendingMs).toISOString() : "";
+        resolvedAt = Number.isFinite(resolvedMs) ? new Date(resolvedMs).toISOString() : "";
+      }
+    }
+    const stage = getDashboardAppointmentStage({ hasAppointment, hasCustomer: Boolean(customer) });
+    const normalizedPhone = (customer && getDashboardCustomerPhone(customer)) || phone;
+    if (normalizedPhone) {
+      adCustomerRecords.push({
+        id: normalizedPhone,
+        phone: normalizedPhone,
+        name: getDashboardConversationDisplayName(conversation, customer),
+        conversationId,
+        stageId: stage.id,
+        stageLabel: stage.label,
+        firstAdSeenAt: adSignal.firstSignalAtMs ? new Date(adSignal.firstSignalAtMs).toISOString() : "",
+        lastAdSeenAt: new Date(Math.max(adSignal.firstSignalAtMs || 0, adSeenAt || 0, lastMessageAtMs || 0, normalizedStartMs)).toISOString(),
+        lastMessageAt: lastMessageAtMs > 0 ? new Date(lastMessageAtMs).toISOString() : "",
+        appointmentAt,
+        resolvedAt,
+        keywords: adSignal.keywords,
+      });
     }
     const keywords = adSignal.keywords.length ? adSignal.keywords : ["sem-palavra-chave"];
     keywords.forEach((keyword) => {
@@ -8003,6 +8112,10 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   const appointments = appointmentPhones.size;
   const newCustomers = customerPhones.size;
   const spend = meta.spend || 0;
+  const persistedAdCustomers = upsertDashboardAdCustomerRecords(operationStore, adCustomerRecords);
+  if (mutationState && persistedAdCustomers.mutated) {
+    mutationState.mutated = true;
+  }
 
   return {
     period: {
@@ -8030,11 +8143,11 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       adToAppointmentRate: conversationsStarted > 0 ? appointments / conversationsStarted : 0,
     },
     funnel: {
-      clicks: meta.clicks || conversationsStarted || 0,
       conversations: conversationsStarted,
       appointments,
       newCustomers,
     },
+    adCustomers: persistedAdCustomers.items,
     byKeyword: Array.from(keywordStats.values()).sort(
       (left, right) => right.appointments - left.appointments || right.conversations - left.conversations,
     ),
@@ -8045,30 +8158,103 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   };
 };
 
-const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs } = {}) => {
+const getRoutineTemplateNameForDashboard = (routine = {}, fallback = "") =>
+  String(
+    routine?.hsm?.templateName ||
+      routine?.templateName ||
+      routine?.details?.templateName ||
+      fallback ||
+      "Sem template",
+  ).trim() || "Sem template";
+
+const getRoutineSelectionHaystack = (routine = {}) =>
+  normalizeDashboardText(
+    [
+      routine.id,
+      routine.name,
+      routine.title,
+      routine.templateName,
+      routine.hsm?.templateName,
+      routine.followUp?.targetLabelName,
+      routine.followUp?.targetLabelId,
+    ].join(" "),
+  );
+
+const resolveConfiguredFollowUpRoutines = (operationStore = {}, dashboardSettings = {}) => {
+  const routines = Array.isArray(operationStore?.routines?.items) ? operationStore.routines.items : [];
+  const followUpRoutines = routines.filter((routine) => String(routine?.type || "").trim() === "follow_up");
+  const selected = dashboardSettings.followUpRoutineNameKeywords.map(normalizeDashboardText).filter(Boolean);
+  if (!selected.length) return followUpRoutines;
+  const matched = followUpRoutines.filter((routine) => {
+    const haystack = getRoutineSelectionHaystack(routine);
+    return selected.some((item) => haystack.includes(item) || item.includes(haystack));
+  });
+  return matched.length ? matched : followUpRoutines;
+};
+
+const resolveDashboardConversationPhoneById = (store = {}) => {
+  const byId = new Map();
+  for (const [conversationId, conversation] of Object.entries(store?.conversations || {})) {
+    const phone = resolveDashboardConversationPhone(conversation, conversationId);
+    if (phone) byId.set(conversationId, phone);
+  }
+  return byId;
+};
+
+const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {} } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
-  const routineKeywords = dashboardSettings.followUpRoutineNameKeywords.map(normalizeDashboardText).filter(Boolean);
+  const configuredRoutines = resolveConfiguredFollowUpRoutines(operationStore, dashboardSettings);
+  const configuredRoutineIds = new Set(configuredRoutines.map((routine) => String(routine?.id || "").trim()).filter(Boolean));
+  const configuredRoutineNames = new Set(configuredRoutines.map((routine) => normalizeDashboardText(routine?.name)).filter(Boolean));
+  const configuredById = new Map(configuredRoutines.map((routine) => [String(routine?.id || "").trim(), routine]).filter(([id]) => id));
+  const configuredByName = new Map(configuredRoutines.map((routine) => [normalizeDashboardText(routine?.name), routine]).filter(([name]) => name));
   const logs = Array.isArray(operationStore?.routines?.logs) ? operationStore.routines.logs : [];
-  const metricEvents = Array.isArray(operationStore?.chatbotEvents)
-    ? operationStore.chatbotEvents.filter((event) => {
-        const createdAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
-        return String(event?.type || "") === "metric_tag" && isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs);
-      })
-    : [];
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
+  const conversationPhoneById = resolveDashboardConversationPhoneById(store);
+  const responseMetricTagIds = new Set(dashboardSettings.followUpResponseMetricTagIds.map(normalizeDashboardText).filter(Boolean));
+  const responseWindowMs = dashboardSettings.templateResponseWindowDays * 24 * 60 * 60 * 1000;
   const recoveryWindowMs = dashboardSettings.templateRecoveryWindowDays * 24 * 60 * 60 * 1000;
-  const byTemplate = new Map();
+  const scheduledPhones = new Set();
   const recoveredPhones = new Set();
+  const respondedEventIds = new Set();
 
   const isFollowUpLog = (entry = {}) => {
-    const haystack = normalizeDashboardText(
-      [entry.routineName, entry.message, entry.details?.templateName, entry.details?.quickReplyTitle].join(" "),
-    );
-    if (!routineKeywords.length) return true;
-    return routineKeywords.some((keyword) => haystack.includes(keyword));
+    const routineId = String(entry?.routineId || entry?.details?.routineId || "").trim();
+    const routineName = normalizeDashboardText(entry?.routineName || entry?.details?.routineName || "");
+    if (configuredRoutineIds.size || configuredRoutineNames.size) {
+      return (routineId && configuredRoutineIds.has(routineId)) || (routineName && configuredRoutineNames.has(routineName));
+    }
+    return true;
+  };
+
+  const resolveRoutineForLog = (entry = {}) => {
+    const routineId = String(entry?.routineId || entry?.details?.routineId || "").trim();
+    const routineName = normalizeDashboardText(entry?.routineName || entry?.details?.routineName || "");
+    return configuredById.get(routineId) || configuredByName.get(routineName) || null;
+  };
+
+  const buildRoutineRow = (routine = {}, entry = null) => {
+    const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+    const routineId = String(routine?.id || entry?.routineId || details.routineId || entry?.routineName || "sem-rotina").trim();
+    const routineName = String(routine?.name || entry?.routineName || "Sem rotina").trim() || "Sem rotina";
+    const templateName = String(
+      details.templateName ||
+        getRoutineTemplateNameForDashboard(routine, details.quickReplyTitle || entry?.routineName || ""),
+    ).trim() || "Sem template";
+    return {
+      routineId,
+      routineName,
+      templateName,
+      sent: 0,
+      responses: 0,
+      appointments: 0,
+      recovered: 0,
+      responseRate: 0,
+      recoveryRate: 0,
+    };
   };
 
   const periodLogs = logs.filter((entry) => {
@@ -8076,7 +8262,33 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs } =
     return isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs) && isFollowUpLog(entry);
   });
 
-  const sent = periodLogs.reduce((total, entry) => {
+  const routineRows = new Map();
+  configuredRoutines.forEach((routine) => {
+    const row = buildRoutineRow(routine);
+    routineRows.set(row.routineId, row);
+  });
+
+  const successLogs = periodLogs
+    .filter((entry) => {
+      const status = String(entry.status || entry.level || "").toLowerCase();
+      const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+      return status === "success" && normalizePhone(details.phone || entry.phone || "");
+    })
+    .map((entry) => {
+      const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+      const routine = resolveRoutineForLog(entry) || {};
+      const row = buildRoutineRow(routine, entry);
+      if (!routineRows.has(row.routineId)) routineRows.set(row.routineId, row);
+      return {
+        entry,
+        rowKey: row.routineId,
+        phone: normalizePhone(details.phone || entry.phone || ""),
+        sentAtMs: Date.parse(String(entry.createdAt || entry.created_at || "")),
+      };
+    })
+    .filter((item) => item.phone && Number.isFinite(item.sentAtMs));
+
+  const summarySent = periodLogs.reduce((total, entry) => {
     if (entry?.summary && Number.isFinite(Number(entry.summary.sent))) return total + Number(entry.summary.sent || 0);
     return total;
   }, 0);
@@ -8088,45 +8300,76 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs } =
     if (entry?.summary && Number.isFinite(Number(entry.summary.skipped))) return total + Number(entry.summary.skipped || 0);
     return total;
   }, 0);
+  const sent = successLogs.length || summarySent;
 
-  periodLogs.forEach((entry) => {
-    const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
-    const phone = normalizePhone(details.phone || entry.phone || "");
-    const templateName = String(details.templateName || details.quickReplyTitle || entry.routineName || "Sem template").trim() || "Sem template";
-    const currentTemplate = byTemplate.get(templateName) || {
-      templateName,
-      sent: 0,
-      responses: 0,
-      recovered: 0,
-    };
-    if (String(entry.status || entry.level || "").toLowerCase() === "success" && phone) {
-      currentTemplate.sent += 1;
-      const sentAtMs = Date.parse(String(entry.createdAt || ""));
-      const customer = findDashboardCustomerByPhone(customerIndex, phone);
-      const appointmentMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
-      if (
-        customer &&
-        Number.isFinite(sentAtMs) &&
-        Number.isFinite(appointmentMs) &&
-        appointmentMs >= sentAtMs &&
-        appointmentMs <= sentAtMs + recoveryWindowMs &&
-        !recoveredPhones.has(phone)
-      ) {
-        recoveredPhones.add(phone);
-        currentTemplate.recovered += 1;
-      }
+  successLogs.forEach((item) => {
+    const row = routineRows.get(item.rowKey);
+    if (!row) return;
+    row.sent += 1;
+
+    const customer = findDashboardCustomerByPhone(customerIndex, item.phone);
+    const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
+    const hasPendingAppointment =
+      Number.isFinite(pendingMs) &&
+      pendingMs >= item.sentAtMs &&
+      pendingMs <= item.sentAtMs + recoveryWindowMs;
+    const hasResolvedAppointment =
+      Number.isFinite(resolvedMs) &&
+      resolvedMs >= item.sentAtMs &&
+      resolvedMs <= item.sentAtMs + recoveryWindowMs;
+
+    if ((hasPendingAppointment || hasResolvedAppointment) && !scheduledPhones.has(`${item.rowKey}:${item.phone}`)) {
+      scheduledPhones.add(`${item.rowKey}:${item.phone}`);
+      row.appointments += 1;
     }
-    byTemplate.set(templateName, currentTemplate);
+    if (hasResolvedAppointment && !recoveredPhones.has(`${item.rowKey}:${item.phone}`)) {
+      recoveredPhones.add(`${item.rowKey}:${item.phone}`);
+      row.recovered += 1;
+    }
   });
 
-  const templateRows = Array.from(byTemplate.values())
+  const metricEvents = Array.isArray(operationStore?.chatbotEvents)
+    ? operationStore.chatbotEvents.filter((event) => {
+        const createdAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
+        const metricTagId = normalizeDashboardText(event?.metadata?.metricTagId || event?.metricTagId || "");
+        return (
+          String(event?.type || "") === "metric_tag" &&
+          isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs) &&
+          (!responseMetricTagIds.size || responseMetricTagIds.has(metricTagId))
+        );
+      })
+    : [];
+
+  metricEvents.forEach((event) => {
+    const eventAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
+    const conversationId = String(event?.conversation_id || event?.conversationId || "").trim();
+    const phone = conversationPhoneById.get(conversationId);
+    if (!phone || !Number.isFinite(eventAtMs)) return;
+
+    const matchedSend = successLogs
+      .filter((item) => item.phone === phone && item.sentAtMs <= eventAtMs && eventAtMs <= item.sentAtMs + responseWindowMs)
+      .sort((left, right) => right.sentAtMs - left.sentAtMs)[0];
+    if (!matchedSend) return;
+
+    const eventId = String(event?.id || `${conversationId}:${eventAtMs}:${matchedSend.rowKey}`).trim();
+    if (respondedEventIds.has(eventId)) return;
+    respondedEventIds.add(eventId);
+    const row = routineRows.get(matchedSend.rowKey);
+    if (row) row.responses += 1;
+  });
+
+  const templateRows = Array.from(routineRows.values())
     .map((item) => ({
       ...item,
       responseRate: item.sent > 0 ? item.responses / item.sent : 0,
       recoveryRate: item.sent > 0 ? item.recovered / item.sent : 0,
     }))
-    .sort((left, right) => right.recovered - left.recovered || right.sent - left.sent);
-  const bestTemplate = templateRows[0]?.templateName || "";
+    .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
+
+  const bestTemplate = templateRows.find((item) => item.responses > 0)?.templateName || templateRows[0]?.templateName || "";
+  const totalResponses = respondedEventIds.size;
+  const totalAppointments = templateRows.reduce((total, item) => total + Number(item.appointments || 0), 0);
+  const totalRecovered = templateRows.reduce((total, item) => total + Number(item.recovered || 0), 0);
 
   return {
     period: {
@@ -8135,21 +8378,23 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs } =
     },
     cards: {
       sent,
-      responses: metricEvents.length,
-      appointments: recoveredPhones.size,
-      recoveredCustomers: recoveredPhones.size,
+      responses: totalResponses,
+      appointments: totalAppointments,
+      recoveredCustomers: totalRecovered,
       bestTemplate,
-      responseRate: sent > 0 ? metricEvents.length / sent : 0,
+      responseRate: sent > 0 ? totalResponses / sent : 0,
     },
     totals: {
       sent,
       failed,
       skipped,
-      recoveredCustomers: recoveredPhones.size,
+      appointments: totalAppointments,
+      recoveredCustomers: totalRecovered,
     },
     byTemplate: templateRows,
     settings: {
       followUpRoutineNameKeywords: dashboardSettings.followUpRoutineNameKeywords,
+      followUpResponseMetricTagIds: dashboardSettings.followUpResponseMetricTagIds,
       templateResponseWindowDays: dashboardSettings.templateResponseWindowDays,
       templateRecoveryWindowDays: dashboardSettings.templateRecoveryWindowDays,
       responseSource: "chatbot_metric_tag",
@@ -33641,7 +33886,11 @@ const server = http.createServer(async (req, res) => {
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
       const store = await readStore({ mutable: false });
       const operationStore = await readOperationStore();
-      const metrics = await buildAcquisitionDashboardMetrics(store, { startMs, endMs, operationStore });
+      const mutationState = { mutated: false };
+      const metrics = await buildAcquisitionDashboardMetrics(store, { startMs, endMs, operationStore, mutationState });
+      if (mutationState.mutated) {
+        await writeOperationStore(operationStore);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(metrics));
     } catch (error) {
@@ -33657,7 +33906,8 @@ const server = http.createServer(async (req, res) => {
       const startMs = parseDashboardDateBoundary(url.searchParams.get("start"), "start");
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
       const operationStore = await readOperationStore();
-      const metrics = buildFollowUpDashboardMetrics(operationStore, { startMs, endMs });
+      const store = await readStore({ mutable: false });
+      const metrics = buildFollowUpDashboardMetrics(operationStore, { startMs, endMs, store });
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(metrics));
     } catch (error) {
@@ -54706,14 +54956,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
-
-
-
 
 
 

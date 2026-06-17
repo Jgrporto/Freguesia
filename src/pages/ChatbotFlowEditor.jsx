@@ -116,7 +116,7 @@ const createNodeData = (type, nodes) => {
   if (type === 'message') return { ...base, headerType: 'none', text: '' };
   if (type === 'audio') return { ...base, audioName: '', audioAsset: null };
   if (type === 'label') return { ...base, addLabelId: '', removeLabelId: '', removeAllCustom: false };
-  if (type === 'metric_tag') return { ...base, metricTagId: '', metricTagName: '' };
+  if (type === 'metric_tag') return { ...base, metricTagId: 'follow_up_response', metricTagName: 'Resposta follow-up' };
   if (type === 'finish') return { ...base, finishType: 'resolved', surveyId: 'none' };
   if (type === 'ura') return { ...base, text: '', waitMinutes: 5, displayAs: 'buttons', listTitle: 'MENU' };
   if (type === 'variables') return { ...base, variables: [] };

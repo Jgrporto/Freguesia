@@ -6,6 +6,7 @@ export const DEFAULT_DASHBOARD_SETTINGS = {
   appointmentAttributionWindowDays: 60,
   attendantRoleKeywords: ['atendente'],
   followUpRoutineNameKeywords: ['follow', 'recuper', 'retorno', 'corte'],
+  followUpResponseMetricTagIds: ['follow_up_response'],
   templateResponseWindowDays: 7,
   templateRecoveryWindowDays: 30,
   newCustomerWindowDays: 30,
@@ -45,6 +46,10 @@ export const readDashboardSettings = (value = {}) => {
     followUpRoutineNameKeywords: normalizeList(
       source.followUpRoutineNameKeywords,
       DEFAULT_DASHBOARD_SETTINGS.followUpRoutineNameKeywords,
+    ),
+    followUpResponseMetricTagIds: normalizeList(
+      source.followUpResponseMetricTagIds,
+      DEFAULT_DASHBOARD_SETTINGS.followUpResponseMetricTagIds,
     ),
     templateResponseWindowDays: normalizePositiveInteger(
       source.templateResponseWindowDays,

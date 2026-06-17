@@ -333,6 +333,7 @@ export default function Settings() {
   const [customerSyncSettings, setCustomerSyncSettings] = useState(DEFAULT_CUSTOMER_SYNC_SETTINGS);
   const [dashboardSettings, setDashboardSettings] = useState(DEFAULT_DASHBOARD_SETTINGS);
   const [dashboardAdKeywordInput, setDashboardAdKeywordInput] = useState('');
+  const [dashboardFollowUpMetricTagInput, setDashboardFollowUpMetricTagInput] = useState('');
   const [settingsAudit, setSettingsAudit] = useState(() => readJsonStorage(SETTINGS_AUDIT_STORAGE_KEY, []));
   const [activeSettingsTab, setActiveSettingsTab] = useState('profile');
   const [confirmDialog, setConfirmDialog] = useState({
@@ -809,6 +810,9 @@ export default function Settings() {
     }));
     if (field === 'adKeywords') {
       setDashboardAdKeywordInput('');
+    }
+    if (field === 'followUpResponseMetricTagIds') {
+      setDashboardFollowUpMetricTagInput('');
     }
   };
 
@@ -1674,6 +1678,21 @@ export default function Settings() {
                 onRemoveValue={(value) => handleDashboardListRemove('followUpRoutineNameKeywords', value)}
                 disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
                 emptyLabel="Nenhuma rotina selecionada."
+              />
+            </div>
+
+            <div className="lg:col-span-2">
+              <DashboardValueList
+                label="Tags metricas de resposta"
+                description="Eventos de chatbot com estes IDs entram em Respostas recebidas no Dashboard de follow-up."
+                values={dashboardSettings.followUpResponseMetricTagIds}
+                inputValue={dashboardFollowUpMetricTagInput}
+                inputPlaceholder="Ex.: follow_up_response"
+                onInputChange={setDashboardFollowUpMetricTagInput}
+                onAddValue={(value) => handleDashboardListAdd('followUpResponseMetricTagIds', value)}
+                onRemoveValue={(value) => handleDashboardListRemove('followUpResponseMetricTagIds', value)}
+                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                emptyLabel="Nenhuma tag metrica selecionada."
               />
             </div>
           </div>
