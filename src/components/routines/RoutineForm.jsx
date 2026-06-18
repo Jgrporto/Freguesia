@@ -613,7 +613,7 @@ export default function RoutineForm({
                             {Array.from({ length: bodyVariableCount }).map((_, index) => (
                               <Field key={`body-${index}`} label={`Corpo ${index + 1}`}>
                                 <TextInput
-                                  placeholder="{{nome}}, {{plano}}, {{vencimento}}, {{corte}}"
+                                  placeholder="{{nome}}, {{corte}}, {{horarioCorteAgendado}}, {{horarioCorteRealizado}}"
                                   value={draft.hsm.parameterOverrides.body[index] || ''}
                                   onChange={(event) => {
                                     const body = [...draft.hsm.parameterOverrides.body];

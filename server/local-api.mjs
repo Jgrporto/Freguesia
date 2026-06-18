@@ -4528,9 +4528,68 @@ const formatRoutineDateVariable = (value) => {
   return year && month && day ? `${day}/${month}/${year}` : String(value || '').trim();
 };
 
+const formatRoutineTimeVariable = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const explicitTime = raw.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if (explicitTime) return `${String(explicitTime[1]).padStart(2, '0')}:${explicitTime[2]}`;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed);
+};
+
+const getRoutineFirstFilledField = (customer = {}, keys = []) => getObjectField(customer, keys);
+
 const getRoutineLastCutValue = (customer = {}) =>
   formatRoutineDateVariable(
-    getObjectField(customer, [
+    getRoutineFirstFilledField(customer, [
+      'UltimoAgendamentoResolvido',
+      'ultimoAgendamentoResolvido',
+      'UltimoAgendamento',
+      'ultimoAgendamento',
+      'UltimoCorte',
+      'ultimoCorte',
+      'lastResolvedAppointmentAt',
+      'lastAppointmentResolvedAt',
+      'lastAppointmentDate',
+      'lastVisitDate',
+      'last_cut_at',
+      'lastCutAt',
+    ]),
+  );
+
+const getRoutineScheduledCutTimeValue = (customer = {}) =>
+  formatRoutineTimeVariable(
+    getRoutineFirstFilledField(customer, [
+      'AgendamentoPendenteHorario',
+      'agendamentoPendenteHorario',
+      'ProximoAgendamentoHorario',
+      'proximoAgendamentoHorario',
+      'pendingAppointmentTime',
+      'nextAppointmentTime',
+      'ProximoAgendamento',
+      'AgendamentoPendenteData',
+      'proximoAgendamento',
+      'agendamentoPendenteData',
+      'pendingAppointmentAt',
+      'nextAppointmentAt',
+    ]),
+  );
+
+const getRoutineCompletedCutTimeValue = (customer = {}) =>
+  formatRoutineTimeVariable(
+    getRoutineFirstFilledField(customer, [
+      'UltimoAgendamentoResolvidoHorario',
+      'ultimoAgendamentoResolvidoHorario',
+      'UltimoCorteHorario',
+      'ultimoCorteHorario',
+      'lastResolvedAppointmentTime',
+      'lastAppointmentResolvedTime',
       'UltimoAgendamentoResolvido',
       'ultimoAgendamentoResolvido',
       'UltimoAgendamento',
@@ -4576,6 +4635,10 @@ const getCustomerVariableSource = (customer = {}) => {
     corte: getRoutineLastCutValue(customer),
     ultimo_corte: getRoutineLastCutValue(customer),
     data_corte: getRoutineLastCutValue(customer),
+    horarioCorteAgendado: getRoutineScheduledCutTimeValue(customer),
+    horario_corte_agendado: getRoutineScheduledCutTimeValue(customer),
+    horarioCorteRealizado: getRoutineCompletedCutTimeValue(customer),
+    horario_corte_realizado: getRoutineCompletedCutTimeValue(customer),
     vencimento: formatRoutineDateVariable(dueDateValue),
     data_vencimento: formatRoutineDateVariable(dueDateValue),
     status: customer.status_label || customer.status || raw.status || '',

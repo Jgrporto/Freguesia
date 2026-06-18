@@ -370,6 +370,21 @@ const formatDateVariable = (value) => {
   return year && month && day ? `${day}/${month}/${year}` : raw;
 };
 
+const formatTimeVariable = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const explicitTime = raw.match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
+  if (explicitTime) return `${String(explicitTime[1]).padStart(2, '0')}:${explicitTime[2]}`;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed);
+};
+
 const getCustomerField = (customer = {}, keys = []) => {
   const pools = [customer, customer?.raw, customer?.source, customer?.profile, customer?.sourceCustomer, customer?.customer].filter(
     (item) => item && typeof item === 'object',
@@ -387,6 +402,48 @@ const getCustomerField = (customer = {}, keys = []) => {
 const getCustomerLastCutValue = (customer = {}) =>
   formatDateVariable(
     getCustomerField(customer, [
+      'UltimoAgendamentoResolvido',
+      'ultimoAgendamentoResolvido',
+      'UltimoAgendamento',
+      'ultimoAgendamento',
+      'UltimoCorte',
+      'ultimoCorte',
+      'lastResolvedAppointmentAt',
+      'lastAppointmentResolvedAt',
+      'lastAppointmentDate',
+      'lastVisitDate',
+      'last_cut_at',
+      'lastCutAt',
+    ]),
+  );
+
+const getCustomerScheduledCutTimeValue = (customer = {}) =>
+  formatTimeVariable(
+    getCustomerField(customer, [
+      'AgendamentoPendenteHorario',
+      'agendamentoPendenteHorario',
+      'ProximoAgendamentoHorario',
+      'proximoAgendamentoHorario',
+      'pendingAppointmentTime',
+      'nextAppointmentTime',
+      'ProximoAgendamento',
+      'AgendamentoPendenteData',
+      'proximoAgendamento',
+      'agendamentoPendenteData',
+      'pendingAppointmentAt',
+      'nextAppointmentAt',
+    ]),
+  );
+
+const getCustomerCompletedCutTimeValue = (customer = {}) =>
+  formatTimeVariable(
+    getCustomerField(customer, [
+      'UltimoAgendamentoResolvidoHorario',
+      'ultimoAgendamentoResolvidoHorario',
+      'UltimoCorteHorario',
+      'ultimoCorteHorario',
+      'lastResolvedAppointmentTime',
+      'lastAppointmentResolvedTime',
       'UltimoAgendamentoResolvido',
       'ultimoAgendamentoResolvido',
       'UltimoAgendamento',
@@ -427,6 +484,10 @@ export const getCustomerValue = (customer = {}, key = '') => {
     corte: getCustomerLastCutValue(customer),
     ultimo_corte: getCustomerLastCutValue(customer),
     data_corte: getCustomerLastCutValue(customer),
+    horarioCorteAgendado: getCustomerScheduledCutTimeValue(customer),
+    horario_corte_agendado: getCustomerScheduledCutTimeValue(customer),
+    horarioCorteRealizado: getCustomerCompletedCutTimeValue(customer),
+    horario_corte_realizado: getCustomerCompletedCutTimeValue(customer),
     vencimento: formatDateVariable(dueDateValue),
     data_vencimento: formatDateVariable(dueDateValue),
     status: customer.status_label || customer.status || raw.status || '',
