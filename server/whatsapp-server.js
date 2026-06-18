@@ -12097,6 +12097,7 @@ const resolveBroadcastResolvedAt = (conversation = {}, fallback = nowIso()) =>
   );
 
 const clearConversationAssignmentForResolvedState = (conversation = {}) => {
+  conversation.status = "resolved";
   conversation.assigned_agent = "";
   conversation.assigned_agent_id = "";
   conversation.assigned_agent_email = "";
@@ -12105,6 +12106,9 @@ const clearConversationAssignmentForResolvedState = (conversation = {}) => {
   conversation.assignment_source = "resolved";
   conversation.queue_status = "resolved";
   conversation.queued_at = "";
+  conversation.is_in_attendance = false;
+  conversation.is_pending = false;
+  conversation.is_broadcast = true;
 };
 
 const ensureBroadcastResolutionPreference = (operationStore = {}, conversation = {}, timestamp = nowIso()) => {
@@ -12384,6 +12388,10 @@ const chooseBalancedAttendingUser = (store, operationStore, activeUsers) => {
 
 const assignConversationToAvailableAgent = ({ store, operationStore, conversation, forceReassign = false, assignedAt = nowIso() }) => {
   if (!conversation?.id) return { assigned: false, reason: "missing_conversation" };
+  if (hasBroadcastAwaitingCustomerReply(conversation)) {
+    clearConversationAssignmentForResolvedState(conversation);
+    return { assigned: false, reason: "broadcast_waiting_customer_reply" };
+  }
   const conversationServiceIds = setConversationQueueState(operationStore, conversation, assignedAt);
   if (!conversationServiceIds.length) {
     return { assigned: false, reason: "no_matching_service" };
@@ -25842,15 +25850,25 @@ const resolveConversationPreviewText = ({ content, attachments, storedMessage })
 };
 
 const resolveConversationFlags = (conversation) => {
+  const tags = Array.isArray(conversation?.tags) ? conversation.tags : [];
+  const isBroadcastAwaitingReply = tags
+    .map((tag) => String(tag || "").trim().toLowerCase())
+    .includes("disparo");
+  if (isBroadcastAwaitingReply) {
+    return {
+      is_in_attendance: false,
+      is_pending: false,
+      is_broadcast: true,
+    };
+  }
   const lastClient = conversation?.lastClientMessageTime
     ? new Date(conversation.lastClientMessageTime).getTime()
     : null;
   const withinWindow = lastClient ? Date.now() - lastClient <= 24 * 60 * 60 * 1000 : false;
-  const tags = Array.isArray(conversation?.tags) ? conversation.tags : [];
   return {
     is_in_attendance: withinWindow,
     is_pending: !withinWindow,
-    is_broadcast: tags.includes("disparo"),
+    is_broadcast: false,
   };
 };
 
@@ -55098,7 +55116,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
 
 
 
