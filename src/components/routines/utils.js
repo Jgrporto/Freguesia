@@ -536,9 +536,9 @@ export const buildPreviewFromTemplate = (template, routine = {}, sampleCustomer 
     : [];
 
   return {
-    body: replaceTemplateParameters(getTemplateBody(template), bodyParameters),
+    body: interpolateValue(replaceTemplateParameters(getTemplateBody(template), bodyParameters), sampleCustomer),
     footer: template?.footer || '',
-    headerText: replaceTemplateParameters(template?.headerText || '', headerParameters),
+    headerText: interpolateValue(replaceTemplateParameters(template?.headerText || '', headerParameters), sampleCustomer),
     headerMediaUrl: routine?.hsm?.mediaOverride?.url || template?.headerMediaUrl || template?.headerExample || '',
     headerType: template?.headerType || template?.headerFormat || '',
     buttons: getTemplateButtons(template),

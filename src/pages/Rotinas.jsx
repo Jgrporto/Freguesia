@@ -438,7 +438,18 @@ export default function Rotinas() {
   const logs = liveLogs;
   const operationalRuns = useMemo(() => buildOperationalRuns(logs), [logs]);
   const customerLookups = useMemo(() => buildCustomerLookups(customers, conversations), [customers, conversations]);
-  const sampleCustomer = customers[0] || {};
+  const sampleCustomer = customers.find((customer) =>
+    [
+      customer?.AgendamentoPendenteData,
+      customer?.ProximoAgendamento,
+      customer?.raw?.AgendamentoPendenteData,
+      customer?.raw?.ProximoAgendamento,
+      customer?.UltimoAgendamentoResolvido,
+      customer?.UltimoAgendamento,
+      customer?.raw?.UltimoAgendamentoResolvido,
+      customer?.raw?.UltimoAgendamento,
+    ].some((value) => String(value || '').trim()),
+  ) || customers[0] || {};
   const selectedLogDetails =
     selectedLog?.entries?.length
       ? JSON.stringify(selectedLog.entries.map((entry) => ({ id: entry.id, status: entry.status, message: entry.message, createdAt: entry.createdAt, details: entry.details, summary: entry.summary })), null, 2)

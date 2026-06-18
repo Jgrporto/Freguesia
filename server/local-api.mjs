@@ -4799,8 +4799,8 @@ const buildRoutineTemplatePayload = (template, routine, customer, options = {}) 
     .sort((left, right) => Number(left.index || 0) - Number(right.index || 0))
     .map((button) => String(button.value || '').trim());
   bodyParameters.splice(0, bodyParameters.length, ...overrideBody.map((value) => interpolateRoutineValue(value, customer, extraValues)));
-  const body = replaceTemplateParameters(getTemplateBody(template), bodyParameters);
-  const headerText = replaceTemplateParameters(String(template?.headerText || ''), headerParameters);
+  const body = interpolateRoutineValue(replaceTemplateParameters(getTemplateBody(template), bodyParameters), customer, extraValues);
+  const headerText = interpolateRoutineValue(replaceTemplateParameters(String(template?.headerText || ''), headerParameters), customer, extraValues);
   const headerFormat = String(template?.headerFormat || '').trim().toUpperCase();
   const headerType = String(template?.headerType || '').trim().toLowerCase();
   const headerMediaUrl = String(routine?.hsm?.mediaOverride?.url || template?.headerMediaUrl || template?.headerExample || '').trim();
