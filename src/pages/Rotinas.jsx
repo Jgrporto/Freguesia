@@ -108,9 +108,10 @@ const buildOperationalRuns = (logs = []) => {
     const durationMs =
       Number(summary.durationMs) ||
       (startedAt && finishedAt ? Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime()) : 0);
-    const successTotal = Number(summary.sent ?? summary.changed ?? entries.filter((entry) => String(entry.status).toLowerCase() === 'success').length);
+    const warningTotal = Number(summary.warnings ?? entries.filter((entry) => String(entry.status).toLowerCase() === 'warning').length);
+    const successTotal = Number(summary.sent ?? summary.changed ?? entries.filter((entry) => ['success', 'warning'].includes(String(entry.status).toLowerCase())).length);
     const failedTotal = Number(summary.failed ?? entries.filter((entry) => String(entry.status).toLowerCase() === 'error').length);
-    const ignoredTotal = Number(summary.ignored ?? summary.skipped ?? entries.filter((entry) => ['skipped', 'warning'].includes(String(entry.status).toLowerCase())).length);
+    const ignoredTotal = Number(summary.ignored ?? summary.skipped ?? entries.filter((entry) => String(entry.status).toLowerCase() === 'skipped').length);
     const processedTotal = Number(summary.total ?? successTotal + failedTotal + ignoredTotal);
 
     return {
@@ -123,6 +124,7 @@ const buildOperationalRuns = (logs = []) => {
       durationMs,
       processedTotal,
       successTotal,
+      warningTotal,
       failedTotal,
       ignoredTotal,
     };
@@ -159,8 +161,9 @@ const logStatusConfig = {
 
 const categorizeRunEntries = (entries = []) => ({
   success: entries.filter((entry) => String(entry.status || '').toLowerCase() === 'success'),
+  warnings: entries.filter((entry) => String(entry.status || '').toLowerCase() === 'warning'),
   failed: entries.filter((entry) => String(entry.status || '').toLowerCase() === 'error'),
-  ignored: entries.filter((entry) => ['skipped', 'warning'].includes(String(entry.status || '').toLowerCase()) || /ignorado|inválido|invalido/i.test(entry.message || '')),
+  ignored: entries.filter((entry) => String(entry.status || '').toLowerCase() === 'skipped' || /ignorado|inválido|invalido/i.test(entry.message || '')),
   technical: entries.filter((entry) => !['success', 'error', 'skipped', 'warning'].includes(String(entry.status || '').toLowerCase()) && !/ignorado|inválido|invalido/i.test(entry.message || '')),
 });
 
@@ -487,7 +490,7 @@ export default function Rotinas() {
     [customerLookups, selectedLog],
   );
   const selectedLogCategories = useMemo(
-    () => (selectedLog ? categorizeRunEntries(selectedLog.entries || []) : { success: [], failed: [], ignored: [], technical: [] }),
+    () => (selectedLog ? categorizeRunEntries(selectedLog.entries || []) : { success: [], warnings: [], failed: [], ignored: [], technical: [] }),
     [selectedLog],
   );
 
@@ -830,9 +833,10 @@ export default function Rotinas() {
                         </span>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 xl:grid-cols-2">
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5 xl:grid-cols-2">
                         <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1">Processados: <strong>{run.processedTotal}</strong></span>
                         <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1">Sucesso: <strong>{run.successTotal}</strong></span>
+                        <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1">Avisos: <strong>{run.warningTotal}</strong></span>
                         <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1">Falhas: <strong>{run.failedTotal}</strong></span>
                         <span className="rounded-md border border-border/70 bg-background/70 px-2 py-1">Ignorados: <strong>{run.ignoredTotal}</strong></span>
                       </div>
@@ -1083,7 +1087,7 @@ export default function Rotinas() {
 
             <div className="rounded-md border border-border bg-muted/30 p-3">
               <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                Detalhes técnicos | OK {selectedLogCategories.success.length} | Falhas {selectedLogCategories.failed.length} | Ignorados {selectedLogCategories.ignored.length}
+                Detalhes técnicos | OK {selectedLogCategories.success.length} | Avisos {selectedLogCategories.warnings.length} | Falhas {selectedLogCategories.failed.length} | Ignorados {selectedLogCategories.ignored.length}
               </div>
               {selectedLogDetails ? (
                 <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-background p-3 text-xs text-foreground">

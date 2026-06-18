@@ -23837,6 +23837,56 @@ const processLocalChatbotIncomingMessage = async ({
   }
 };
 
+const resolveConversationAfterChatbotFinish = async (conversationId, chatbotResult = null) => {
+  const safeConversationId = String(conversationId || "").trim();
+  if (!safeConversationId) return false;
+  const session = chatbotResult?.session && typeof chatbotResult.session === "object" ? chatbotResult.session : null;
+  const finished = String(session?.status || "").trim().toLowerCase() === "finished";
+  if (!finished) return false;
+
+  const timestamp = nowIso();
+  const store = await readStore();
+  const conversation = store.conversations?.[safeConversationId];
+  if (!conversation || typeof conversation !== "object") return false;
+
+  clearConversationAssignmentForResolvedState(conversation);
+  conversation.is_broadcast = false;
+  conversation.updated_date = timestamp;
+  store.conversations[safeConversationId] = conversation;
+  await writeStore(store);
+
+  const operationStore = await readOperationStore();
+  const preferences = Array.isArray(operationStore.conversationPreferences)
+    ? operationStore.conversationPreferences
+    : [];
+  const index = preferences.findIndex(
+    (preference) =>
+      String(preference?.conversation_id || preference?.conversationId || preference?.id || "").trim() === safeConversationId,
+  );
+  const current = index >= 0 ? preferences[index] : null;
+  const nextPreference = {
+    ...(current || {}),
+    id: current?.id || safeConversationId,
+    conversation_id: safeConversationId,
+    resolution_status: "resolved",
+    resolution_type: "chatbot",
+    resolved_at: timestamp,
+    resolved_until: "",
+    resolved_by_id: current?.resolved_by_id || "chatbot",
+    resolved_by_name: current?.resolved_by_name || "Chatbot",
+    created_date: current?.created_date || timestamp,
+    updated_date: timestamp,
+  };
+  if (index >= 0) {
+    preferences[index] = nextPreference;
+  } else {
+    preferences.push(nextPreference);
+  }
+  operationStore.conversationPreferences = preferences;
+  await writeOperationStore(operationStore);
+  return true;
+};
+
 const PLUSTV_METRICS_API_BASE = String(
   process.env.PLUSTV_METRICS_API_BASE || "https://painel.newbr.top",
 ).replace(/\/+$/, "");
@@ -27198,8 +27248,9 @@ const upsertIncomingMessage = async ({
 
   });
 
+  let chatbotFinishedConversation = false;
   try {
-    await processLocalChatbotIncomingMessage({
+    const chatbotResult = await processLocalChatbotIncomingMessage({
       waId,
       content,
       timestamp,
@@ -27207,20 +27258,23 @@ const upsertIncomingMessage = async ({
       conversationId: result?.conversationId || null,
       conversation: result?.conversation || null,
     });
+    chatbotFinishedConversation = await resolveConversationAfterChatbotFinish(result?.conversationId || null, chatbotResult);
   } catch (error) {
     console.error("[chatbot] local incoming processing failed:", error?.message || error);
   }
 
-  try {
-    await executeMatchingFlowForSupportMessage({
-      waId,
-      content,
-      messageId,
-      conversationId: result?.conversationId || null,
-      conversation: result?.conversation || null,
-    });
-  } catch (error) {
-    console.error("[flow] support execution failed:", error?.message || error);
+  if (!chatbotFinishedConversation) {
+    try {
+      await executeMatchingFlowForSupportMessage({
+        waId,
+        content,
+        messageId,
+        conversationId: result?.conversationId || null,
+        conversation: result?.conversation || null,
+      });
+    } catch (error) {
+      console.error("[flow] support execution failed:", error?.message || error);
+    }
   }
 
   return result;
@@ -52331,6 +52385,8 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         origin,
         agentName,
         senderName,
+        customerName,
+        contactName,
         templateButtons,
       } = payload;
       const metaSelector = resolveRequestedMetaSelector(req, payload);
@@ -52953,32 +53009,48 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
           metaSelector.displayPhoneNumber || result?.__metaConfig?.displayPhoneNumber || null,
         wabaId: result?.__metaConfig?.wabaId || null,
       });
+      let localStateWarning = "";
       if (normalizedTo) {
-        const store = await readStore();
-        const conversationId = mergeConversationIds(store, normalizedTo);
-        const resolvedCustomerName = String(customerName || contactName || "").trim();
-        const conversation =
-          store.conversations[conversationId] || buildConversation({ waId: normalizedTo, name: resolvedCustomerName || null });
-        if (resolvedCustomerName) {
-          conversation.customer = {
-            ...(conversation.customer && typeof conversation.customer === "object" ? conversation.customer : {}),
-            name: conversation.customer?.name || resolvedCustomerName,
-            phone: conversation.customer?.phone || normalizedTo,
-          };
-        }
-        const tags = new Set(conversation.tags || []);
-        tags.add("disparo");
-        conversation.tags = Array.from(tags);
-        const operationStore = await readOperationStore();
-        const { mutated: preferenceMutated } = ensureBroadcastResolutionPreference(
-          operationStore,
-          conversation,
-          nowIso(),
-        );
-        store.conversations[conversationId] = conversation;
-        await writeStore(store);
-        if (preferenceMutated) {
-          await writeOperationStore(operationStore);
+        try {
+          const store = await readStore();
+          const conversationId = mergeConversationIds(store, normalizedTo);
+          const resolvedCustomerName = String(customerName || contactName || "").trim();
+          const conversation =
+            store.conversations[conversationId] || buildConversation({ waId: normalizedTo, name: resolvedCustomerName || null });
+          if (resolvedCustomerName) {
+            conversation.customer = {
+              ...(conversation.customer && typeof conversation.customer === "object" ? conversation.customer : {}),
+              name: conversation.customer?.name || resolvedCustomerName,
+              phone: conversation.customer?.phone || normalizedTo,
+            };
+          }
+          const tags = new Set(conversation.tags || []);
+          tags.add("disparo");
+          conversation.tags = Array.from(tags);
+          const operationStore = await readOperationStore();
+          const { mutated: preferenceMutated } = ensureBroadcastResolutionPreference(
+            operationStore,
+            conversation,
+            nowIso(),
+          );
+          store.conversations[conversationId] = conversation;
+          await writeStore(store);
+          if (preferenceMutated) {
+            await writeOperationStore(operationStore);
+          }
+        } catch (stateError) {
+          localStateWarning = stateError?.message || "Falha ao aplicar estado local de disparo.";
+          console.warn("[send-template] template sent but local broadcast state failed:", localStateWarning);
+          await appendMessageDeliveryLog({
+            category: "message-send",
+            level: "warning",
+            source: "send-template",
+            event: "send-template-state-warning",
+            to: normalizedTo,
+            messageId: responseMessageId || null,
+            templateName: String(templateName || DEFAULT_TEMPLATE_NAME || "").trim() || null,
+            message: `Template enviado, mas houve falha ao aplicar tag/resolucao local: ${localStateWarning}`,
+          });
         }
       }
 
@@ -52990,7 +53062,9 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         to: normalizedTo,
         messageId: responseMessageId || null,
         templateName: String(templateName || DEFAULT_TEMPLATE_NAME || "").trim() || null,
-        message: `Template enviado para ${normalizedTo}.`,
+        message: localStateWarning
+          ? `Template enviado para ${normalizedTo} com alerta de estado local.`
+          : `Template enviado para ${normalizedTo}.`,
       });
 
 
@@ -53086,7 +53160,10 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
 
 
 
-      res.end(JSON.stringify(result));
+      res.end(JSON.stringify({
+        ...result,
+        localStateWarning: localStateWarning || null,
+      }));
     } catch (error) {
       await appendMessageDeliveryLog({
         category: "message-send",
@@ -55124,16 +55201,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
-
-
-
-
-
 
 
 

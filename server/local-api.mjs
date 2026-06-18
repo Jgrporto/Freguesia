@@ -23,6 +23,7 @@ const ROUTINE_LOG_LIMIT = Number.parseInt(process.env.ROUTINE_LOG_LIMIT || '600'
 const ROUTINE_SCHEDULER_INTERVAL_MS = Number.parseInt(process.env.ROUTINE_SCHEDULER_INTERVAL_MS || '60000', 10);
 const ROUTINE_DEFAULT_INTERVAL_MS = Number.parseInt(process.env.ROUTINE_DEFAULT_INTERVAL_MS || '1500', 10);
 const ROUTINE_SCHEDULER_ENABLED = String(process.env.ROUTINE_SCHEDULER_ENABLED || 'true').toLowerCase() !== 'false';
+const CHATBOT_INTERACTION_GREETING_SUPPRESSION_DAYS = 1;
 const QUICK_REPLY_SCHEDULE_INTERVAL_MS = Number.parseInt(process.env.QUICK_REPLY_SCHEDULE_INTERVAL_MS || '60000', 10);
 const ATTENDANCE_PRESENCE_TTL_MS = Number.parseInt(
   process.env.ATTENDANCE_PRESENCE_TTL_MS || `${3 * 60 * 1000}`,
@@ -1064,6 +1065,52 @@ const hasGreetingAlreadySent = (store = {}, conversation = {}, labelId = '') => 
   return !shouldResetGreetingAfterResolution(store, conversation, record.sentAt);
 };
 
+const getSaoPauloDateKeyFromValue = (value = nowIso()) => {
+  const parsed = value instanceof Date ? value : new Date(value);
+  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date();
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
+
+const getChatbotInteractionRecord = (store = {}, conversationId = '') => {
+  const safeConversationId = String(conversationId || '').trim();
+  const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
+  const interactions = greetings.chatbotInteractions && typeof greetings.chatbotInteractions === 'object' ? greetings.chatbotInteractions : {};
+  return safeConversationId ? interactions[safeConversationId] || null : null;
+};
+
+const hasChatbotInteractionToday = (store = {}, conversation = {}) => {
+  const conversationId = String(conversation.id || '').trim();
+  const record = getChatbotInteractionRecord(store, conversationId);
+  if (!record?.dateKey) return false;
+  return String(record.dateKey) === getSaoPauloDateKeyFromValue();
+};
+
+const markChatbotInteractionForGreeting = (store = {}, conversationId = '', metadata = {}) => {
+  const safeConversationId = String(conversationId || '').trim();
+  if (!safeConversationId) return;
+  const timestamp = nowIso();
+  const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
+  const interactions = greetings.chatbotInteractions && typeof greetings.chatbotInteractions === 'object' ? greetings.chatbotInteractions : {};
+  store.chatbotGreetings = {
+    ...greetings,
+    chatbotInteractions: {
+      ...interactions,
+      [safeConversationId]: {
+        ...(interactions[safeConversationId] || {}),
+        dateKey: getSaoPauloDateKeyFromValue(timestamp),
+        lastInteractionAt: timestamp,
+        suppressGreetingDays: CHATBOT_INTERACTION_GREETING_SUPPRESSION_DAYS,
+        ...metadata,
+      },
+    },
+  };
+};
+
 const markGreetingSent = (store = {}, { conversationId, labelId, messageKey, message }) => {
   const greetings = store.chatbotGreetings && typeof store.chatbotGreetings === 'object' ? store.chatbotGreetings : {};
   const sent = greetings.sent && typeof greetings.sent === 'object' ? greetings.sent : {};
@@ -1102,6 +1149,11 @@ const runChatbotGreetingFallback = async (store, conversation = {}, options = {}
   if (isActiveOutboundOrTemplateConversation(conversation)) {
     chatbotDebugLog(`skipped fallback_greeting_active_origin conversationId=${conversationId}`);
     return { ok: true, skipped: true, reason: 'fallback_greeting_active_origin' };
+  }
+
+  if (hasChatbotInteractionToday(store, conversation)) {
+    chatbotDebugLog(`skipped fallback_greeting_chatbot_interaction_today conversationId=${conversationId}`);
+    return { ok: true, skipped: true, reason: 'fallback_greeting_chatbot_interaction_today' };
   }
 
   const labelsState = normalizeLabelsState(store.labels);
@@ -1608,6 +1660,42 @@ const finishChatbotConversation = (store, conversationId, nodeData) => {
     preferences.push(nextPreference);
   }
   store.conversationPreferences = preferences;
+
+  if (store.conversations && typeof store.conversations === 'object') {
+    if (Array.isArray(store.conversations)) {
+      const conversation = store.conversations.find((item) => String(item?.id || '') === String(conversationId));
+      if (conversation) {
+        conversation.status = 'resolved';
+        conversation.queue_status = 'resolved';
+        conversation.assigned_agent = '';
+        conversation.assigned_agent_id = '';
+        conversation.assigned_agent_email = '';
+        conversation.assigned_agent_name = '';
+        conversation.assigned_at = '';
+        conversation.assignment_source = 'resolved';
+        conversation.queued_at = '';
+        conversation.is_in_attendance = false;
+        conversation.is_pending = false;
+        conversation.updated_date = timestamp;
+      }
+    } else {
+      const conversation = store.conversations[conversationId];
+      if (conversation && typeof conversation === 'object') {
+        conversation.status = 'resolved';
+        conversation.queue_status = 'resolved';
+        conversation.assigned_agent = '';
+        conversation.assigned_agent_id = '';
+        conversation.assigned_agent_email = '';
+        conversation.assigned_agent_name = '';
+        conversation.assigned_at = '';
+        conversation.assignment_source = 'resolved';
+        conversation.queued_at = '';
+        conversation.is_in_attendance = false;
+        conversation.is_pending = false;
+        conversation.updated_date = timestamp;
+      }
+    }
+  }
 };
 
 const appendChatbotEvent = (store, event = {}) => {
@@ -1686,15 +1774,18 @@ const runChatbotFlow = async ({ store, flow, conversation, session }) => {
         },
       });
     } else if (data.componentType === 'finish') {
-      if (!activeSession.skipResolutionOnFinish) {
-        finishChatbotConversation(store, conversationId, data);
-      }
+      finishChatbotConversation(store, conversationId, data);
+      markChatbotInteractionForGreeting(store, conversationId, {
+        flowId: flow.id,
+        flowName: flow.name,
+        reason: 'flow_finished',
+      });
       appendChatbotEvent(store, {
         conversationId,
         flowId: flow.id,
         flowName: flow.name,
         type: 'finished',
-        metadata: activeSession.skipResolutionOnFinish ? { skippedResolution: true } : {},
+        metadata: { resolved: true },
       });
       activeSession.status = 'finished';
       activeSession.nodeId = '';
@@ -1800,6 +1891,11 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
     const flow = flows.find((item) => item.id === currentSession.flowId);
     if (!flow) return { ok: true, skipped: true, reason: 'flow_missing' };
     if (options.dryRun) return { ok: true, mutated: true, reason: 'resume_timer_ready' };
+    markChatbotInteractionForGreeting(store, conversationId, {
+      flowId: flow.id,
+      flowName: flow.name,
+      reason: 'flow_timer_resumed',
+    });
     return {
       ok: true,
       mutated: true,
@@ -1835,6 +1931,11 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
       return { ok: true, skipped: true, reason: 'awaiting_ura' };
     }
     if (options.dryRun) return { ok: true, mutated: true, reason: isTimerRun ? 'ura_timeout_ready' : 'ura_reply_ready' };
+    markChatbotInteractionForGreeting(store, conversationId, {
+      flowId: flow.id,
+      flowName: flow.name,
+      reason: isTimerRun ? 'flow_ura_timeout' : 'flow_ura_reply',
+    });
     return {
       ok: true,
       mutated: true,
@@ -1891,6 +1992,11 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
     ok: true,
     mutated: true,
     session: await (async () => {
+      markChatbotInteractionForGreeting(store, conversationId, {
+        flowId: matchedFlow.id,
+        flowName: matchedFlow.name,
+        reason: options.reopenedFromBroadcast ? 'broadcast_reply_flow_started' : 'flow_started',
+      });
       appendChatbotEvent(store, {
         conversationId,
         flowId: matchedFlow.id,
@@ -4833,6 +4939,24 @@ const replaceTemplateParameters = (text, parameters = []) =>
     return parameters[index] != null ? String(parameters[index]) : '';
   });
 
+const countTemplateIndexedVariables = (text = '') => {
+  const indexes = new Set();
+  String(text || '').replace(/\{\{\s*(\d+)\s*\}\}/g, (_, indexText) => {
+    const index = Number.parseInt(indexText, 10);
+    if (Number.isFinite(index) && index > 0) indexes.add(index);
+    return '';
+  });
+  return indexes.size ? Math.max(...indexes) : 0;
+};
+
+const fillRoutineParameterSources = (sources = [], requiredCount = 0) => {
+  const count = Math.max(requiredCount, Array.isArray(sources) ? sources.length : 0);
+  return Array.from({ length: count }, (_, index) => {
+    const value = Array.isArray(sources) ? String(sources[index] ?? '').trim() : '';
+    return value || '{{nome}}';
+  });
+};
+
 const getTemplateButtons = (template = {}) => {
   if (Array.isArray(template.buttons) && template.buttons.length > 0) return template.buttons;
   if (Array.isArray(template.buttonConfig) && template.buttonConfig.length > 0) {
@@ -4891,8 +5015,10 @@ const buildRoutineTemplatePayload = (template, routine, customer, options = {}) 
   const extraValues = options.extraValues && typeof options.extraValues === 'object' ? options.extraValues : {};
   const variables = normalizeRoutineVariables(routine?.variables);
   const overrides = routine?.hsm?.parameterOverrides && typeof routine.hsm.parameterOverrides === 'object' ? routine.hsm.parameterOverrides : {};
-  const overrideBody = Array.isArray(overrides.body) ? overrides.body : variables.body;
-  const overrideHeader = Array.isArray(overrides.header) ? overrides.header : variables.header;
+  const bodyVariableCount = countTemplateIndexedVariables(getTemplateBody(template));
+  const headerVariableCount = countTemplateIndexedVariables(String(template?.headerText || ''));
+  const overrideBody = fillRoutineParameterSources(Array.isArray(overrides.body) ? overrides.body : variables.body, bodyVariableCount);
+  const overrideHeader = fillRoutineParameterSources(Array.isArray(overrides.header) ? overrides.header : variables.header, headerVariableCount);
   const overrideButtons = Array.isArray(overrides.buttons) ? overrides.buttons : variables.buttons;
   const templateButtons = getTemplateButtons(template);
   const checkoutButtonOverrides = templateButtons
@@ -6996,6 +7122,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
     let sent = 0;
     let failed = 0;
     let skipped = 0;
+    let warnings = 0;
     const detailLogs = [];
 
     for (const customer of customers) {
@@ -7078,7 +7205,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
         emptyButtonParameters = payload.buttonParameterValues
           .map((value, index) => (String(value || '').trim() ? null : index + 1))
           .filter(Boolean);
-        await requestWhatsappApiJson('/api/whatsapp/send-template', {
+        const sendResult = await requestWhatsappApiJson('/api/whatsapp/send-template', {
           to: phone,
           customerName: getRoutineCustomerDisplayName(customer),
           templateName: payload.templateName,
@@ -7096,13 +7223,18 @@ const executeRoutineNow = async (routineId, options = {}) => {
           timeoutMs: ROUTINE_WHATSAPP_TIMEOUT_MS,
         });
         sent += 1;
+        const stateWarning = String(sendResult?.localStateWarning || '').trim();
+        const hasParameterWarning = Boolean(emptyBodyParameters.length || emptyHeaderParameters.length || emptyButtonParameters.length);
+        if (stateWarning || hasParameterWarning) {
+          warnings += 1;
+        }
         await persistRoutineLog({
           routineId: id,
           routineName: routine.name,
-          level: 'success',
-          status: 'success',
+          level: stateWarning || hasParameterWarning ? 'warning' : 'success',
+          status: stateWarning || hasParameterWarning ? 'warning' : 'success',
           runId,
-          message: 'Mensagem enviada.',
+          message: stateWarning ? 'Mensagem enviada com alerta de estado local.' : hasParameterWarning ? 'Mensagem enviada com parametro vazio.' : 'Mensagem enviada.',
           details: {
             customerId: customer.id || null,
             phone,
@@ -7111,6 +7243,10 @@ const executeRoutineNow = async (routineId, options = {}) => {
             bodyParameterCount: payload.bodyParameters.length,
             headerParameterCount: payload.headerParameters.length,
             buttonParameterCount: payload.buttonParameterValues.length,
+            localStateWarning: stateWarning || null,
+            emptyBodyParameters,
+            emptyHeaderParameters,
+            emptyButtonParameters,
           },
         });
         detailLogs.push({
@@ -7120,9 +7256,9 @@ const executeRoutineNow = async (routineId, options = {}) => {
           routineName: routine.name,
           customerId: customer.id || null,
           phone,
-          status: 'success',
+          status: stateWarning || hasParameterWarning ? 'warning' : 'success',
           createdAt: nowIso(),
-          message: 'HSM enviado.',
+          message: stateWarning || hasParameterWarning ? 'HSM enviado com alerta.' : 'HSM enviado.',
         });
       } catch (error) {
         failed += 1;
@@ -7187,6 +7323,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
       sent,
       failed,
       skipped,
+      warnings,
       ignored: skipped + (manualSelection?.ignored || 0),
       duplicates: manualSelection?.duplicates || 0,
       startedAt,
@@ -7216,10 +7353,10 @@ const executeRoutineNow = async (routineId, options = {}) => {
             runId,
             routineId: id,
             routineName: routine.name,
-            status: failed > 0 ? 'warning' : 'success',
+            status: failed > 0 || warnings > 0 ? 'warning' : 'success',
             createdAt: finishedAt,
             summary,
-            message: `Execucao finalizada: ${sent} enviado(s), ${failed} falha(s), ${skipped} ignorado(s).`,
+            message: `Execucao finalizada: ${sent} enviado(s), ${failed} falha(s), ${warnings} aviso(s), ${skipped} ignorado(s).`,
           },
         ),
       };
@@ -7231,10 +7368,10 @@ const executeRoutineNow = async (routineId, options = {}) => {
       runId,
       routineId: id,
       routineName: routine.name,
-      level: failed > 0 ? 'warning' : 'success',
-      status: failed > 0 ? 'warning' : 'success',
+      level: failed > 0 || warnings > 0 ? 'warning' : 'success',
+      status: failed > 0 || warnings > 0 ? 'warning' : 'success',
       summary,
-      message: `Rotina finalizada. Total: ${customers.length} | Enviados: ${sent} | Falhas: ${failed} | Ignorados: ${skipped}.`,
+      message: `Rotina finalizada. Total: ${customers.length} | Enviados: ${sent} | Falhas: ${failed} | Avisos: ${warnings} | Ignorados: ${skipped}.`,
     });
 
     return { ok: true, summary };
