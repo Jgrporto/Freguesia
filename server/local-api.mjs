@@ -4528,6 +4528,24 @@ const formatRoutineDateVariable = (value) => {
   return year && month && day ? `${day}/${month}/${year}` : String(value || '').trim();
 };
 
+const getRoutineLastCutValue = (customer = {}) =>
+  formatRoutineDateVariable(
+    getObjectField(customer, [
+      'UltimoAgendamentoResolvido',
+      'ultimoAgendamentoResolvido',
+      'UltimoAgendamento',
+      'ultimoAgendamento',
+      'UltimoCorte',
+      'ultimoCorte',
+      'lastResolvedAppointmentAt',
+      'lastAppointmentResolvedAt',
+      'lastAppointmentDate',
+      'lastVisitDate',
+      'last_cut_at',
+      'lastCutAt',
+    ]),
+  );
+
 const getCustomerVariableSource = (customer = {}) => {
   const raw = customer?.raw && typeof customer.raw === 'object' ? customer.raw : {};
   const dueDateValue =
@@ -4555,6 +4573,9 @@ const getCustomerVariableSource = (customer = {}) => {
     documento: raw.documento || raw.cpf || raw.cnpj || raw.document || '',
     plano: customer.package || customer.plan_name || raw.plano || raw.plan || raw.package || '',
     plan: customer.package || customer.plan_name || raw.plan || raw.plano || raw.package || '',
+    corte: getRoutineLastCutValue(customer),
+    ultimo_corte: getRoutineLastCutValue(customer),
+    data_corte: getRoutineLastCutValue(customer),
     vencimento: formatRoutineDateVariable(dueDateValue),
     data_vencimento: formatRoutineDateVariable(dueDateValue),
     status: customer.status_label || customer.status || raw.status || '',
@@ -4758,15 +4779,24 @@ const buildScheduleCustomerSource = (schedule = {}, conversation = {}) => ({
   },
 });
 
-const resolveQuickReplyScheduledText = (value, schedule = {}, conversation = {}) => {
+const resolveQuickReplyScheduledText = (value, schedule = {}, conversation = {}, customer = {}) => {
+  const customerSource =
+    customer && typeof customer === 'object' && Object.keys(customer).length
+      ? customer
+      : {
+          ...buildScheduleCustomerSource(schedule, conversation),
+          ...(conversation?.customer && typeof conversation.customer === 'object' ? { raw: conversation.customer } : {}),
+        };
   const source = {
+    ...getCustomerVariableSource(customerSource),
     nome: schedule.customerName || conversation.contact_name || conversation.customer?.name || '',
     telefone: schedule.customerPhone || conversation.contact_phone || conversation.customer?.phone || '',
     protocolo: schedule.conversationId || conversation.id || '',
     atendente: schedule.createdByName || '',
     servico: conversation.department || conversation.sector || '',
   };
-  return String(value || '').replace(/\{#([^}]+)\}/g, (_, key) => {
+  return String(value || '').replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}|\{#\s*([A-Za-z0-9_.-]+)\s*\}/g, (_, keyA, keyB) => {
+    const key = keyA || keyB;
     const normalized = String(key || '').trim().toLowerCase();
     return source[normalized] ?? '';
   });
@@ -4882,7 +4912,7 @@ const resolveScheduledQuickReplyMediaPayload = (action = {}) => {
   };
 };
 
-const resolveScheduledQuickReplyUraPayload = (action = {}, schedule = {}, conversation = {}) => {
+const resolveScheduledQuickReplyUraPayload = (action = {}, schedule = {}, conversation = {}, customer = {}) => {
   const ura = action.ura && typeof action.ura === 'object' ? action.ura : {};
   const metadata = action.metadata && typeof action.metadata === 'object' ? action.metadata : {};
   const rawOptions = Array.isArray(ura.options)
@@ -4896,15 +4926,15 @@ const resolveScheduledQuickReplyUraPayload = (action = {}, schedule = {}, conver
       if (!label) return null;
       return {
         id: String(option?.id || option?.value || `ura-option-${index + 1}`),
-        title: resolveQuickReplyScheduledText(label, schedule, conversation).slice(0, 20),
+        title: resolveQuickReplyScheduledText(label, schedule, conversation, customer).slice(0, 20),
       };
     })
     .filter(Boolean)
     .slice(0, 3);
   return {
-    text: resolveQuickReplyScheduledText(action.content || ura.description || metadata.description || 'Selecione uma opção:', schedule, conversation),
-    buttonText: resolveQuickReplyScheduledText(ura.buttonText || metadata.buttonText || 'Selecionar', schedule, conversation).slice(0, 20) || 'Selecionar',
-    footer: resolveQuickReplyScheduledText(ura.footer || metadata.footer || '', schedule, conversation),
+    text: resolveQuickReplyScheduledText(action.content || ura.description || metadata.description || 'Selecione uma opção:', schedule, conversation, customer),
+    buttonText: resolveQuickReplyScheduledText(ura.buttonText || metadata.buttonText || 'Selecionar', schedule, conversation, customer).slice(0, 20) || 'Selecionar',
+    footer: resolveQuickReplyScheduledText(ura.footer || metadata.footer || '', schedule, conversation, customer),
     buttons,
   };
 };
@@ -5012,6 +5042,7 @@ const executeQuickReplyActionChain = async ({
   origin = 'routine-follow-up',
   agentName = 'Bot',
   routeSelector = {},
+  customer = {},
 } = {}) => {
   const phone = normalizePhone(explicitPhone || schedule.customerPhone || conversation?.contact_phone || conversation?.customer?.phone || '');
   if (!phone) throw new Error('Cadeia de resposta rápida sem telefone do cliente.');
@@ -5031,7 +5062,7 @@ const executeQuickReplyActionChain = async ({
     if (typingDelay > 0) await delay(typingDelay * 1000);
 
     if (actionType === 'text') {
-      const text = resolveQuickReplyScheduledText(action.content, schedule, conversation);
+      const text = resolveQuickReplyScheduledText(action.content, schedule, conversation, customer);
       if (text.trim()) {
         await requestWhatsappApiJson('/api/whatsapp/send-text', {
           to: phone,
@@ -5051,7 +5082,7 @@ const executeQuickReplyActionChain = async ({
       const basePayload = {
         to: phone,
         mimetype: mediaPayload.mimeType,
-        caption: resolveQuickReplyScheduledText(action.caption || '', schedule, conversation),
+        caption: resolveQuickReplyScheduledText(action.caption || '', schedule, conversation, customer),
         origin,
         agentName,
         ...selector,
@@ -5088,7 +5119,7 @@ const executeQuickReplyActionChain = async ({
       }
       sentTypes.push(actionType);
     } else if (actionType === 'ura') {
-      const uraPayload = resolveScheduledQuickReplyUraPayload(action, schedule, conversation);
+      const uraPayload = resolveScheduledQuickReplyUraPayload(action, schedule, conversation, customer);
       if (!uraPayload.buttons.length) {
         log('URA ignorada no follow up: nenhuma opção válida configurada.');
       } else {
@@ -6079,6 +6110,13 @@ const buildFollowUpForecast = async (store, routine, options = {}) => {
     eligible.push({
       customerKey,
       customerId: customerKey,
+      customer: matchedCustomer || {
+        display_name: conversation.contact_name || conversation.customer?.name || '',
+        name: conversation.contact_name || conversation.customer?.name || '',
+        whatsapp: phone,
+        phone_digits: phone,
+        raw: conversation.customer && typeof conversation.customer === 'object' ? conversation.customer : {},
+      },
       conversationId: conversation.id,
       name: getRoutineCustomerDisplayName({
         display_name: conversation.contact_name || conversation.customer?.name || conversation.customer?.push_name || '',
@@ -6434,6 +6472,7 @@ const executeFollowUpRoutineNow = async (routine, runId, startedAt, options = {}
           createdByName: 'Bot',
         },
         conversation: item.conversation || { id: item.conversationId, contact_name: item.name, contact_phone: item.phone },
+        customer: item.customer || {},
         phone: item.phone,
         origin: 'routine-follow-up',
         agentName: 'Bot',

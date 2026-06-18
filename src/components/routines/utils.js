@@ -356,6 +356,11 @@ export const getCustomerPhone = (customer = {}) => String(customer.whatsapp || c
 const formatDateVariable = (value) => {
   const raw = String(value || '').trim();
   if (!raw) return '';
+  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
+  if (brDate) {
+    const [, day, month, year] = brDate;
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+  }
   const dateKey = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : (() => {
     const parsed = new Date(raw);
     return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
@@ -364,6 +369,38 @@ const formatDateVariable = (value) => {
   const [year, month, day] = dateKey.split('-');
   return year && month && day ? `${day}/${month}/${year}` : raw;
 };
+
+const getCustomerField = (customer = {}, keys = []) => {
+  const pools = [customer, customer?.raw, customer?.source, customer?.profile, customer?.sourceCustomer, customer?.customer].filter(
+    (item) => item && typeof item === 'object',
+  );
+  for (const pool of pools) {
+    for (const key of keys) {
+      if (pool?.[key] !== undefined && pool?.[key] !== null && String(pool[key]).trim() !== '') {
+        return pool[key];
+      }
+    }
+  }
+  return '';
+};
+
+const getCustomerLastCutValue = (customer = {}) =>
+  formatDateVariable(
+    getCustomerField(customer, [
+      'UltimoAgendamentoResolvido',
+      'ultimoAgendamentoResolvido',
+      'UltimoAgendamento',
+      'ultimoAgendamento',
+      'UltimoCorte',
+      'ultimoCorte',
+      'lastResolvedAppointmentAt',
+      'lastAppointmentResolvedAt',
+      'lastAppointmentDate',
+      'lastVisitDate',
+      'last_cut_at',
+      'lastCutAt',
+    ]),
+  );
 
 export const getCustomerValue = (customer = {}, key = '') => {
   const raw = customer.raw && typeof customer.raw === 'object' ? customer.raw : {};
@@ -387,6 +424,9 @@ export const getCustomerValue = (customer = {}, key = '') => {
     telefone: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
     whatsapp: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
     plano: customer.package || customer.plan_name || raw.plano || raw.plan || raw.package || '',
+    corte: getCustomerLastCutValue(customer),
+    ultimo_corte: getCustomerLastCutValue(customer),
+    data_corte: getCustomerLastCutValue(customer),
     vencimento: formatDateVariable(dueDateValue),
     data_vencimento: formatDateVariable(dueDateValue),
     status: customer.status_label || customer.status || raw.status || '',
