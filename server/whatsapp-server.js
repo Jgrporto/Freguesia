@@ -8319,10 +8319,13 @@ const getRoutineSelectionHaystack = (routine = {}) =>
 
 const resolveConfiguredFollowUpRoutines = (operationStore = {}, dashboardSettings = {}) => {
   const routines = Array.isArray(operationStore?.routines?.items) ? operationStore.routines.items : [];
-  const followUpRoutines = routines.filter((routine) => String(routine?.type || "").trim() === "follow_up");
+  const followUpRoutines = routines.filter((routine) => {
+    const type = String(routine?.type || "").trim();
+    return type === "follow_up" || type === "disparo";
+  });
   const selected = dashboardSettings.followUpRoutineNameKeywords.map(normalizeDashboardText).filter(Boolean);
   if (!selected.length) return followUpRoutines;
-  const matched = followUpRoutines.filter((routine) => {
+  const matched = routines.filter((routine) => {
     const haystack = getRoutineSelectionHaystack(routine);
     return selected.some((item) => haystack.includes(item) || item.includes(haystack));
   });
@@ -8338,6 +8341,67 @@ const resolveDashboardConversationPhoneById = (store = {}) => {
   return byId;
 };
 
+const normalizeDashboardMessageDirection = (message = {}) => {
+  if (
+    message?.fromMe === true ||
+    message?.from_me === true ||
+    message?.isFromMe === true ||
+    message?.is_from_me === true
+  ) {
+    return "agent";
+  }
+  if (
+    message?.fromMe === false ||
+    message?.from_me === false ||
+    message?.isFromMe === false ||
+    message?.is_from_me === false
+  ) {
+    return "client";
+  }
+  const type = String(
+    message?.sender_type ||
+      message?.senderType ||
+      message?.type ||
+      message?.direction ||
+      message?.origin ||
+      message?.from ||
+      message?.role ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  if (["client", "customer", "inbound", "received", "user"].includes(type)) return "client";
+  if (["agent", "attendant", "operator", "outbound", "sent", "system", "routine", "template"].includes(type)) return "agent";
+  return type;
+};
+
+const buildDashboardClientMessagesByPhone = (store = {}) => {
+  const conversationPhoneById = resolveDashboardConversationPhoneById(store);
+  const byPhone = new Map();
+  for (const [conversationId, rawMessages] of Object.entries(store?.messages || {})) {
+    const phone =
+      conversationPhoneById.get(conversationId) ||
+      normalizePhone(String(conversationId || "").replace(/^wa-/, ""));
+    if (!phone) continue;
+    const clientMessages = (Array.isArray(rawMessages) ? rawMessages : [])
+      .map((message) => ({
+        id: String(message?.id || message?.messageId || "").trim(),
+        timestampMs: resolveDashboardMessageTimestampMs(message),
+        direction: normalizeDashboardMessageDirection(message),
+        text: String(message?.text || message?.content || message?.body || "").trim(),
+      }))
+      .filter((message) => message.direction === "client" && Number.isFinite(message.timestampMs));
+    if (!clientMessages.length) continue;
+    const current = byPhone.get(phone) || [];
+    current.push(...clientMessages);
+    byPhone.set(phone, current);
+  }
+  for (const [phone, items] of byPhone.entries()) {
+    byPhone.set(phone, items.sort((left, right) => left.timestampMs - right.timestampMs));
+  }
+  return byPhone;
+};
+
 const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {} } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
@@ -8351,12 +8415,13 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const logs = Array.isArray(operationStore?.routines?.logs) ? operationStore.routines.logs : [];
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
   const conversationPhoneById = resolveDashboardConversationPhoneById(store);
+  const clientMessagesByPhone = buildDashboardClientMessagesByPhone(store);
   const responseMetricTagIds = new Set(dashboardSettings.followUpResponseMetricTagIds.map(normalizeDashboardText).filter(Boolean));
   const responseWindowMs = dashboardSettings.templateResponseWindowDays * 24 * 60 * 60 * 1000;
   const recoveryWindowMs = dashboardSettings.templateRecoveryWindowDays * 24 * 60 * 60 * 1000;
   const scheduledPhones = new Set();
   const recoveredPhones = new Set();
-  const respondedEventIds = new Set();
+  const respondedDispatchKeys = new Set();
   const dayStats = new Map();
   const ensureFollowUpDayStats = (dayKey) => {
     if (!dayStats.has(dayKey)) {
@@ -8422,7 +8487,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     .filter((entry) => {
       const status = String(entry.status || entry.level || "").toLowerCase();
       const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
-      return status === "success" && normalizePhone(details.phone || entry.phone || "");
+      return ["success", "warning"].includes(status) && normalizePhone(details.phone || entry.phone || "");
     })
     .map((entry) => {
       const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
@@ -8451,6 +8516,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     return total;
   }, 0);
   const sent = successLogs.length || summarySent;
+  const dispatchFacts = [];
 
   successLogs.forEach((item) => {
     const row = routineRows.get(item.rowKey);
@@ -8481,6 +8547,39 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       row.recovered += 1;
       dayEntry.recovered += 1;
     }
+    dispatchFacts.push({
+      routineId: item.rowKey,
+      routineName: row.routineName,
+      templateName: row.templateName,
+      phone: item.phone,
+      sentAt: new Date(item.sentAtMs).toISOString(),
+      responded: false,
+      responseAt: null,
+      appointment: hasPendingAppointment || hasResolvedAppointment,
+      recovered: hasResolvedAppointment,
+    });
+  });
+
+  successLogs.forEach((item) => {
+    const messages = clientMessagesByPhone.get(item.phone) || [];
+    const response = messages.find(
+      (message) =>
+        message.timestampMs > item.sentAtMs &&
+        message.timestampMs <= item.sentAtMs + responseWindowMs,
+    );
+    if (!response) return;
+    const responseKey = `${item.rowKey}:${item.phone}`;
+    if (respondedDispatchKeys.has(responseKey)) return;
+    respondedDispatchKeys.add(responseKey);
+    const row = routineRows.get(item.rowKey);
+    if (row) row.responses += 1;
+    const fact = dispatchFacts.find((entry) => entry.routineId === item.rowKey && entry.phone === item.phone);
+    if (fact) {
+      fact.responded = true;
+      fact.responseAt = new Date(response.timestampMs).toISOString();
+      fact.responseSource = "client_message";
+    }
+    ensureFollowUpDayStats(new Date(response.timestampMs).toISOString().slice(0, 10)).responses += 1;
   });
 
   const metricEvents = Array.isArray(operationStore?.chatbotEvents)
@@ -8506,11 +8605,17 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       .sort((left, right) => right.sentAtMs - left.sentAtMs)[0];
     if (!matchedSend) return;
 
-    const eventId = String(event?.id || `${conversationId}:${eventAtMs}:${matchedSend.rowKey}`).trim();
-    if (respondedEventIds.has(eventId)) return;
-    respondedEventIds.add(eventId);
+    const responseKey = `${matchedSend.rowKey}:${phone}`;
+    if (respondedDispatchKeys.has(responseKey)) return;
+    respondedDispatchKeys.add(responseKey);
     const row = routineRows.get(matchedSend.rowKey);
     if (row) row.responses += 1;
+    const fact = dispatchFacts.find((entry) => entry.routineId === matchedSend.rowKey && entry.phone === phone);
+    if (fact) {
+      fact.responded = true;
+      fact.responseAt = new Date(eventAtMs).toISOString();
+      fact.responseSource = "chatbot_metric_tag";
+    }
     ensureFollowUpDayStats(new Date(eventAtMs).toISOString().slice(0, 10)).responses += 1;
   });
 
@@ -8523,7 +8628,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
 
   const bestTemplate = templateRows.find((item) => item.responses > 0)?.templateName || templateRows[0]?.templateName || "";
-  const totalResponses = respondedEventIds.size;
+  const totalResponses = respondedDispatchKeys.size;
   const totalAppointments = templateRows.reduce((total, item) => total + Number(item.appointments || 0), 0);
   const totalRecovered = templateRows.reduce((total, item) => total + Number(item.recovered || 0), 0);
   enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach((dayKey) => {
@@ -8553,12 +8658,13 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     },
     byTemplate: templateRows,
     byDay,
+    dispatchFacts: dispatchFacts.slice(0, 500),
     settings: {
       followUpRoutineNameKeywords: dashboardSettings.followUpRoutineNameKeywords,
       followUpResponseMetricTagIds: dashboardSettings.followUpResponseMetricTagIds,
       templateResponseWindowDays: dashboardSettings.templateResponseWindowDays,
       templateRecoveryWindowDays: dashboardSettings.templateRecoveryWindowDays,
-      responseSource: "chatbot_metric_tag",
+      responseSource: "client_reply_or_chatbot_metric_tag",
     },
   };
 };
@@ -55562,10 +55668,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
 
 
 
