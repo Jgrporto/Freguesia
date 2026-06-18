@@ -633,9 +633,11 @@ export function enrichConversationsWithLabels(conversations = [], customerRows =
       ).values()
     );
     const isTrial = resolveConversationTrialFlag(conversation, matchedCustomer);
+    const databaseCustomerName = String(matchedCustomer?.name || '').trim();
 
     return {
       ...conversation,
+      contact_name: databaseCustomerName || conversation.contact_name,
       matched_customer: matchedCustomer,
       system_label: automaticLabel,
       custom_labels: assignedCustomLabels,
@@ -646,6 +648,7 @@ export function enrichConversationsWithLabels(conversations = [], customerRows =
       primary_label: stageLabel || automaticLabel || assignedCustomLabels[0] || null,
       customer: {
         ...(conversation.customer || {}),
+        name: databaseCustomerName || conversation.customer?.name || '',
         existsInBase: Boolean(matchedCustomer),
         isTeste: Boolean(isTrial),
         username: matchedCustomer?.username || conversation.customer?.username || '',

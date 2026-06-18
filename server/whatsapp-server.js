@@ -5865,6 +5865,57 @@ const buildPainelCustomersPhoneIndex = (painelCustomers) => {
   return index;
 };
 
+const normalizeCustomerAccessText = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
+const isCustomerAccessStatusLabel = (value) =>
+  ["possui acesso", "nao possui", "nao possui acesso", "desativado"].includes(
+    normalizeCustomerAccessText(value),
+  );
+
+const pickCustomerDatabaseName = (...values) => {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text && !isCustomerAccessStatusLabel(text)) return text;
+  }
+  return "";
+};
+
+const resolvePainelCustomerDisplayName = (customer = {}) =>
+  pickCustomerDatabaseName(
+    customer?.display_name,
+    customer?.displayName,
+    customer?.Nome,
+    customer?.nome,
+    customer?.name,
+    customer?.Cliente,
+    customer?.cliente,
+    customer?.raw?.Nome,
+    customer?.raw?.nome,
+    customer?.raw?.name,
+    customer?.sourceCustomer?.Nome,
+    customer?.sourceCustomer?.nome,
+    customer?.sourceCustomer?.name,
+  );
+
+const resolvePainelCustomerUsername = (customer = {}) =>
+  pickCustomerDatabaseName(
+    customer?.usuario,
+    customer?.user,
+    customer?.username,
+    customer?.Login,
+    customer?.login,
+    customer?.raw?.usuario,
+    customer?.raw?.user,
+    customer?.raw?.username,
+    customer?.raw?.Login,
+    customer?.raw?.login,
+  );
+
 
 
 
@@ -8494,16 +8545,17 @@ const buildConversationListResponse = (store, painelCustomers, operationStore = 
     if (normalizedPhone) {
       const painelCustomer = painelCustomersByPhone.get(normalizedPhone);
       if (painelCustomer) {
-        const painelUsuario =
-          painelCustomer.usuario || painelCustomer.user || painelCustomer.username || null;
+        const painelNome = resolvePainelCustomerDisplayName(painelCustomer);
+        const painelUsuario = resolvePainelCustomerUsername(painelCustomer);
+        if (painelNome) {
+          item.customer = item.customer || {};
+          item.customer.name = painelNome;
+        }
         if (painelUsuario) {
           item.customer = item.customer || {};
           item.customer.usuario = painelUsuario;
           if (!item.customer.username) {
             item.customer.username = painelUsuario;
-          }
-          if (isUnknownCustomerName(item.customer.name, normalizedPhone)) {
-            item.customer.name = painelUsuario;
           }
         }
       }
@@ -8844,15 +8896,15 @@ const applyFlowLabelsToSupportConversation = async ({
   if (normalizedPhone) {
     const painelCustomer = buildPainelCustomersPhoneIndex(painelCustomers).get(normalizedPhone);
     if (painelCustomer) {
-      const painelUsuario =
-        painelCustomer.usuario || painelCustomer.user || painelCustomer.username || null;
+      const painelNome = resolvePainelCustomerDisplayName(painelCustomer);
+      const painelUsuario = resolvePainelCustomerUsername(painelCustomer);
+      if (painelNome) {
+        targetConversation.customer.name = painelNome;
+      }
       if (painelUsuario) {
         targetConversation.customer.usuario = painelUsuario;
         if (!targetConversation.customer.username) {
           targetConversation.customer.username = painelUsuario;
-        }
-        if (isUnknownCustomerName(targetConversation.customer.name, normalizedPhone)) {
-          targetConversation.customer.name = painelUsuario;
         }
       }
     }
@@ -19418,6 +19470,9 @@ const isUnknownCustomerName = (value, waId) => {
   if (lowered.includes("desconhe")) {
     return true;
   }
+  if (isCustomerAccessStatusLabel(trimmed)) {
+    return true;
+  }
 
   const waDigits = normalizePhone(waId) || String(waId || "").replace(/\D/g, "");
   const valueDigits = normalizePhone(trimmed) || trimmed.replace(/\D/g, "");
@@ -19438,7 +19493,7 @@ const isUnknownCustomerName = (value, waId) => {
 };
 
 
-const resolvePainelUsuarioByPhone = async (waId) => {
+const resolvePainelCustomerNameByPhone = async (waId) => {
   const normalized = normalizePhone(waId);
   if (!normalized) {
     return null;
@@ -19450,7 +19505,7 @@ const resolvePainelUsuarioByPhone = async (waId) => {
     return null;
   }
 
-  return stored.usuario || stored.user || stored.username || null;
+  return resolvePainelCustomerDisplayName(stored) || null;
 };
 
 
@@ -26041,10 +26096,9 @@ const upsertStoredMessage = async ({
   if (name && !nameLooksUnknown) {
     existingConversation.customer.name = name;
   } else if (type === "client" && isUnknownCustomerName(existingConversation.customer?.name, waId)) {
-    const painelUsuario = await resolvePainelUsuarioByPhone(waId);
-    if (painelUsuario) {
-      existingConversation.customer.name = painelUsuario;
-      existingConversation.customer.usuario = painelUsuario;
+    const painelNome = await resolvePainelCustomerNameByPhone(waId);
+    if (painelNome) {
+      existingConversation.customer.name = painelNome;
     }
   }
 
@@ -55044,12 +55098,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
-
 
 
 
