@@ -438,6 +438,8 @@ const getCustomerLastCutValue = (customer = {}) =>
       'ultimoAgendamentoResolvido',
       'UltimoAgendamento',
       'ultimoAgendamento',
+      'UltimaVisita',
+      'ultimaVisita',
       'UltimoCorte',
       'ultimoCorte',
       'lastResolvedAppointmentAt',

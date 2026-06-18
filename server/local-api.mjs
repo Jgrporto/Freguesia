@@ -4603,6 +4603,41 @@ const formatRoutineTimeVariable = (value) => {
 
 const getRoutineFirstFilledField = (customer = {}, keys = []) => getObjectField(customer, keys);
 
+const normalizeRoutineAppointmentStatus = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const isNegativeRoutineAppointmentStatus = (value) =>
+  ['cancelado', 'cancelada', 'canceled', 'cancelled', 'resolvido', 'resolvida', 'realizado', 'realizada', 'ausente', 'faltou', 'bloqueado', 'bloqueada', 'encerrado', 'encerrada'].includes(
+    normalizeRoutineAppointmentStatus(value),
+  );
+
+const isPositiveRoutineAppointmentStatus = (value) =>
+  ['agendado', 'agendada', 'scheduled', 'pendente', 'pending', 'confirmado', 'confirmada', 'sim', 's', 'true', '1', 'yes'].includes(
+    normalizeRoutineAppointmentStatus(value),
+  );
+
+const customerHasScheduledCutAppointment = (customer = {}) => {
+  const statusValue = getRoutineFirstFilledField(customer, [
+    'AgendamentoPendenteStatus',
+    'agendamentoPendenteStatus',
+    'ProximoAgendamentoStatus',
+    'proximoAgendamentoStatus',
+    'StatusAgendamento',
+    'statusAgendamento',
+    'appointmentStatus',
+    'pendingAppointmentStatus',
+    'nextAppointmentStatus',
+  ]);
+  if (isNegativeRoutineAppointmentStatus(statusValue)) return false;
+  if (isPositiveRoutineAppointmentStatus(statusValue)) return true;
+
+  return customerHasAppBarberPendingAppointment(customer);
+};
+
 const getRoutineLastCutValue = (customer = {}) =>
   formatRoutineDateVariable(
     getRoutineFirstFilledField(customer, [
@@ -4610,6 +4645,8 @@ const getRoutineLastCutValue = (customer = {}) =>
       'ultimoAgendamentoResolvido',
       'UltimoAgendamento',
       'ultimoAgendamento',
+      'UltimaVisita',
+      'ultimaVisita',
       'UltimoCorte',
       'ultimoCorte',
       'lastResolvedAppointmentAt',
@@ -4622,30 +4659,32 @@ const getRoutineLastCutValue = (customer = {}) =>
   );
 
 const getRoutineScheduledCutTimeValue = (customer = {}) =>
-  formatRoutineTimeVariable(
-    getRoutineFirstFilledField(customer, [
-      'AgendamentoPendenteHorario',
-      'agendamentoPendenteHorario',
-      'ProximoAgendamentoHorario',
-      'proximoAgendamentoHorario',
-      'HorarioAgendamento',
-      'horarioAgendamento',
-      'HoraAgendamento',
-      'horaAgendamento',
-      'HorarioCorte',
-      'horarioCorte',
-      'HoraCorte',
-      'horaCorte',
-      'pendingAppointmentTime',
-      'nextAppointmentTime',
-      'ProximoAgendamento',
-      'AgendamentoPendenteData',
-      'proximoAgendamento',
-      'agendamentoPendenteData',
-      'pendingAppointmentAt',
-      'nextAppointmentAt',
-    ]),
-  );
+  customerHasScheduledCutAppointment(customer)
+    ? formatRoutineTimeVariable(
+        getRoutineFirstFilledField(customer, [
+          'AgendamentoPendenteHorario',
+          'agendamentoPendenteHorario',
+          'ProximoAgendamentoHorario',
+          'proximoAgendamentoHorario',
+          'HorarioAgendamento',
+          'horarioAgendamento',
+          'HoraAgendamento',
+          'horaAgendamento',
+          'HorarioCorte',
+          'horarioCorte',
+          'HoraCorte',
+          'horaCorte',
+          'pendingAppointmentTime',
+          'nextAppointmentTime',
+          'ProximoAgendamento',
+          'AgendamentoPendenteData',
+          'proximoAgendamento',
+          'agendamentoPendenteData',
+          'pendingAppointmentAt',
+          'nextAppointmentAt',
+        ]),
+      )
+    : '';
 
 const getRoutineCompletedCutTimeValue = (customer = {}) =>
   formatRoutineTimeVariable(
