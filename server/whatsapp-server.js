@@ -23816,6 +23816,7 @@ const processLocalChatbotIncomingMessage = async ({
         messageKey: [normalizedConversationId, timestamp || "", normalizedMessageId].join("|"),
         messageType: "text",
         conversation,
+        reopenedFromBroadcast: Boolean(conversation?.reopened_from_broadcast || conversation?.reopenedFromBroadcast),
       }),
       signal: controller.signal,
     });
@@ -26486,6 +26487,7 @@ const upsertStoredMessage = async ({
   const eventAt = String(timestamp || nowIso());
   existingConversation.lastMessageTime = eventAt;
   existingConversation.last_message_at = eventAt;
+  let reopenedFromBroadcast = false;
 
   if (adReferral && typeof adReferral === "object") {
     existingConversation.adReferral = adReferral;
@@ -26500,7 +26502,8 @@ const upsertStoredMessage = async ({
     if (!Array.isArray(existingConversation.tags)) {
       existingConversation.tags = [];
     }
-    if (existingConversation.tags.includes("disparo")) {
+    reopenedFromBroadcast = existingConversation.tags.includes("disparo");
+    if (reopenedFromBroadcast) {
       existingConversation.tags = existingConversation.tags.filter((tag) => tag !== "disparo");
     }
   }
@@ -26737,8 +26740,13 @@ const upsertStoredMessage = async ({
 
   return {
     conversationId,
-    conversation: existingConversation,
+    conversation: {
+      ...existingConversation,
+      reopened_from_broadcast: reopenedFromBroadcast,
+      reopenedFromBroadcast,
+    },
     message: storedMessage || null,
+    reopenedFromBroadcast,
   };
 
 
@@ -55116,9 +55124,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
 
 
 

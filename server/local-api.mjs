@@ -1686,12 +1686,15 @@ const runChatbotFlow = async ({ store, flow, conversation, session }) => {
         },
       });
     } else if (data.componentType === 'finish') {
-      finishChatbotConversation(store, conversationId, data);
+      if (!activeSession.skipResolutionOnFinish) {
+        finishChatbotConversation(store, conversationId, data);
+      }
       appendChatbotEvent(store, {
         conversationId,
         flowId: flow.id,
         flowName: flow.name,
         type: 'finished',
+        metadata: activeSession.skipResolutionOnFinish ? { skippedResolution: true } : {},
       });
       activeSession.status = 'finished';
       activeSession.nodeId = '';
@@ -1800,7 +1803,17 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
     return {
       ok: true,
       mutated: true,
-      session: await runChatbotFlow({ store, flow, conversation, session: { ...currentSession, status: 'active', nodeId: currentSession.resumeNodeId } }),
+      session: await runChatbotFlow({
+        store,
+        flow,
+        conversation,
+        session: {
+          ...currentSession,
+          status: 'active',
+          nodeId: currentSession.resumeNodeId,
+          skipResolutionOnFinish: Boolean(currentSession.skipResolutionOnFinish || options.reopenedFromBroadcast),
+        },
+      }),
     };
   }
 
@@ -1825,7 +1838,18 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
     return {
       ok: true,
       mutated: true,
-      session: await runChatbotFlow({ store, flow, conversation, session: { ...currentSession, status: 'active', nodeId: selectedEdge.target, lastMessageKey: messageKey } }),
+      session: await runChatbotFlow({
+        store,
+        flow,
+        conversation,
+        session: {
+          ...currentSession,
+          status: 'active',
+          nodeId: selectedEdge.target,
+          lastMessageKey: messageKey,
+          skipResolutionOnFinish: Boolean(currentSession.skipResolutionOnFinish || options.reopenedFromBroadcast),
+        },
+      }),
     };
   }
 
@@ -1877,7 +1901,11 @@ const processChatbotConversationInStore = async (store, conversation = {}, optio
       store,
       flow: matchedFlow,
       conversation,
-      session: { flowId: matchedFlow.id, lastMessageKey: messageKey },
+      session: {
+        flowId: matchedFlow.id,
+        lastMessageKey: messageKey,
+        skipResolutionOnFinish: Boolean(options.reopenedFromBroadcast),
+      },
       });
     })(),
   };
@@ -1908,6 +1936,7 @@ const processChatbotConversationRequest = async (conversation = {}, options = {}
       dryRun: true,
       messageKey: requestMessageKey,
       timerRun: Boolean(options.timerRun),
+      reopenedFromBroadcast: Boolean(options.reopenedFromBroadcast),
     });
 
     if (result?.mutated) {
@@ -1915,6 +1944,7 @@ const processChatbotConversationRequest = async (conversation = {}, options = {}
         result = await processChatbotConversationInStore(store, conversation, {
           messageKey: requestMessageKey,
           timerRun: Boolean(options.timerRun),
+          reopenedFromBroadcast: Boolean(options.reopenedFromBroadcast),
         });
         return result?.mutated ? store : false;
       });
@@ -6868,7 +6898,9 @@ const executeRoutineNow = async (routineId, options = {}) => {
 
   routineInFlight.add(id);
   const startedAt = nowIso();
-  const runId = `routine-run-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+  const runId =
+    String(options.runId || '').trim() ||
+    `routine-run-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
 
   try {
     const store = await readStore();
@@ -7227,12 +7259,14 @@ const enqueueRoutineExecution = async (routineId, options = {}) => {
   }
 
   const queuedAt = nowIso();
+  const runId = `routine-run-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
   routineQueued.add(id);
   await persistRoutineLog({
     routineId: id,
     routineName: routine.name,
     level: 'queued',
     status: 'queued',
+    runId,
     message: options.manual ? 'Envio manual enfileirado.' : 'Execucao de rotina enfileirada.',
     details: {
       trigger: options.trigger || null,
@@ -7247,7 +7281,7 @@ const enqueueRoutineExecution = async (routineId, options = {}) => {
     })
     .then(async () => {
       routineQueued.delete(id);
-      await executeRoutineNow(id, options);
+      await executeRoutineNow(id, { ...options, runId });
     })
     .catch((error) => {
       routineQueued.delete(id);
@@ -7768,7 +7802,10 @@ const server = http.createServer(async (req, res) => {
           conversation.last_message_type || 'text',
         ].join('|');
 
-      const result = await processChatbotConversationRequest(conversation, { messageKey });
+      const result = await processChatbotConversationRequest(conversation, {
+        messageKey,
+        reopenedFromBroadcast: Boolean(payload.reopenedFromBroadcast || payload.reopened_from_broadcast),
+      });
       return sendJson(res, 200, result);
     }
 

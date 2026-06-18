@@ -60,7 +60,14 @@ const getLogRunStatus = (entries = [], summary = {}) => {
   const statuses = entries.map((entry) => String(entry.status || '').toLowerCase());
   const hasRunning = statuses.some((status) => ['running', 'queued'].includes(status));
   const hasFinalSummary = Boolean(summary?.finishedAt || entries.some((entry) => entry.summary?.finishedAt || /finalizada|finalizado|conclu/i.test(entry.message || '')));
-  if (hasRunning && !hasFinalSummary) return 'running';
+  if (hasRunning && !hasFinalSummary) {
+    const latestAtMs = Math.max(
+      ...entries.map((entry) => new Date(entry.createdAt || 0).getTime()).filter((value) => Number.isFinite(value)),
+      0,
+    );
+    const isStale = latestAtMs > 0 && Date.now() - latestAtMs > 30 * 60 * 1000;
+    return isStale ? 'stale' : 'running';
+  }
 
   const success = Number(summary.sent || summary.changed || 0);
   const failed = Number(summary.failed || 0);
@@ -142,6 +149,11 @@ const logStatusConfig = {
     label: 'Falha',
     className: 'border-destructive/30 bg-destructive/10 text-destructive',
     cardClassName: 'border-destructive/25 bg-destructive/10',
+  },
+  stale: {
+    label: 'Sem conclusao',
+    className: 'border-amber-500/30 bg-amber-500/10 text-amber-700',
+    cardClassName: 'border-amber-500/25 bg-amber-500/5',
   },
 };
 
