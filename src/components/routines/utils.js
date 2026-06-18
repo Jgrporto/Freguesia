@@ -348,10 +348,42 @@ export const isTemplateSendable = (template = {}) => {
   return active && (!status || ['approved', 'aprovado', 'ativo'].includes(status));
 };
 
-export const getCustomerLabel = (customer = {}) =>
-  String(customer.display_name || customer.name || customer.username || customer.whatsapp || 'Cliente sem nome');
+const normalizeComparableText = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
 
-export const getCustomerPhone = (customer = {}) => String(customer.whatsapp || customer.phone_digits || '');
+const isCustomerAccessLabel = (value) =>
+  ['possui acesso', 'nao possui', 'nao possui acesso', 'desativado'].includes(normalizeComparableText(value));
+
+const sanitizeCustomerNameValue = (value) => {
+  const text = String(value || '').trim();
+  return text && !isCustomerAccessLabel(text) ? text : '';
+};
+
+const pickCustomerNameValue = (...values) => {
+  for (const value of values) {
+    const normalized = sanitizeCustomerNameValue(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
+export const getCustomerLabel = (customer = {}) =>
+  pickCustomerNameValue(
+    customer.display_name,
+    customer.name,
+    customer.raw?.Nome,
+    customer.raw?.nome,
+    customer.raw?.name,
+    customer.username,
+    customer.whatsapp,
+  ) || 'Cliente sem nome';
+
+export const getCustomerPhone = (customer = {}) =>
+  String(customer.phone_digits || customer.phoneDigits || customer.whatsapp || customer.raw?.Celular || customer.raw?.Telefone || '');
 
 const formatDateVariable = (value) => {
   const raw = String(value || '').trim();
@@ -424,6 +456,14 @@ const getCustomerScheduledCutTimeValue = (customer = {}) =>
       'agendamentoPendenteHorario',
       'ProximoAgendamentoHorario',
       'proximoAgendamentoHorario',
+      'HorarioAgendamento',
+      'horarioAgendamento',
+      'HoraAgendamento',
+      'horaAgendamento',
+      'HorarioCorte',
+      'horarioCorte',
+      'HoraCorte',
+      'horaCorte',
       'pendingAppointmentTime',
       'nextAppointmentTime',
       'ProximoAgendamento',
@@ -470,16 +510,17 @@ export const getCustomerValue = (customer = {}, key = '') => {
     raw.expiration_date ||
     raw.expires_at ||
     '';
-  const customerName = String(raw.nome || raw.name || customer.name || customer.display_name || customer.username || '').trim();
+  const customerName = getCustomerLabel(customer);
+  const customerPhone = getCustomerPhone(customer);
   const source = {
     ...raw,
     nome: customerName,
     name: customerName,
     cliente: customerName,
     nome_cliente: customerName,
-    usuario: customer.username || raw.username || raw.user || raw.login || '',
-    telefone: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
-    whatsapp: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
+    usuario: sanitizeCustomerNameValue(customer.username || raw.username || raw.user || raw.login || ''),
+    telefone: customerPhone || customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || raw.Celular || raw.Telefone || '',
+    whatsapp: customerPhone || customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || raw.Celular || raw.Telefone || '',
     plano: customer.package || customer.plan_name || raw.plano || raw.plan || raw.package || '',
     corte: getCustomerLastCutValue(customer),
     ultimo_corte: getCustomerLastCutValue(customer),

@@ -4173,6 +4173,34 @@ const stringifyCell = (value) => {
   return String(value).trim();
 };
 
+const findOwnValue = (inputValue, preferredKeys = []) => {
+  if (!inputValue || typeof inputValue !== 'object' || Array.isArray(inputValue)) return null;
+  for (const key of preferredKeys) {
+    if (Object.prototype.hasOwnProperty.call(inputValue, key)) {
+      const value = inputValue[key];
+      if (value !== '' && value != null) return value;
+    }
+  }
+  return null;
+};
+
+const extractCustomerOwnField = (
+  customer,
+  keys,
+  nestedKeys = ['raw', 'source', 'user', 'customer', 'account', 'profile'],
+) => {
+  const direct = findOwnValue(customer, keys);
+  if (direct !== '' && direct != null) return stringifyCell(direct);
+
+  for (const nestedKey of nestedKeys) {
+    const nested = customer?.[nestedKey];
+    const nestedValue = findOwnValue(nested, keys);
+    if (nestedValue !== '' && nestedValue != null) return stringifyCell(nestedValue);
+  }
+
+  return '';
+};
+
 const extractCustomerField = (
   customer,
   keys,
@@ -4286,6 +4314,30 @@ const buildCustomerStableKey = (customer, fallbackIndex) => {
   return `customer-${fallbackIndex + 1}`;
 };
 
+const normalizeCustomerAccessLabelText = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const isCustomerAccessLabel = (value) =>
+  ['possui acesso', 'nao possui', 'nao possui acesso', 'desativado'].includes(normalizeCustomerAccessLabelText(value));
+
+const sanitizeCustomerNameValue = (value) => {
+  const text = String(value || '').trim();
+  if (!text || isCustomerAccessLabel(text)) return '';
+  return text;
+};
+
+const pickCustomerNameValue = (...values) => {
+  for (const value of values) {
+    const normalized = sanitizeCustomerNameValue(value);
+    if (normalized) return normalized;
+  }
+  return '';
+};
+
 const normalizeCustomerRow = (customer, index, syncedAt) => {
   const raw = {
     ...(customer && typeof customer === 'object' ? customer : {}),
@@ -4299,8 +4351,14 @@ const normalizeCustomerRow = (customer, index, syncedAt) => {
   const sourcePrefix = customer?.Nome || customer?.Codigo || customer?.UsuCodigo ? 'appbarber' : 'customer';
   const expiresAt = findExpiryDate(customer);
   const status = extractCustomerField(customer, ['status', 'situation', 'state']).trim().toUpperCase();
-  const username = extractCustomerField(customer, ['Login', 'username', 'user_name', 'login', 'user', 'nome', 'name']);
-  const displayName = extractCustomerField(customer, ['Nome', 'name', 'nome', 'full_name', 'fullName', 'username']);
+  const username = pickCustomerNameValue(
+    extractCustomerOwnField(customer, ['Login', 'username', 'user_name', 'login', 'user']),
+    extractCustomerOwnField(customer, ['Nome', 'nome', 'name']),
+  );
+  const displayName = pickCustomerNameValue(
+    extractCustomerOwnField(customer, ['Nome', 'full_name', 'fullName', 'display_name', 'displayName']),
+    extractCustomerOwnField(customer, ['nome', 'name', 'username']),
+  );
   const ddi = extractCustomerField(customer, ['DDI', 'ddi', 'country_code', 'countryCode']);
   const phoneRaw = extractCustomerField(customer, ['Celular', 'Telefone', 'whatsapp', 'telefone', 'phone', 'phone_number', 'mobile', 'cellphone']);
   const whatsapp = `${ddi ? `+${normalizePhone(ddi)}` : ''}${phoneRaw ? ` ${phoneRaw}` : ''}`.trim() || phoneRaw;
@@ -4570,6 +4628,14 @@ const getRoutineScheduledCutTimeValue = (customer = {}) =>
       'agendamentoPendenteHorario',
       'ProximoAgendamentoHorario',
       'proximoAgendamentoHorario',
+      'HorarioAgendamento',
+      'horarioAgendamento',
+      'HoraAgendamento',
+      'horaAgendamento',
+      'HorarioCorte',
+      'horarioCorte',
+      'HoraCorte',
+      'horaCorte',
       'pendingAppointmentTime',
       'nextAppointmentTime',
       'ProximoAgendamento',
@@ -4616,7 +4682,8 @@ const getCustomerVariableSource = (customer = {}) => {
     raw.expiration_date ||
     raw.expires_at ||
     '';
-  const customerName = String(raw.nome || raw.name || customer.name || customer.display_name || customer.username || '').trim();
+  const customerName = getRoutineCustomerDisplayName(customer);
+  const customerPhone = getRoutineCustomerPhone(customer);
   return {
     ...raw,
     id: customer.id || raw.id || '',
@@ -4624,11 +4691,11 @@ const getCustomerVariableSource = (customer = {}) => {
     name: customerName,
     cliente: customerName,
     nome_cliente: customerName,
-    usuario: customer.username || raw.username || raw.user || raw.login || '',
-    username: customer.username || raw.username || raw.user || raw.login || '',
-    telefone: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
-    phone: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
-    whatsapp: customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || '',
+    usuario: pickCustomerNameValue(customer.username, raw.username, raw.user, raw.login),
+    username: pickCustomerNameValue(customer.username, raw.username, raw.user, raw.login),
+    telefone: customerPhone || customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || raw.Celular || raw.Telefone || '',
+    phone: customerPhone || customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || raw.Celular || raw.Telefone || '',
+    whatsapp: customerPhone || customer.whatsapp || raw.whatsapp || raw.telefone || raw.phone || raw.Celular || raw.Telefone || '',
     documento: raw.documento || raw.cpf || raw.cnpj || raw.document || '',
     plano: customer.package || customer.plan_name || raw.plano || raw.plan || raw.package || '',
     plan: customer.package || customer.plan_name || raw.plan || raw.plano || raw.package || '',
@@ -5395,7 +5462,13 @@ const parseRoutinePlanMonths = (customer = {}) => {
 const buildRoutineCheckoutData = async (customer = {}) => {
   const phone = getRoutineCustomerPhone(customer);
   if (!phone) throw new Error('Cliente sem telefone para gerar checkout.');
-  const user = String(customer.username || customer.raw?.username || customer.raw?.user || customer.raw?.login || customer.display_name || phone).trim();
+  const user = pickCustomerNameValue(
+    customer.username,
+    customer.raw?.username,
+    customer.raw?.user,
+    customer.raw?.login,
+    customer.display_name,
+  ) || phone;
   const connectionsRaw = Number(customer.connections ?? customer.raw?.connections ?? customer.raw?.conexoes ?? 1);
   const connections = Number.isFinite(connectionsRaw) ? Math.min(4, Math.max(1, Math.round(connectionsRaw))) : 1;
   const planMonths = parseRoutinePlanMonths(customer);
@@ -5463,7 +5536,7 @@ const resolveRoutineCustomers = (store, routine) => {
 
   return selected.filter((customer) => {
     if (isRoutineTestCustomer(customer)) return false;
-    const phone = normalizePhone(customer?.whatsapp || customer?.phone_digits || customer?.raw?.whatsapp || '');
+    const phone = getRoutineCustomerPhone(customer);
     if (!phone || seenPhones.has(phone)) return false;
     seenPhones.add(phone);
     return true;
@@ -5592,7 +5665,7 @@ const resolveManualRoutineCustomers = (store, customerIds = []) => {
   const selected = [];
 
   customers.forEach((customer) => {
-    const phone = normalizePhone(customer?.whatsapp || customer?.phone_digits || customer?.raw?.whatsapp || '');
+    const phone = getRoutineCustomerPhone(customer);
     if (!phone) {
       ignored += 1;
       return;
@@ -5609,10 +5682,49 @@ const resolveManualRoutineCustomers = (store, customerIds = []) => {
 };
 
 const getRoutineCustomerDisplayName = (customer = {}) =>
-  String(customer.display_name || customer.name || customer.username || customer.raw?.nome || customer.raw?.name || 'Cliente sem nome').trim();
+  pickCustomerNameValue(
+    customer.display_name ||
+      '',
+    customer.name || '',
+    customer.username || '',
+    customer.raw?.Nome || '',
+    customer.raw?.nome || '',
+    customer.raw?.name || '',
+  ) || 'Cliente sem nome';
 
 const getRoutineCustomerPhone = (customer = {}) =>
-  normalizePhone(customer?.whatsapp || customer?.phone_digits || customer?.raw?.whatsapp || customer?.raw?.telefone || customer?.raw?.phone || '');
+  normalizePhone(
+    customer?.phone_digits ||
+      customer?.phoneDigits ||
+      customer?.whatsapp ||
+      customer?.telefone ||
+      customer?.phone ||
+      getObjectField(customer, [
+        'Celular',
+        'Telefone',
+        'DDITelefone',
+        'whatsapp',
+        'telefone',
+        'phone',
+        'phone_number',
+        'mobile',
+        'cellphone',
+        'celular',
+      ]),
+  );
+
+const customerHasScheduledCutTimeValue = (customer = {}) =>
+  Boolean(String(getRoutineScheduledCutTimeValue(customer) || '').trim());
+
+const selectRoutinePreviewCustomer = (store = {}, forecast = {}) => {
+  const customers = Array.isArray(store.customers) ? store.customers : [];
+  const forecastCustomerId = String(forecast?.items?.[0]?.customerId || '').trim();
+  if (forecastCustomerId) {
+    const matched = customers.find((customer) => String(customer?.id || '') === forecastCustomerId);
+    if (matched) return matched;
+  }
+  return customers.find(customerHasScheduledCutTimeValue) || customers[0] || {};
+};
 
 const getRoutineReferenceTargetDateKey = (routine = {}, referenceDateKey = getSaoPauloDateParts().dateKey) => {
   const rule = normalizeRoutineRule(routine?.rule);
@@ -6796,7 +6908,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
       ? resolveManualRoutineCustomers(currentStore, options.customerIds)
       : null;
     const baseCustomers = manualSelection ? manualSelection.customers : resolveRoutineCustomers(currentStore, routine);
-    const customers = options.manual ? baseCustomers : filterRoutineCustomersForToday(baseCustomers, routine);
+    const customers = manualSelection ? baseCustomers : filterRoutineCustomersForToday(baseCustomers, routine);
     await persistRoutineLog({
       routineId: id,
       routineName: routine.name,
@@ -6868,7 +6980,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
         level: 'running',
         status: 'running',
         runId,
-        message: `Enviando para ${customer.display_name || customer.username || phone}.`,
+        message: `Enviando para ${getRoutineCustomerDisplayName(customer) || phone}.`,
         details: { customerId: customer.id || null },
       });
       let payload = null;
@@ -6897,6 +7009,7 @@ const executeRoutineNow = async (routineId, options = {}) => {
           .filter(Boolean);
         await requestWhatsappApiJson('/api/whatsapp/send-template', {
           to: phone,
+          customerName: getRoutineCustomerDisplayName(customer),
           templateName: payload.templateName,
           language: payload.language,
           parameters: payload.bodyParameters,
@@ -8324,10 +8437,7 @@ const server = http.createServer(async (req, res) => {
         limit: Number.parseInt(String(payload?.limit || '20'), 10) || 20,
         allowUpcomingPeriod: normalizeRoutineType(routine?.type) === 'follow_up',
       });
-      const sampleCustomer =
-        forecast.items?.[0]?.customerId && Array.isArray(store.customers)
-          ? store.customers.find((customer) => String(customer?.id || '') === String(forecast.items[0].customerId)) || store.customers?.[0] || {}
-          : store.customers?.[0] || {};
+      const sampleCustomer = selectRoutinePreviewCustomer(store, forecast);
       const preview = template ? buildRoutineTemplatePayload(template, routine, sampleCustomer) : null;
       return sendJson(res, 200, {
         routine,
@@ -8416,10 +8526,7 @@ const server = http.createServer(async (req, res) => {
         limit: Number.parseInt(String(payload?.limit || '20'), 10) || 20,
         allowUpcomingPeriod: normalizeRoutineType(routine?.type) === 'follow_up',
       });
-      const sampleCustomer =
-        forecast.items?.[0]?.customerId && Array.isArray(store.customers)
-          ? store.customers.find((customer) => String(customer?.id || '') === String(forecast.items[0].customerId)) || store.customers?.[0] || {}
-          : store.customers?.[0] || {};
+      const sampleCustomer = selectRoutinePreviewCustomer(store, forecast);
       const preview = template ? buildRoutineTemplatePayload(template, routine, sampleCustomer) : null;
       return sendJson(res, 200, {
         routine,

@@ -35038,6 +35038,8 @@ const server = http.createServer(async (req, res) => {
         origin,
         agentName,
         senderName,
+        customerName,
+        contactName,
         templateButtons,
       } = payload;
       const metaSelector = resolveRequestedMetaSelector(req, payload);
@@ -52874,8 +52876,16 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
       if (normalizedTo) {
         const store = await readStore();
         const conversationId = mergeConversationIds(store, normalizedTo);
+        const resolvedCustomerName = String(customerName || contactName || "").trim();
         const conversation =
-          store.conversations[conversationId] || buildConversation({ waId: normalizedTo, name: null });
+          store.conversations[conversationId] || buildConversation({ waId: normalizedTo, name: resolvedCustomerName || null });
+        if (resolvedCustomerName) {
+          conversation.customer = {
+            ...(conversation.customer && typeof conversation.customer === "object" ? conversation.customer : {}),
+            name: conversation.customer?.name || resolvedCustomerName,
+            phone: conversation.customer?.phone || normalizedTo,
+          };
+        }
         const tags = new Set(conversation.tags || []);
         tags.add("disparo");
         conversation.tags = Array.from(tags);
@@ -55034,7 +55044,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
 
 
 

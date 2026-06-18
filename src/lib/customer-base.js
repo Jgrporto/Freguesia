@@ -13,6 +13,28 @@ function normalizeText(value, fallback = '') {
   return normalized || fallback;
 }
 
+function normalizeComparableText(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function getLoginAccessInfo(value) {
+  const raw = normalizeText(value);
+  const normalized = normalizeComparableText(raw);
+  if (['possui acesso', 'possui'].includes(normalized)) {
+    return { login: '', status: 'has' };
+  }
+  if (['nao possui', 'nao possui acesso', 'sem acesso'].includes(normalized)) {
+    return { login: '', status: 'missing' };
+  }
+  if (['desativado', 'disabled', 'inativo'].includes(normalized)) {
+    return { login: '', status: 'disabled' };
+  }
+  return { login: raw, status: raw ? 'has' : 'missing' };
+}
+
 function formatCpf(value) {
   const digits = normalizePhone(value);
   if (digits.length !== 11) return normalizeText(value);
@@ -268,16 +290,18 @@ export function buildCustomerRows(customers = [], conversations = []) {
     const dueDate = parseCustomerDate(customer?.expires_at);
     const daysWithoutVisit = calculateDaysWithoutVisit(customer, lastVisitDate);
     const returnStatus = getReturnStatus(daysWithoutVisit, lastVisitDate);
-    const appLogin = normalizeText(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || ''));
+    const loginAccess = getLoginAccessInfo(getCustomerField(customer, ['Login', 'login', 'username'], customer?.username || ''));
+    const appLogin = loginAccess.login;
     const email = normalizeText(getCustomerField(customer, ['Email', 'email'], '')).toLowerCase();
     const cpf = formatCpf(getCustomerField(customer, ['CPF', 'cpf', 'documento', 'document'], ''));
     const name = normalizeText(
       getCustomerField(customer, ['Nome', 'nome', 'display_name', 'displayName'], customer?.display_name || appLogin || `Cliente ${index + 1}`),
       `Cliente ${index + 1}`,
     );
-    const isAppDisabled = ['desativado', 'disabled', 'inativo'].includes(
-      String(getCustomerField(customer, ['AppStatus', 'appStatus', 'login_status', 'loginStatus', 'status_login'])).trim().toLowerCase(),
+    const appStatusAccess = getLoginAccessInfo(
+      getCustomerField(customer, ['AppStatus', 'appStatus', 'login_status', 'loginStatus', 'status_login'], ''),
     );
+    const isAppDisabled = appStatusAccess.status === 'disabled';
     const hasConversation = matchingConversations.length > 0;
     const hasOpenConversation = matchingConversations.some((conversation) => isOpenConversation(conversation?.status));
 
@@ -317,7 +341,7 @@ export function buildCustomerRows(customers = [], conversations = []) {
       ),
       pendingAppointmentService: normalizeText(getCustomerField(customer, ['AgendamentoPendenteServico', 'agendamentoPendenteServico'], ''), '-'),
       lastResolvedService: normalizeText(getCustomerField(customer, ['UltimoServico', 'ultimoServico'], ''), '-'),
-      appAccessStatus: isAppDisabled ? 'disabled' : appLogin ? 'has' : 'missing',
+      appAccessStatus: isAppDisabled ? 'disabled' : appStatusAccess.login || appStatusAccess.status !== 'missing' ? appStatusAccess.status : loginAccess.status,
       reseller: customer?.reseller || '-',
       planName: customer?.package || '-',
       isTest: Boolean(customer?.is_trial),
