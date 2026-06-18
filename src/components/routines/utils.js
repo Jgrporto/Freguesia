@@ -431,6 +431,75 @@ const getCustomerField = (customer = {}, keys = []) => {
   return '';
 };
 
+const parseIntegerValue = (value) => {
+  const parsed = Number.parseInt(String(value ?? '').replace(/[^\d-]/g, ''), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseCustomerDateValue = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const brDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (brDate) {
+    const [, day, month, year, hour = '0', minute = '0', second = '0'] = brDate;
+    const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const normalizeAppointmentStatus = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const isNegativeAppointmentStatus = (value) =>
+  ['cancelado', 'cancelada', 'canceled', 'cancelled', 'resolvido', 'resolvida', 'realizado', 'realizada', 'ausente', 'faltou', 'bloqueado', 'bloqueada', 'encerrado', 'encerrada'].includes(
+    normalizeAppointmentStatus(value),
+  );
+
+const isPositiveAppointmentStatus = (value) =>
+  ['agendado', 'agendada', 'scheduled', 'pendente', 'pending', 'confirmado', 'confirmada', 'sim', 's', 'true', '1', 'yes'].includes(
+    normalizeAppointmentStatus(value),
+  );
+
+const customerHasScheduledCutAppointment = (customer = {}) => {
+  const statusValue = getCustomerField(customer, [
+    'AgendamentoPendenteStatus',
+    'agendamentoPendenteStatus',
+    'ProximoAgendamentoStatus',
+    'proximoAgendamentoStatus',
+    'StatusAgendamento',
+    'statusAgendamento',
+    'appointmentStatus',
+    'pendingAppointmentStatus',
+    'nextAppointmentStatus',
+  ]);
+  if (isNegativeAppointmentStatus(statusValue)) return false;
+  if (isPositiveAppointmentStatus(statusValue)) return true;
+
+  const pendingFlag = getCustomerField(customer, ['AgendamentoPendente', 'agendamentoPendente', 'pendingAppointment', 'hasPendingAppointment']);
+  const pendingTotal = parseIntegerValue(
+    getCustomerField(customer, ['AgendamentoPendenteTotal', 'agendamentosPendentesTotal', 'pendingAppointmentsTotal']),
+  );
+  const hasPending = isPositiveAppointmentStatus(pendingFlag) || (Number.isFinite(pendingTotal) && pendingTotal > 0);
+  if (!hasPending) return false;
+
+  const pendingDate = parseCustomerDateValue(
+    getCustomerField(customer, ['ProximoAgendamento', 'AgendamentoPendenteData', 'proximoAgendamento', 'pendingAppointmentAt']),
+  );
+  if (!pendingDate) return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(pendingDate);
+  target.setHours(0, 0, 0, 0);
+  return target.getTime() >= today.getTime();
+};
+
 const getCustomerLastCutValue = (customer = {}) =>
   formatDateVariable(
     getCustomerField(customer, [
@@ -452,30 +521,32 @@ const getCustomerLastCutValue = (customer = {}) =>
   );
 
 const getCustomerScheduledCutTimeValue = (customer = {}) =>
-  formatTimeVariable(
-    getCustomerField(customer, [
-      'AgendamentoPendenteHorario',
-      'agendamentoPendenteHorario',
-      'ProximoAgendamentoHorario',
-      'proximoAgendamentoHorario',
-      'HorarioAgendamento',
-      'horarioAgendamento',
-      'HoraAgendamento',
-      'horaAgendamento',
-      'HorarioCorte',
-      'horarioCorte',
-      'HoraCorte',
-      'horaCorte',
-      'pendingAppointmentTime',
-      'nextAppointmentTime',
-      'ProximoAgendamento',
-      'AgendamentoPendenteData',
-      'proximoAgendamento',
-      'agendamentoPendenteData',
-      'pendingAppointmentAt',
-      'nextAppointmentAt',
-    ]),
-  );
+  customerHasScheduledCutAppointment(customer)
+    ? formatTimeVariable(
+        getCustomerField(customer, [
+          'AgendamentoPendenteHorario',
+          'agendamentoPendenteHorario',
+          'ProximoAgendamentoHorario',
+          'proximoAgendamentoHorario',
+          'HorarioAgendamento',
+          'horarioAgendamento',
+          'HoraAgendamento',
+          'horaAgendamento',
+          'HorarioCorte',
+          'horarioCorte',
+          'HoraCorte',
+          'horaCorte',
+          'pendingAppointmentTime',
+          'nextAppointmentTime',
+          'ProximoAgendamento',
+          'AgendamentoPendenteData',
+          'proximoAgendamento',
+          'agendamentoPendenteData',
+          'pendingAppointmentAt',
+          'nextAppointmentAt',
+        ]),
+      )
+    : '';
 
 const getCustomerCompletedCutTimeValue = (customer = {}) =>
   formatTimeVariable(
