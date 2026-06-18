@@ -380,6 +380,7 @@ function EmptyLineChart({
   secondLine = false,
   firstLegend = '1ª resposta média',
   secondLegend = 'TMR',
+  valueFormatter = formatInteger,
 }) {
   const numericValues = labels.map((_, index) => Number(values[index] || 0));
   const numericSecondValues = labels.map((_, index) => Number(secondValues[index] || 0));
@@ -393,9 +394,9 @@ function EmptyLineChart({
 
   return (
     <div className="relative h-[220px] rounded-xl bg-gradient-to-b from-transparent to-muted/30 px-4 pb-7 pt-4">
-      <div className="mb-3 flex items-center gap-5 text-xs text-muted-foreground">
+      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary" />{firstLegend}</span>
-        {secondLine ? <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary/20" />{secondLegend}</span> : null}
+        {secondLine && secondLegend ? <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-primary/20" />{secondLegend}</span> : null}
       </div>
       <div className="absolute inset-x-4 top-11 h-px border-t border-dashed border-border" />
       <div className="absolute inset-x-4 top-[38%] h-px border-t border-dashed border-border" />
@@ -418,6 +419,22 @@ function EmptyLineChart({
       <div className="absolute bottom-2 left-4 right-4 flex justify-between text-[11px] text-muted-foreground">
         {labels.map((label) => <span key={label}>{label}</span>)}
       </div>
+      <div className="absolute left-4 right-4 top-14 flex justify-between gap-2 text-[10px] font-semibold text-foreground">
+        {labels.map((label, index) => (
+          <span key={`v-${label}`} className="rounded-md border border-border/70 bg-card/95 px-1.5 py-0.5 shadow-sm tabular-nums">
+            {valueFormatter(numericValues[index])}
+          </span>
+        ))}
+      </div>
+      {secondLine && secondLegend ? (
+        <div className="absolute left-4 right-4 top-[78px] flex justify-between gap-2 text-[10px] font-semibold text-muted-foreground">
+          {labels.map((label, index) => (
+            <span key={`sv-${label}`} className="rounded-md border border-border/60 bg-card/90 px-1.5 py-0.5 shadow-sm tabular-nums">
+              {valueFormatter(numericSecondValues[index])}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -437,7 +454,7 @@ function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatte
                 style={{ width: numericValues[index] > 0 ? `${Math.max(6, (numericValues[index] / maxValue) * 100)}%` : '0%' }}
               />
             </div>
-            <span className="text-right font-semibold text-foreground">{valueFormatter(numericValues[index])}</span>
+            <span className="text-right font-semibold text-foreground tabular-nums">{valueFormatter(numericValues[index])}</span>
           </div>
         ))}
       </div>
@@ -449,13 +466,17 @@ function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatte
       {labels.map((label, index) => (
         <div key={label} className="flex min-w-0 flex-1 flex-col items-center gap-2">
           <div className="flex h-32 w-full items-end justify-center">
-            <div
-              className="w-full max-w-16 rounded-t-lg bg-primary/55 shadow-[0_8px_18px_rgba(197,0,21,0.14)]"
-              style={{ height: numericValues[index] > 0 ? `${Math.max(8, (numericValues[index] / maxValue) * 128)}px` : '0px' }}
-            />
+            <div className="flex w-full max-w-16 flex-col items-center justify-end gap-1">
+              <span className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 text-[10px] font-bold text-foreground shadow-sm tabular-nums">
+                {valueFormatter(numericValues[index])}
+              </span>
+              <div
+                className="w-full rounded-t-lg bg-primary/55 shadow-[0_8px_18px_rgba(197,0,21,0.14)]"
+                style={{ height: numericValues[index] > 0 ? `${Math.max(8, (numericValues[index] / maxValue) * 112)}px` : '2px' }}
+              />
+            </div>
           </div>
           <span className="max-w-full truncate text-[10px] text-muted-foreground" title={label}>{label}</span>
-          <span className="text-[10px] font-semibold text-foreground">{valueFormatter(numericValues[index])}</span>
         </div>
       ))}
     </div>
@@ -480,7 +501,8 @@ function EmptyDonut({ labels = [], values = [], large = false }) {
               <span className="h-2.5 w-2.5 rounded-full bg-primary/40" />
               {label}
             </span>
-            <span className="font-semibold text-foreground">{formatPercent(total > 0 ? (numericValues[index] / total) * 100 : 0)}</span>
+            <span className="ml-auto font-semibold text-foreground">{formatPercent(total > 0 ? (numericValues[index] / total) * 100 : 0)}</span>
+            <span className="min-w-8 text-right text-xs font-bold text-foreground tabular-nums">{formatInteger(numericValues[index])}</span>
           </div>
         ))}
       </div>
@@ -845,8 +867,8 @@ function ChartCard({
       </div>
 
       {type === 'funnel' ? <EmptyFunnel labels={labels} /> : null}
-      {type === 'line' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine firstLegend={firstLegend} secondLegend={secondLegend} /> : null}
-      {type === 'combo' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine firstLegend={firstLegend} secondLegend={secondLegend} /> : null}
+      {type === 'line' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine firstLegend={firstLegend} secondLegend={secondLegend} valueFormatter={valueFormatter} /> : null}
+      {type === 'combo' ? <EmptyLineChart labels={labels} values={values} secondValues={secondValues} secondLine firstLegend={firstLegend} secondLegend={secondLegend} valueFormatter={valueFormatter} /> : null}
       {type === 'bars' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
       {type === 'stacked' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
       {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
