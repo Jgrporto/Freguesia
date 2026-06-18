@@ -462,23 +462,25 @@ function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatte
   );
 }
 
-function EmptyDonut({ labels = [], large = false }) {
+function EmptyDonut({ labels = [], values = [], large = false }) {
+  const numericValues = labels.map((_, index) => Number(values[index] || 0));
+  const total = numericValues.reduce((sum, value) => sum + value, 0);
   return (
     <div className={cn('flex items-center gap-6', large ? 'min-h-[230px]' : 'min-h-[180px]')}>
       <div className={cn('grid shrink-0 place-items-center rounded-full border-[24px] border-primary/15', large ? 'h-40 w-40' : 'h-32 w-32')}>
         <div className="text-center">
-          <div className="text-3xl font-bold text-foreground">0</div>
+          <div className="text-3xl font-bold text-foreground">{formatInteger(total)}</div>
           <div className="text-xs text-muted-foreground">Total</div>
         </div>
       </div>
       <div className="min-w-0 flex-1 space-y-2">
-        {labels.map((label) => (
+        {labels.map((label, index) => (
           <div key={label} className="flex items-center justify-between gap-4 text-sm">
             <span className="flex items-center gap-2 text-muted-foreground">
               <span className="h-2.5 w-2.5 rounded-full bg-primary/40" />
               {label}
             </span>
-            <span className="font-semibold text-foreground">0%</span>
+            <span className="font-semibold text-foreground">{formatPercent(total > 0 ? (numericValues[index] / total) * 100 : 0)}</span>
           </div>
         ))}
       </div>
@@ -503,14 +505,16 @@ function EmptyFunnel({ labels = [] }) {
   );
 }
 
-function EmptyGauge() {
+function EmptyGauge({ value = 0 }) {
+  const normalizedValue = Math.max(-100, Math.min(100, Number(value) || 0));
+  const rotation = (normalizedValue / 100) * 75;
   return (
     <div className="flex min-h-[180px] flex-col items-center justify-center">
       <div className="relative h-28 w-56 overflow-hidden">
         <div className="absolute inset-x-0 top-0 h-56 rounded-full border-[22px] border-primary/15" />
-        <div className="absolute bottom-0 left-1/2 h-16 w-1 -translate-x-1/2 origin-bottom rotate-0 rounded-full bg-primary" />
+        <div className="absolute bottom-0 left-1/2 h-16 w-1 -translate-x-1/2 origin-bottom rounded-full bg-primary" style={{ transform: `translateX(-50%) rotate(${rotation}deg)` }} />
       </div>
-      <div className="mt-3 text-3xl font-bold text-foreground">0</div>
+      <div className="mt-3 text-3xl font-bold text-foreground">{Math.round(normalizedValue)}</div>
       <div className="text-xs text-muted-foreground">NPS geral</div>
     </div>
   );
@@ -847,10 +851,10 @@ function ChartCard({
       {type === 'stacked' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
       {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
       {type === 'ranking' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
-      {type === 'donut' ? <EmptyDonut labels={labels} /> : null}
-      {type === 'donutLarge' ? <EmptyDonut labels={labels} large /> : null}
-      {type === 'gauge' ? <EmptyGauge /> : null}
-      {type === 'scoreBars' ? <EmptyBars labels={labels} valueFormatter={valueFormatter} /> : null}
+      {type === 'donut' ? <EmptyDonut labels={labels} values={values} /> : null}
+      {type === 'donutLarge' ? <EmptyDonut labels={labels} values={values} large /> : null}
+      {type === 'gauge' ? <EmptyGauge value={values[0]} /> : null}
+      {type === 'scoreBars' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
     </section>
   );
 }
@@ -968,6 +972,8 @@ export default function Dashboard() {
   const [attendanceMetrics, setAttendanceMetrics] = useState(null);
   const [acquisitionMetrics, setAcquisitionMetrics] = useState(null);
   const [followUpMetrics, setFollowUpMetrics] = useState(null);
+  const [baseMetrics, setBaseMetrics] = useState(null);
+  const [experienceMetrics, setExperienceMetrics] = useState(null);
   const current = dashboards[activeDashboard];
   const currentMain = useMemo(() => current.main, [current]);
 
@@ -1046,6 +1052,56 @@ export default function Dashboard() {
     return () => controller.abort();
   }, [activeDashboard, start, end]);
 
+  useEffect(() => {
+    if (activeDashboard !== 'base') return;
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams();
+    if (start) searchParams.set('start', start);
+    if (end) searchParams.set('end', end);
+
+    fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/base?${searchParams.toString()}`), {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Falha ao carregar métricas de base');
+        return response.json();
+      })
+      .then((payload) => setBaseMetrics(payload))
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.error('[dashboard] failed to load base metrics:', error);
+        }
+      });
+
+    return () => controller.abort();
+  }, [activeDashboard, start, end]);
+
+  useEffect(() => {
+    if (activeDashboard !== 'experiencia') return;
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams();
+    if (start) searchParams.set('start', start);
+    if (end) searchParams.set('end', end);
+
+    fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/experience?${searchParams.toString()}`), {
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Falha ao carregar métricas de experiência');
+        return response.json();
+      })
+      .then((payload) => setExperienceMetrics(payload))
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.error('[dashboard] failed to load experience metrics:', error);
+        }
+      });
+
+    return () => controller.abort();
+  }, [activeDashboard, start, end]);
+
   const cards = useMemo(() => {
     if (activeDashboard === 'aquisicao') {
       const metrics = acquisitionMetrics?.cards || {};
@@ -1089,6 +1145,56 @@ export default function Dashboard() {
         }
         if (card.title === 'Melhor template') {
           return { ...card, value: metrics.bestTemplate || '—', subtitle: 'Mais respostas atribuídas' };
+        }
+        return card;
+      });
+    }
+
+    if (activeDashboard === 'base') {
+      const metrics = baseMetrics?.cards || {};
+      return current.cards.map((card) => {
+        if (card.title === 'Clientes ativos') {
+          return { ...card, value: formatInteger(metrics.activeCustomers), subtitle: 'Com corte ou agenda no AppBarber' };
+        }
+        if (card.title === 'Primeiro corte') {
+          return { ...card, value: formatInteger(metrics.firstCut), subtitle: 'Clientes com 1 corte realizado' };
+        }
+        if (card.title === 'Recorrentes') {
+          return { ...card, value: formatInteger(metrics.recurring), subtitle: '2 a 4 cortes realizados' };
+        }
+        if (card.title === 'Fiéis') {
+          return { ...card, value: formatInteger(metrics.loyal), subtitle: 'Acima de 4 cortes' };
+        }
+        if (card.title === 'Taxa de retorno') {
+          return { ...card, value: formatPercentCard(metrics.returnRate), subtitle: 'Retornaram no período' };
+        }
+        if (card.title === 'Tempo entre cortes') {
+          return { ...card, value: `${formatInteger(metrics.averageCycleDays)} dias`, subtitle: 'Estimado pela base AppBarber' };
+        }
+        return card;
+      });
+    }
+
+    if (activeDashboard === 'experiencia') {
+      const metrics = experienceMetrics?.cards || {};
+      return current.cards.map((card) => {
+        if (card.title === 'NPS Médio') {
+          return { ...card, value: (Number(metrics.npsAverage) || 0).toFixed(1).replace('.', ','), subtitle: 'Tags de métrica do chatbot' };
+        }
+        if (card.title === 'Notas 9 e 10') {
+          return { ...card, value: formatInteger(metrics.promoters), subtitle: 'Promotores identificados' };
+        }
+        if (card.title === 'Notas abaixo de 6') {
+          return { ...card, value: formatInteger(metrics.detractors), subtitle: 'Detratores e alertas' };
+        }
+        if (card.title === 'Enviados para relatório') {
+          return { ...card, value: formatInteger(metrics.reportSent), subtitle: 'Eventos críticos marcados' };
+        }
+        if (card.title === 'Indicações geradas') {
+          return { ...card, value: formatInteger(metrics.referrals), subtitle: 'Eventos de indicação' };
+        }
+        if (card.title === 'Agendas por aniversário') {
+          return { ...card, value: formatInteger(metrics.birthdayAppointments), subtitle: 'Após rotina de aniversário' };
         }
         return card;
       });
@@ -1145,7 +1251,7 @@ export default function Dashboard() {
 
       return card;
     });
-  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, current.cards, followUpMetrics]);
+  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, baseMetrics, current.cards, experienceMetrics, followUpMetrics]);
 
   const atendimentoFunnelValues = useMemo(() => {
     if (activeDashboard !== 'atendimento') return currentMain.values;
@@ -1167,6 +1273,29 @@ export default function Dashboard() {
   }, [activeDashboard, acquisitionMetrics]);
 
   const mainChartProps = useMemo(() => {
+    if (activeDashboard === 'base') {
+      const distribution = baseMetrics?.distribution || {};
+      return {
+        ...currentMain,
+        values: [
+          distribution.firstCut || 0,
+          distribution.recurring || 0,
+          distribution.loyal || 0,
+          distribution.stopped || 0,
+        ],
+        description: 'Distribuição calculada a partir dos cortes e agendamentos sincronizados do AppBarber.',
+      };
+    }
+
+    if (activeDashboard === 'experiencia') {
+      const scoreDistribution = Array.isArray(experienceMetrics?.scoreDistribution) ? experienceMetrics.scoreDistribution : [];
+      return {
+        ...currentMain,
+        values: currentMain.labels.map((label) => scoreDistribution.find((item) => Number(item.score) === Number(label))?.count || 0),
+        description: 'Notas capturadas por tags de métrica nos flows do chatbot.',
+      };
+    }
+
     if (activeDashboard !== 'followup') return currentMain;
     const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
     if (!byTemplate.length) return currentMain;
@@ -1176,7 +1305,7 @@ export default function Dashboard() {
       values: byTemplate.map((item) => item.appointments || 0),
       description: 'Agendamentos atribuídos por rotina configurada no período selecionado.',
     };
-  }, [activeDashboard, currentMain, followUpMetrics]);
+  }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpMetrics]);
 
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
@@ -1238,8 +1367,73 @@ export default function Dashboard() {
       });
     }
 
+    if (activeDashboard === 'base') {
+      const stoppedPeriods = Array.isArray(baseMetrics?.stoppedPeriods) ? baseMetrics.stoppedPeriods : [];
+      const byMonth = Array.isArray(baseMetrics?.byMonth) ? baseMetrics.byMonth : [];
+      return current.sideCharts.map((chart) => {
+        if (chart.title === 'Clientes parados por período') {
+          return {
+            ...chart,
+            labels: stoppedPeriods.length ? stoppedPeriods.map((item) => item.period) : chart.labels,
+            values: stoppedPeriods.length ? stoppedPeriods.map((item) => item.count || 0) : [],
+          };
+        }
+        if (chart.title === 'Taxa de retorno por mês') {
+          return {
+            ...chart,
+            labels: byMonth.length ? byMonth.map((item) => item.month.slice(5)) : chart.labels,
+            values: byMonth.length ? byMonth.map((item) => Math.round((Number(item.returnRate) || 0) * 1000) / 10) : [],
+            valueFormatter: formatPercent,
+            firstLegend: 'Retorno',
+            secondLegend: '',
+          };
+        }
+        if (chart.title === 'Tempo médio entre cortes') {
+          return {
+            ...chart,
+            labels: byMonth.length ? byMonth.map((item) => item.month.slice(5)) : chart.labels,
+            values: byMonth.length ? byMonth.map(() => baseMetrics?.cards?.averageCycleDays || 0) : [],
+            firstLegend: 'Dias',
+            secondLegend: '',
+          };
+        }
+        return chart;
+      });
+    }
+
+    if (activeDashboard === 'experiencia') {
+      const bySegment = Array.isArray(experienceMetrics?.bySegment) ? experienceMetrics.bySegment : [];
+      const byDay = Array.isArray(experienceMetrics?.byDay) ? experienceMetrics.byDay : [];
+      return current.sideCharts.map((chart) => {
+        if (chart.title === 'NPS geral') {
+          return {
+            ...chart,
+            values: [experienceMetrics?.gauge?.nps || 0],
+          };
+        }
+        if (chart.title === 'NPS por tipo de cliente') {
+          return {
+            ...chart,
+            labels: bySegment.length ? bySegment.map((item) => item.label) : chart.labels,
+            values: bySegment.length ? bySegment.map((item) => item.average || 0) : [],
+          };
+        }
+        if (chart.title === 'Indicações e aniversários') {
+          return {
+            ...chart,
+            labels: byDay.length ? byDay.map((item) => String(item.date || '').slice(5) || '-') : chart.labels,
+            values: byDay.length ? byDay.map((item) => item.referrals || 0) : [],
+            secondValues: byDay.length ? byDay.map((item) => item.birthdayAppointments || 0) : [],
+            firstLegend: 'Indicações',
+            secondLegend: 'Agendas por aniversário',
+          };
+        }
+        return chart;
+      });
+    }
+
     return current.sideCharts;
-  }, [activeDashboard, attendanceMetrics, current.sideCharts, followUpMetrics]);
+  }, [activeDashboard, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpMetrics]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">

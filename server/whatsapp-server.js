@@ -7395,6 +7395,38 @@ const getDashboardAppointmentStage = ({ hasAppointment = false, hasCustomer = fa
   return { id: "conversation", label: "Conversa" };
 };
 
+const getDashboardCustomerResolvedAppointmentsTotal = (customer = {}) => {
+  const value = Number(
+    getDashboardField(customer, [
+      "AgendamentosResolvidosTotal",
+      "agendamentosResolvidosTotal",
+      "resolvedAppointmentsTotal",
+      "AppBarberAgendamentosResolvidosTotal",
+    ]),
+  );
+  if (Number.isFinite(value) && value >= 0) return value;
+  return getDashboardCustomerLastResolvedAppointmentMs(customer) ? 1 : 0;
+};
+
+const getDashboardCustomerTotalAppointments = (customer = {}) => {
+  const value = Number(
+    getDashboardField(customer, [
+      "AppBarberAgendamentosTotal",
+      "appBarberAgendamentosTotal",
+      "AgendamentosTotal",
+      "appointmentsTotal",
+    ]),
+  );
+  if (Number.isFinite(value) && value >= 0) return value;
+  return getDashboardCustomerResolvedAppointmentsTotal(customer);
+};
+
+const getDashboardCustomerDaysSinceLastCut = (customer = {}, referenceMs = Date.now()) => {
+  const resolvedMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
+  if (!Number.isFinite(resolvedMs) || resolvedMs <= 0) return null;
+  return Math.max(0, Math.floor((referenceMs - resolvedMs) / (24 * 60 * 60 * 1000)));
+};
+
 const normalizeDashboardPersistedAdCustomers = (value = []) =>
   (Array.isArray(value) ? value : [])
     .map((item) => ({
@@ -8529,6 +8561,287 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       responseSource: "chatbot_metric_tag",
     },
   };
+};
+
+const getDashboardMonthKey = (timestampMs) => {
+  if (!Number.isFinite(timestampMs)) return "";
+  return new Date(timestampMs).toISOString().slice(0, 7);
+};
+
+const buildBaseDashboardMetrics = (operationStore = {}, { startMs, endMs } = {}) => {
+  const range = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  const customers = Array.isArray(operationStore.customers) ? operationStore.customers : Object.values(operationStore.customers || {});
+  const distribution = {
+    firstCut: 0,
+    recurring: 0,
+    loyal: 0,
+    stopped: 0,
+  };
+  const stoppedPeriods = new Map([
+    ["D+20", 0],
+    ["D+30", 0],
+    ["D+40", 0],
+    ["D+50", 0],
+  ]);
+  const monthly = new Map();
+  let activeCustomers = 0;
+  let returnedInPeriod = 0;
+  let customersWithCuts = 0;
+  let totalCutIntervals = 0;
+  let intervalCount = 0;
+
+  customers.forEach((customer) => {
+    const resolvedMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
+    const pendingMs = getDashboardCustomerPendingAppointmentMs(customer);
+    const resolvedTotal = getDashboardCustomerResolvedAppointmentsTotal(customer);
+    const totalAppointments = getDashboardCustomerTotalAppointments(customer);
+    const hasResolvedCut = Number.isFinite(resolvedMs) && resolvedMs > 0;
+    const hasPending = Number.isFinite(pendingMs) && pendingMs > 0;
+    if (hasResolvedCut || hasPending) activeCustomers += 1;
+    if (hasResolvedCut) customersWithCuts += 1;
+    if (hasResolvedCut && resolvedMs >= normalizedStartMs && resolvedMs <= normalizedEndMs) returnedInPeriod += 1;
+
+    if (resolvedTotal <= 0) return;
+    if (resolvedTotal === 1) distribution.firstCut += 1;
+    else if (resolvedTotal <= 4) distribution.recurring += 1;
+    else distribution.loyal += 1;
+
+    const daysSinceLastCut = getDashboardCustomerDaysSinceLastCut(customer, normalizedEndMs);
+    if (Number.isFinite(daysSinceLastCut) && daysSinceLastCut >= 50) distribution.stopped += 1;
+    if (Number.isFinite(daysSinceLastCut)) {
+      if (daysSinceLastCut >= 50) stoppedPeriods.set("D+50", stoppedPeriods.get("D+50") + 1);
+      else if (daysSinceLastCut >= 40) stoppedPeriods.set("D+40", stoppedPeriods.get("D+40") + 1);
+      else if (daysSinceLastCut >= 30) stoppedPeriods.set("D+30", stoppedPeriods.get("D+30") + 1);
+      else if (daysSinceLastCut >= 20) stoppedPeriods.set("D+20", stoppedPeriods.get("D+20") + 1);
+    }
+
+    if (hasResolvedCut) {
+      const monthKey = getDashboardMonthKey(resolvedMs);
+      const item = monthly.get(monthKey) || { month: monthKey, returns: 0, firstCuts: 0, activeCustomers: 0, averageCycleDays: 0 };
+      item.returns += resolvedTotal > 1 ? 1 : 0;
+      item.firstCuts += resolvedTotal === 1 ? 1 : 0;
+      item.activeCustomers += 1;
+      monthly.set(monthKey, item);
+    }
+
+    const registrationMs = getDashboardCustomerRegistrationMs(customer);
+    if (Number.isFinite(registrationMs) && hasResolvedCut && totalAppointments > 1 && resolvedMs > registrationMs) {
+      totalCutIntervals += (resolvedMs - registrationMs) / (24 * 60 * 60 * 1000) / Math.max(1, totalAppointments - 1);
+      intervalCount += 1;
+    }
+  });
+
+  const byMonth = Array.from(monthly.values())
+    .filter((item) => item.month)
+    .sort((left, right) => left.month.localeCompare(right.month))
+    .slice(-12)
+    .map((item) => ({
+      ...item,
+      returnRate: item.activeCustomers > 0 ? item.returns / item.activeCustomers : 0,
+    }));
+  const averageCycleDays = intervalCount > 0 ? Math.round(totalCutIntervals / intervalCount) : 0;
+
+  return {
+    period: {
+      start: new Date(normalizedStartMs).toISOString(),
+      end: new Date(normalizedEndMs).toISOString(),
+    },
+    cards: {
+      activeCustomers,
+      firstCut: distribution.firstCut,
+      recurring: distribution.recurring,
+      loyal: distribution.loyal,
+      returnRate: activeCustomers > 0 ? returnedInPeriod / activeCustomers : 0,
+      averageCycleDays,
+    },
+    distribution,
+    stoppedPeriods: Array.from(stoppedPeriods.entries()).map(([period, count]) => ({ period, count })),
+    byMonth,
+    totals: {
+      customers: customers.length,
+      customersWithCuts,
+      returnedInPeriod,
+    },
+    sources: {
+      customers: "appbarber_customers",
+      appointments: "appbarber_appointments",
+      limitation: averageCycleDays ? null : "Tempo entre cortes depende de cadastro e total de agendamentos sincronizados.",
+    },
+  };
+};
+
+const extractDashboardScore = (...values) => {
+  for (const value of values) {
+    if (value == null) continue;
+    const direct = Number(value);
+    if (Number.isFinite(direct) && direct >= 0 && direct <= 10) return direct;
+    const match = String(value).match(/\b(10|[0-9])\b/);
+    if (match) return Number(match[1]);
+  }
+  return null;
+};
+
+const isDashboardTextMatch = (value, tokens = []) => {
+  const text = normalizeDashboardText(value);
+  return Boolean(text) && tokens.some((token) => text.includes(token));
+};
+
+const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {} } = {}) => {
+  const range = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  const scoreBuckets = Array.from({ length: 11 }, (_, score) => ({ score, count: 0 }));
+  const npsBySegment = new Map([
+    ["1º corte", { label: "1º corte", total: 0, count: 0 }],
+    ["4º corte", { label: "4º corte", total: 0, count: 0 }],
+    ["Fiéis", { label: "Fiéis", total: 0, count: 0 }],
+    ["Trimestral", { label: "Trimestral", total: 0, count: 0 }],
+  ]);
+  const byDay = new Map();
+  const ensureDay = (dayKey) => {
+    if (!byDay.has(dayKey)) byDay.set(dayKey, { date: dayKey, referrals: 0, birthdayMessages: 0, birthdayAppointments: 0 });
+    return byDay.get(dayKey);
+  };
+  enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach(ensureDay);
+
+  const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
+  const conversationPhoneById = resolveDashboardConversationPhoneById(store);
+  const chatbotEvents = Array.isArray(operationStore.chatbotEvents) ? operationStore.chatbotEvents : [];
+  let scoreTotal = 0;
+  let scoreCount = 0;
+  let promoters = 0;
+  let detractors = 0;
+  let reportSent = 0;
+  let referrals = 0;
+
+  chatbotEvents.forEach((event) => {
+    const eventAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
+    if (!isWithinDashboardRange(eventAtMs, normalizedStartMs, normalizedEndMs)) return;
+    const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+    const metricName = [metadata.metricTagName, metadata.metricTagId, event.type].join(" ");
+    const day = ensureDay(new Date(eventAtMs).toISOString().slice(0, 10));
+
+    if (isDashboardTextMatch(metricName, ["nps", "satisfacao", "satisfacao", "nota"])) {
+      const score = extractDashboardScore(metadata.score, metadata.value, metadata.metricValue, metadata.metricTagName, event.message);
+      if (score != null) {
+        scoreBuckets[score].count += 1;
+        scoreTotal += score;
+        scoreCount += 1;
+        if (score >= 9) promoters += 1;
+        if (score <= 6) detractors += 1;
+
+        const phone = conversationPhoneById.get(String(event?.conversation_id || event?.conversationId || "").trim());
+        const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
+        const resolvedTotal = customer ? getDashboardCustomerResolvedAppointmentsTotal(customer) : 0;
+        const segment = resolvedTotal <= 1 ? "1º corte" : resolvedTotal > 4 ? "Fiéis" : resolvedTotal === 4 ? "4º corte" : "Trimestral";
+        const segmentRow = npsBySegment.get(segment) || { label: segment, total: 0, count: 0 };
+        segmentRow.total += score;
+        segmentRow.count += 1;
+        npsBySegment.set(segment, segmentRow);
+      }
+    }
+
+    if (isDashboardTextMatch(metricName, ["relatorio", "critico", "problema"])) reportSent += 1;
+    if (isDashboardTextMatch(metricName, ["indicacao", "indicação", "referral", "amigo"])) {
+      referrals += 1;
+      day.referrals += 1;
+    }
+  });
+
+  const routineLogs = Array.isArray(operationStore?.routines?.logs) ? operationStore.routines.logs : [];
+  let birthdayMessages = 0;
+  const birthdayPhones = new Set();
+  routineLogs.forEach((entry) => {
+    const createdAtMs = Date.parse(String(entry?.createdAt || entry?.created_at || ""));
+    if (!isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs)) return;
+    const text = [entry?.routineName, entry?.message, entry?.details?.templateName].join(" ");
+    if (!isDashboardTextMatch(text, ["aniversario", "aniversário", "birthday"])) return;
+    const status = String(entry?.status || entry?.level || "").toLowerCase();
+    if (!["success", "warning"].includes(status)) return;
+    birthdayMessages += 1;
+    const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+    const phone = normalizePhone(details.phone || entry.phone || "");
+    if (phone) birthdayPhones.add(phone);
+    ensureDay(new Date(createdAtMs).toISOString().slice(0, 10)).birthdayMessages += 1;
+  });
+
+  let birthdayAppointments = 0;
+  birthdayPhones.forEach((phone) => {
+    const customer = findDashboardCustomerByPhone(customerIndex, phone);
+    const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
+    if (
+      isWithinDashboardRange(pendingMs, normalizedStartMs, normalizedEndMs) ||
+      isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)
+    ) {
+      birthdayAppointments += 1;
+    }
+  });
+
+  const npsAverage = scoreCount > 0 ? scoreTotal / scoreCount : 0;
+  return {
+    period: {
+      start: new Date(normalizedStartMs).toISOString(),
+      end: new Date(normalizedEndMs).toISOString(),
+    },
+    cards: {
+      npsAverage,
+      promoters,
+      detractors,
+      reportSent,
+      referrals,
+      birthdayAppointments,
+    },
+    scoreDistribution: scoreBuckets,
+    gauge: {
+      promoters,
+      neutrals: Math.max(0, scoreCount - promoters - detractors),
+      detractors,
+      nps: scoreCount > 0 ? ((promoters - detractors) / scoreCount) * 100 : 0,
+    },
+    bySegment: Array.from(npsBySegment.values()).map((item) => ({
+      label: item.label,
+      average: item.count > 0 ? item.total / item.count : 0,
+      count: item.count,
+    })),
+    byDay: Array.from(byDay.values()).sort((left, right) => left.date.localeCompare(right.date)),
+    totals: {
+      responses: scoreCount,
+      birthdayMessages,
+    },
+    sources: {
+      nps: "chatbot_metric_tag",
+      referrals: "chatbot_metric_tag",
+      birthday: "routine_logs",
+    },
+  };
+};
+
+const persistDashboardMetricSnapshot = (operationStore = {}, dashboardKey = "", metrics = {}) => {
+  const key = String(dashboardKey || "").trim();
+  if (!key || !metrics || typeof metrics !== "object") return false;
+  const currentFacts = operationStore.dashboardFacts && typeof operationStore.dashboardFacts === "object"
+    ? operationStore.dashboardFacts
+    : {};
+  const nextSnapshot = {
+    dashboard: key,
+    generatedAt: nowIso(),
+    period: metrics.period || null,
+    cards: metrics.cards || {},
+    totals: metrics.totals || {},
+    sources: metrics.sources || metrics.settings || {},
+  };
+  const previous = currentFacts[key] || null;
+  const previousComparable = previous ? { ...previous, generatedAt: undefined } : null;
+  const nextComparable = { ...nextSnapshot, generatedAt: undefined };
+  if (JSON.stringify(previousComparable) === JSON.stringify(nextComparable)) return false;
+  operationStore.dashboardFacts = {
+    ...currentFacts,
+    [key]: nextSnapshot,
+    updatedAt: nextSnapshot.generatedAt,
+  };
+  return true;
 };
 
 const buildConversationListResponse = (store, painelCustomers, operationStore = null, mutationState = null) => {
@@ -34082,6 +34395,9 @@ const server = http.createServer(async (req, res) => {
       const store = await readStore({ mutable: false });
       const operationStore = await readOperationStore();
       const metrics = buildAttendanceDashboardMetrics(store, { startMs, endMs, operationStore });
+      if (persistDashboardMetricSnapshot(operationStore, "attendance", metrics)) {
+        await writeOperationStore(operationStore);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(metrics));
     } catch (error) {
@@ -34100,6 +34416,9 @@ const server = http.createServer(async (req, res) => {
       const operationStore = await readOperationStore();
       const mutationState = { mutated: false };
       const metrics = await buildAcquisitionDashboardMetrics(store, { startMs, endMs, operationStore, mutationState });
+      if (persistDashboardMetricSnapshot(operationStore, "acquisition", metrics)) {
+        mutationState.mutated = true;
+      }
       if (mutationState.mutated) {
         await writeOperationStore(operationStore);
       }
@@ -34120,11 +34439,53 @@ const server = http.createServer(async (req, res) => {
       const operationStore = await readOperationStore();
       const store = await readStore({ mutable: false });
       const metrics = buildFollowUpDashboardMetrics(operationStore, { startMs, endMs, store });
+      if (persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
+        await writeOperationStore(operationStore);
+      }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(metrics));
     } catch (error) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: error?.message || "Follow-up dashboard error" }));
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/whatsapp/dashboard/base") {
+    setCors(res);
+    try {
+      const startMs = parseDashboardDateBoundary(url.searchParams.get("start"), "start");
+      const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
+      const operationStore = await readOperationStore();
+      const metrics = buildBaseDashboardMetrics(operationStore, { startMs, endMs });
+      if (persistDashboardMetricSnapshot(operationStore, "base", metrics)) {
+        await writeOperationStore(operationStore);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(metrics));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error?.message || "Base dashboard error" }));
+    }
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/whatsapp/dashboard/experience") {
+    setCors(res);
+    try {
+      const startMs = parseDashboardDateBoundary(url.searchParams.get("start"), "start");
+      const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
+      const operationStore = await readOperationStore();
+      const store = await readStore({ mutable: false });
+      const metrics = buildExperienceDashboardMetrics(operationStore, { startMs, endMs, store });
+      if (persistDashboardMetricSnapshot(operationStore, "experience", metrics)) {
+        await writeOperationStore(operationStore);
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(metrics));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error?.message || "Experience dashboard error" }));
     }
     return;
   }
@@ -55201,12 +55562,6 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
-
 
 
 
