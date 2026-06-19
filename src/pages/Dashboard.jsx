@@ -1125,60 +1125,6 @@ const matchesFilterOption = (selectedValue, candidates = []) => {
   return candidates.some((candidate) => normalizeFilterCompareValue(candidate) === normalizedSelected);
 };
 
-const parseDashboardDateMs = (value, boundary = 'start') => {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-  const suffix = boundary === 'end' ? 'T23:59:59.999' : 'T00:00:00.000';
-  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}${suffix}` : raw);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const isWithinDashboardDateRange = (value, startDate, endDate) => {
-  const timestampMs = Date.parse(String(value || ''));
-  const startMs = parseDashboardDateMs(startDate, 'start');
-  const endMs = parseDashboardDateMs(endDate, 'end');
-  if (!Number.isFinite(timestampMs)) return false;
-  if (Number.isFinite(startMs) && timestampMs < startMs) return false;
-  if (Number.isFinite(endMs) && timestampMs > endMs) return false;
-  return true;
-};
-
-const buildFollowUpRowsFromFacts = ({ facts = [], startDate, endDate, filters = {} } = {}) => {
-  const rows = new Map();
-  (Array.isArray(facts) ? facts : [])
-    .filter((fact) => isWithinDashboardDateRange(fact?.sentAt || fact?.sent_at, startDate, endDate))
-    .filter((fact) => matchesFilterOption(filters.rule, [fact?.routineName, fact?.routineId]))
-    .filter((fact) => matchesFilterOption(filters.template, [fact?.templateName]))
-    .forEach((fact) => {
-      const routineId = String(fact?.routineId || fact?.routineName || 'sem-rotina').trim();
-      const templateName = String(fact?.templateName || 'Sem template').trim() || 'Sem template';
-      const key = `${routineId}:${templateName}`;
-      const row = rows.get(key) || {
-        routineId,
-        routineName: String(fact?.routineName || routineId || 'Sem rotina').trim() || 'Sem rotina',
-        templateName,
-        sent: 0,
-        responses: 0,
-        appointments: 0,
-        recovered: 0,
-      };
-      row.sent += 1;
-      if (fact?.responded) row.responses += 1;
-      if (fact?.appointment) row.appointments += 1;
-      if (fact?.recovered) row.recovered += 1;
-      rows.set(key, row);
-    });
-
-  return Array.from(rows.values())
-    .map((row) => ({
-      ...row,
-      responseRate: row.sent > 0 ? row.responses / row.sent : 0,
-      recoveryRate: row.sent > 0 ? row.recovered / row.sent : 0,
-      appointmentRate: row.sent > 0 ? row.appointments / row.sent : 0,
-    }))
-    .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
-};
-
 const summarizeFollowUpRows = (rows = []) => {
   const sent = rows.reduce((total, row) => total + Number(row.sent || 0), 0);
   const responses = rows.reduce((total, row) => total + Number(row.responses || 0), 0);
@@ -1400,20 +1346,12 @@ export default function Dashboard() {
   const followUpFilters = dashboardFilters.followup || {};
   const experienceFilters = dashboardFilters.experiencia || {};
 
-  const followUpViewRows = useMemo(() => {
-    const factRows = buildFollowUpRowsFromFacts({
-      facts: followUpMetrics?.dispatchFacts || [],
-      startDate: start,
-      endDate: end,
-      filters: followUpFilters,
-    });
-    if (factRows.length || Array.isArray(followUpMetrics?.dispatchFacts)) return factRows;
-    return (Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [])
-      .filter((item) => matchesFilterOption(followUpFilters.rule, [item.routineName, item.routineId]))
-      .filter((item) => matchesFilterOption(followUpFilters.template, [item.templateName]));
-  }, [end, followUpFilters, followUpMetrics, start]);
+  const followUpViewRows = useMemo(
+    () => (Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : []),
+    [followUpMetrics],
+  );
 
-  const followUpViewCards = useMemo(() => summarizeFollowUpRows(followUpViewRows), [followUpViewRows]);
+  const followUpViewCards = followUpMetrics?.cards || summarizeFollowUpRows(followUpViewRows);
 
   const handleDashboardFilterChange = (dashboardId, key, value) => {
     setDashboardFilters((currentFilters) => ({

@@ -7205,7 +7205,7 @@ const parseDashboardDateBoundary = (value, boundary = "start") => {
   const isoDateMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoDateMatch) {
     const [, year, month, day] = isoDateMatch;
-    const suffix = boundary === "end" ? "T23:59:59.999" : "T00:00:00.000";
+    const suffix = boundary === "end" ? "T23:59:59.999-03:00" : "T00:00:00.000-03:00";
     const parsed = Date.parse(`${year}-${month}-${day}${suffix}`);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -7213,7 +7213,7 @@ const parseDashboardDateBoundary = (value, boundary = "start") => {
   const brDateMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (brDateMatch) {
     const [, day, month, year] = brDateMatch;
-    const suffix = boundary === "end" ? "T23:59:59.999" : "T00:00:00.000";
+    const suffix = boundary === "end" ? "T23:59:59.999-03:00" : "T00:00:00.000-03:00";
     const parsed = Date.parse(`${year}-${month}-${day}${suffix}`);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -8817,6 +8817,14 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const isFollowUpLog = (entry = {}) => {
     const routineId = String(entry?.routineId || entry?.details?.routineId || "").trim();
     const routineName = normalizeDashboardText(entry?.routineName || entry?.details?.routineName || "");
+    if (selectedRule) {
+      return matchesSelectedFilter(selectedRule, [
+        routineId,
+        routineName,
+        entry?.details?.templateName,
+        entry?.details?.quickReplyTitle,
+      ]);
+    }
     if (configuredRoutineIds.size || configuredRoutineNames.size) {
       return (routineId && configuredRoutineIds.has(routineId)) || (routineName && configuredRoutineNames.has(routineName));
     }
@@ -8961,11 +8969,9 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
 
   const metricEvents = Array.isArray(operationStore?.chatbotEvents)
     ? operationStore.chatbotEvents.filter((event) => {
-        const createdAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
         const metricTagId = normalizeDashboardText(event?.metadata?.metricTagId || event?.metricTagId || "");
         return (
           String(event?.type || "") === "metric_tag" &&
-          isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs) &&
           (!responseMetricTagIds.size || responseMetricTagIds.has(metricTagId))
         );
       })
@@ -35074,6 +35080,7 @@ const server = http.createServer(async (req, res) => {
           url.searchParams.get("rule") ||
           url.searchParams.get("template"),
       );
+      const hasTemplateFilter = Boolean(url.searchParams.get("template"));
       const metrics = buildFollowUpDashboardMetrics(operationStore, {
         startMs,
         endMs,
@@ -35081,7 +35088,7 @@ const server = http.createServer(async (req, res) => {
         filters: {
           rule: url.searchParams.get("rule") || "",
           template: url.searchParams.get("template") || "",
-          allowSummaryFallback: !hasViewFilters,
+          allowSummaryFallback: !hasTemplateFilter,
         },
       });
       if (!hasViewFilters && persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
