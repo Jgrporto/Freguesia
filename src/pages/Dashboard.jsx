@@ -145,15 +145,15 @@ const dashboards = {
     main: {
       title: 'Funil do follow-up',
       description: 'Do disparo configurado até o cliente recuperado.',
-      type: 'followupFunnel',
+      type: 'funnel',
       labels: ['Disparos enviados', 'Respostas recebidas', 'Agendamentos gerados', 'Clientes recuperados'],
     },
     sideCharts: [
       {
-        title: 'Resultado por rotina',
-        type: 'multiHorizontalBars',
-        labels: ['Rotina 1', 'Rotina 2', 'Rotina 3', 'Rotina 4'],
-        helper: 'Enviados, respostas por tag, agendas e cortes por rotina configurada.',
+        title: 'Taxa de resposta por template',
+        type: 'ranking',
+        labels: ['Template D+20', 'Template D+30', 'Template D+40', 'Template D+50'],
+        helper: 'Mensagens com maior resposta e recuperação.',
       },
       {
         title: 'Recuperação ao longo do tempo',
@@ -491,98 +491,6 @@ function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatte
   );
 }
 
-const followUpMetricStyles = [
-  { key: 'sent', label: 'Enviados', color: '#c50015' },
-  { key: 'responses', label: 'Respostas', color: '#2563eb' },
-  { key: 'appointments', label: 'Agendas', color: '#d97706' },
-  { key: 'recovered', label: 'Recuperados', color: '#059669' },
-];
-
-function FollowUpFunnelChart({ values = {} }) {
-  const sent = Number(values.sent || 0);
-  const responses = Number(values.responses || 0);
-  const appointments = Number(values.appointments || 0);
-  const recovered = Number(values.recovered || values.recoveredCustomers || 0);
-  const stages = [
-    { label: 'Disparos enviados', value: sent, helper: 'Rotinas configuradas', color: '#c50015', rate: 100 },
-    { label: 'Respostas recebidas', value: responses, helper: 'Passaram pela tag de métrica', color: '#2563eb', rate: safeRate(responses, sent) },
-    { label: 'Agendamentos gerados', value: appointments, helper: 'Agendamento agendado', color: '#d97706', rate: safeRate(appointments, sent) },
-    { label: 'Clientes recuperados', value: recovered, helper: 'Agendamento realizado', color: '#059669', rate: safeRate(recovered, sent) },
-  ];
-  const maxValue = Math.max(1, ...stages.map((stage) => stage.value));
-
-  return (
-    <div className="grid gap-3 lg:grid-cols-4">
-      {stages.map((stage, index) => {
-        const width = stage.value > 0 ? Math.max(8, (stage.value / maxValue) * 100) : 0;
-        return (
-          <div key={stage.label} className="rounded-xl border border-border bg-background p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{stage.label}</p>
-                <p className="mt-2 text-3xl font-bold tracking-[-0.03em] text-foreground tabular-nums">{formatInteger(stage.value)}</p>
-              </div>
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: stage.color }}>
-                {index + 1}
-              </span>
-            </div>
-            <div className="mt-4 h-2 rounded-full bg-muted">
-              <div className="h-2 rounded-full" style={{ width: `${width}%`, backgroundColor: stage.color }} />
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-2 text-xs">
-              <span className="text-muted-foreground">{stage.helper}</span>
-              <span className="font-bold text-foreground tabular-nums">{index === 0 ? '100%' : formatPercent(stage.rate)}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function MultiHorizontalBars({ labels = [], series = [], valueFormatter = formatInteger }) {
-  const activeSeries = Array.isArray(series) && series.length ? series : followUpMetricStyles.map((metric) => ({ ...metric, values: [] }));
-  const maxValue = Math.max(1, ...activeSeries.flatMap((item) => (Array.isArray(item.values) ? item.values : [])).map((value) => Number(value) || 0));
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
-        {activeSeries.map((item) => (
-          <span key={item.key || item.label} className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
-            {item.label}
-          </span>
-        ))}
-      </div>
-
-      <div className="space-y-4">
-        {labels.map((label, rowIndex) => (
-          <div key={label} className="grid gap-2 rounded-xl border border-border/70 bg-background p-3 lg:grid-cols-[minmax(150px,220px)_1fr] lg:items-center">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-foreground" title={label}>{label}</p>
-            </div>
-            <div className="space-y-2">
-              {activeSeries.map((item) => {
-                const value = Number(item.values?.[rowIndex] || 0);
-                const width = value > 0 ? Math.max(5, (value / maxValue) * 100) : 0;
-                return (
-                  <div key={`${label}-${item.key || item.label}`} className="grid grid-cols-[76px_minmax(0,1fr)_42px] items-center gap-2 text-[11px]">
-                    <span className="truncate font-medium text-muted-foreground">{item.label}</span>
-                    <div className="h-2.5 rounded-full bg-muted">
-                      <div className="h-2.5 rounded-full" style={{ width: `${width}%`, backgroundColor: item.color }} />
-                    </div>
-                    <span className="text-right font-bold text-foreground tabular-nums">{valueFormatter(value)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function EmptyDonut({ labels = [], values = [], large = false }) {
   const numericValues = labels.map((_, index) => Number(values[index] || 0));
   const total = numericValues.reduce((sum, value) => sum + value, 0);
@@ -757,20 +665,32 @@ function AtendimentoConversionFunnel({ values }) {
   );
 }
 
-function AcquisitionFunnel({ values }) {
-  const clicks = Number(values?.clicks ?? 0);
-  const conversations = Number(values?.conversations ?? 0);
+function AcquisitionFunnel({ values, mode = 'acquisition' }) {
+  const isFollowUp = mode === 'followup';
+  const firstValue = Number((isFollowUp ? values?.sent : values?.clicks) ?? 0);
+  const secondValue = Number((isFollowUp ? values?.responses : values?.conversations) ?? 0);
   const bookings = Number(values?.appointments ?? 0);
-  const attendances = Number(values?.attendances ?? 0);
-  const stages = [
-    { label: 'Cliques', value: clicks, icon: Target, tone: 'dark', helper: '100% do início' },
-    { label: 'Conversas', value: conversations, icon: MessageSquare, tone: 'dark', helper: `${formatPercent(safeRate(conversations, clicks))} dos cliques` },
-    { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'light', helper: `${formatPercent(safeRate(bookings, conversations))} das conversas` },
-    { label: 'Comparecimentos', value: attendances, icon: UserRound, tone: 'light', helper: `${formatPercent(safeRate(attendances, bookings))} dos agendamentos` },
-  ];
-  const insight = bookings > 0
-    ? `${formatInteger(clicks)} cliques geraram ${formatInteger(conversations)} conversas e ${formatInteger(bookings)} agendamentos no período.`
-    : `${formatInteger(clicks)} cliques geraram ${formatInteger(conversations)} conversas. Nenhuma conversa virou agendamento no período.`;
+  const finalValue = Number((isFollowUp ? values?.recovered : values?.attendances) ?? 0);
+  const stages = isFollowUp
+    ? [
+        { label: 'Disparos', value: firstValue, icon: Send, tone: 'dark', helper: '100% do início' },
+        { label: 'Respostas', value: secondValue, icon: MessageSquare, tone: 'dark', helper: `${formatPercent(safeRate(secondValue, firstValue))} dos disparos` },
+        { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'light', helper: `${formatPercent(safeRate(bookings, secondValue))} das respostas` },
+        { label: 'Recuperados', value: finalValue, icon: HeartHandshake, tone: 'light', helper: `${formatPercent(safeRate(finalValue, bookings))} dos agendamentos` },
+      ]
+    : [
+        { label: 'Cliques', value: firstValue, icon: Target, tone: 'dark', helper: '100% do início' },
+        { label: 'Conversas', value: secondValue, icon: MessageSquare, tone: 'dark', helper: `${formatPercent(safeRate(secondValue, firstValue))} dos cliques` },
+        { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'light', helper: `${formatPercent(safeRate(bookings, secondValue))} das conversas` },
+        { label: 'Comparecimentos', value: finalValue, icon: UserRound, tone: 'light', helper: `${formatPercent(safeRate(finalValue, bookings))} dos agendamentos` },
+      ];
+  const insight = isFollowUp
+    ? bookings > 0
+      ? `${formatInteger(firstValue)} disparos geraram ${formatInteger(secondValue)} respostas e ${formatInteger(bookings)} agendamentos no período.`
+      : `${formatInteger(firstValue)} disparos geraram ${formatInteger(secondValue)} respostas. Nenhuma resposta virou agendamento no período.`
+    : bookings > 0
+      ? `${formatInteger(firstValue)} cliques geraram ${formatInteger(secondValue)} conversas e ${formatInteger(bookings)} agendamentos no período.`
+      : `${formatInteger(firstValue)} cliques geraram ${formatInteger(secondValue)} conversas. Nenhuma conversa virou agendamento no período.`;
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
@@ -779,8 +699,10 @@ function AcquisitionFunnel({ values }) {
           <Filter className="h-5 w-5" />
         </div>
         <div>
-          <h3 className="text-sm font-bold text-foreground">Funil de aquisição</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do clique até o comparecimento.</p>
+          <h3 className="text-sm font-bold text-foreground">{isFollowUp ? 'Funil do follow-up' : 'Funil de aquisição'}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {isFollowUp ? 'Acompanhe a jornada do disparo até a recuperação do cliente.' : 'Acompanhe a jornada do clique até o comparecimento.'}
+          </p>
         </div>
       </div>
 
@@ -1081,7 +1003,6 @@ function ChartCard({
   labels = [],
   values = [],
   secondValues = [],
-  series = [],
   helper,
   className,
   valueFormatter = formatInteger,
@@ -1102,8 +1023,6 @@ function ChartCard({
       {type === 'stacked' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
       {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
       {type === 'ranking' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
-      {type === 'multiHorizontalBars' ? <MultiHorizontalBars labels={labels} series={series} valueFormatter={valueFormatter} /> : null}
-      {type === 'followupFunnel' ? <FollowUpFunnelChart values={values} /> : null}
       {type === 'donut' ? <EmptyDonut labels={labels} values={values} /> : null}
       {type === 'donutLarge' ? <EmptyDonut labels={labels} values={values} large /> : null}
       {type === 'gauge' ? <EmptyGauge value={values[0]} /> : null}
@@ -1617,15 +1536,12 @@ export default function Dashboard() {
       const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
       const byDay = Array.isArray(followUpMetrics?.byDay) ? followUpMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
-        if (chart.title === 'Resultado por rotina') {
+        if (chart.title === 'Taxa de resposta por template') {
           return {
             ...chart,
-            labels: byTemplate.length ? byTemplate.map((item) => item.routineName || item.templateName || 'Sem rotina') : chart.labels,
-            series: followUpMetricStyles.map((metric) => ({
-              ...metric,
-              values: byTemplate.length ? byTemplate.map((item) => Number(item[metric.key] || 0)) : [],
-            })),
-            className: 'xl:col-span-2',
+            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || item.routineName || 'Sem template') : chart.labels,
+            values: byTemplate.length ? byTemplate.map((item) => Math.round((Number(item.responseRate) || 0) * 100)) : [],
+            valueFormatter: formatPercent,
           };
         }
         if (chart.title === 'Recuperação ao longo do tempo') {
@@ -1737,6 +1653,8 @@ export default function Dashboard() {
 
       {currentMain.type === 'atendimentoFunnel' ? (
         <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
+      ) : activeDashboard === 'followup' ? (
+        <AcquisitionFunnel values={mainChartProps.values} mode="followup" />
       ) : activeDashboard === 'aquisicao' ? (
         <>
           <AcquisitionFunnel values={acquisitionFunnelValues} />
