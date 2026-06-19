@@ -8006,7 +8006,7 @@ const normalizeDashboardSettings = (value = {}) => {
 };
 
 const getAcquisitionAdKeywords = (settings = {}) =>
-  normalizeDashboardSettings(settings).adKeywords.map((item) => item.trim().toLowerCase()).filter(Boolean);
+  normalizeDashboardSettings(settings).adKeywords.map(normalizeDashboardText).filter(Boolean);
 
 const normalizeMetaAdAccountId = (value = "") => {
   const raw = String(value || "").trim();
@@ -8229,7 +8229,21 @@ const normalizeDashboardAdReferral = (value = {}) => {
 };
 
 const resolveAdSignalDetails = (conversation = {}, messages = [], settings = {}) => {
-  void settings;
+  const keywords = getAcquisitionAdKeywords(settings);
+  const matchedKeywords = new Set();
+  const collectKeywordMatches = (value) => {
+    if (!value || !keywords.length) return false;
+    const normalized = normalizeDashboardText(typeof value === "string" ? value : JSON.stringify(value));
+    let matched = false;
+    keywords.forEach((keyword) => {
+      if (keyword && normalized.includes(keyword)) {
+        matchedKeywords.add(keyword);
+        matched = true;
+      }
+    });
+    return matched;
+  };
+
   let referral =
     normalizeDashboardAdReferral(conversation?.adReferral) ||
     normalizeDashboardAdReferral(conversation?.ad_referral) ||
@@ -8244,14 +8258,46 @@ const resolveAdSignalDetails = (conversation = {}, messages = [], settings = {})
     });
   let firstSignalAtMs = toTimeMs(conversation?.ad_first_seen_at || conversation?.ad_last_seen_at);
   let lastSignalAtMs = toTimeMs(conversation?.ad_last_seen_at || conversation?.ad_first_seen_at);
+  const conversationHasKeyword = collectKeywordMatches([
+    conversation?.source,
+    conversation?.origin,
+    conversation?.lastMessage,
+    conversation?.last_message,
+    conversation?.customer?.name,
+    conversation?.contact_name,
+    conversation?.adReferral,
+    conversation?.ad_referral,
+  ]);
+  if (conversationHasKeyword) {
+    const conversationTs = Math.max(
+      toTimeMs(conversation?.lastMessageTime),
+      toTimeMs(conversation?.last_message_at),
+      toTimeMs(conversation?.created_at),
+    );
+    if (Number.isFinite(conversationTs)) {
+      if (!Number.isFinite(firstSignalAtMs) || conversationTs < firstSignalAtMs) firstSignalAtMs = conversationTs;
+      if (!Number.isFinite(lastSignalAtMs) || conversationTs > lastSignalAtMs) lastSignalAtMs = conversationTs;
+    }
+  }
   for (const message of Array.isArray(messages) ? messages : []) {
     const messageReferral =
       normalizeDashboardAdReferral(message?.adReferral) ||
       normalizeDashboardAdReferral(message?.ad_referral) ||
       normalizeDashboardAdReferral(message?.referral) ||
       normalizeDashboardAdReferral(message?.context?.referral);
-    if (!messageReferral) continue;
-    referral = referral || messageReferral;
+    const messageHasKeyword = collectKeywordMatches([
+      message?.content,
+      message?.text,
+      message?.body,
+      message?.message,
+      message?.caption,
+      message?.adReferral,
+      message?.ad_referral,
+      message?.referral,
+      message?.context?.referral,
+    ]);
+    if (!messageReferral && !messageHasKeyword) continue;
+    if (messageReferral) referral = referral || messageReferral;
     const ts = resolveDashboardMessageTimestampMs(message);
     if (Number.isFinite(ts) && (!Number.isFinite(firstSignalAtMs) || ts < firstSignalAtMs)) {
       firstSignalAtMs = ts;
@@ -8262,10 +8308,11 @@ const resolveAdSignalDetails = (conversation = {}, messages = [], settings = {})
   }
 
   return {
-    hasSignal: Boolean(referral),
+    hasSignal: Boolean(referral) || matchedKeywords.size > 0,
     firstSignalAtMs: Number.isFinite(firstSignalAtMs) ? firstSignalAtMs : null,
     lastSignalAtMs: Number.isFinite(lastSignalAtMs) ? lastSignalAtMs : null,
     referral,
+    keywords: Array.from(matchedKeywords),
   };
 };
 
@@ -8299,6 +8346,7 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   const appointmentPhones = new Set();
   const adCustomerPhones = new Set();
   const newCustomerPhones = new Set();
+  const keywordStats = new Map();
   const adCustomerRecords = [];
   const appointmentWindowMs = dashboardSettings.appointmentAttributionWindowDays * 24 * 60 * 60 * 1000;
 
@@ -8387,9 +8435,17 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
         headline: referral.headline || "",
         body: referral.body || "",
         sourceUrl: referral.sourceUrl || "",
-        keywords: [],
+        keywords: adSignal.keywords || [],
       });
     }
+    const keywordKeys = adSignal.keywords?.length ? adSignal.keywords : [referral?.adId || referral?.sourceId ? "referral_meta" : "sem_palavra"];
+    keywordKeys.forEach((keyword) => {
+      const current = keywordStats.get(keyword) || { keyword, conversations: 0, customers: 0, appointments: 0 };
+      current.conversations += 1;
+      if (phone) current.customers += 1;
+      if (hasAppointment) current.appointments += 1;
+      keywordStats.set(keyword, current);
+    });
   }
 
   const conversationsStarted = adConversationIds.size;
@@ -8456,11 +8512,15 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     adCustomers: persistedAdCustomers.items,
     customers: persistedAdCustomers.items,
     ads,
+    byKeyword: Array.from(keywordStats.values()).sort(
+      (left, right) => right.conversations - left.conversations || right.appointments - left.appointments,
+    ),
     settings: {
       appointmentAttributionWindowDays: dashboardSettings.appointmentAttributionWindowDays,
+      adKeywords: dashboardSettings.adKeywords,
       metaInsightsCacheTtlMs: META_INSIGHTS_CACHE_TTL_MS,
       metaAdLookbackDays: META_AD_LOOKBACK_DAYS,
-      localSource: "whatsapp_ad_referral",
+      localSource: "dashboard_ad_keywords_or_whatsapp_ad_referral",
       appointmentSource: "appbarber_by_phone",
     },
   };

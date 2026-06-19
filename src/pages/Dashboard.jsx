@@ -114,6 +114,9 @@ const dashboards = {
       { title: 'CAC por agendamento', value: 'R$ 0,00', subtitle: 'Investimento / agendas', icon: PiggyBank },
       { title: 'CAC por cliente novo', value: 'R$ 0,00', subtitle: 'Investimento / clientes', icon: UserCheck },
       { title: 'Anúncio → agendamento', value: '0%', subtitle: 'Conversão do tráfego', icon: TrendingUp },
+      { title: 'Investimento Meta', value: 'R$ 0,00', subtitle: 'Gasto no período', icon: PiggyBank },
+      { title: 'Cliques no link', value: '0', subtitle: 'Link clicks da Meta', icon: Target },
+      { title: 'Conversas Meta', value: '0', subtitle: 'Conversas agregadas 7d', icon: MessageSquare },
     ],
     main: {
       title: 'Funil de aquisição',
@@ -121,7 +124,26 @@ const dashboards = {
       type: 'funnel',
       labels: ['Conversas', 'Agendamentos', 'Clientes novos'],
     },
-    sideCharts: [],
+    sideCharts: [
+      {
+        title: 'Investimento por anúncio',
+        type: 'bars',
+        labels: [],
+        helper: 'Gasto da Meta por anúncio no período.',
+      },
+      {
+        title: 'Conversas Meta por anúncio',
+        type: 'bars',
+        labels: [],
+        helper: 'Métrica agregada da Meta, sem telefone do cliente.',
+      },
+      {
+        title: 'Cliques no link por anúncio',
+        type: 'bars',
+        labels: [],
+        helper: 'Link clicks da Meta por anúncio.',
+      },
+    ],
   },
   followup: {
     title: 'Follow-up e Recuperação',
@@ -877,8 +899,12 @@ function AcquisitionCustomersTable({ items = [] }) {
                     <td className="px-4 py-3 text-muted-foreground">{item.phone || '-'}</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       <div className="max-w-[220px]">
-                        <div className="truncate font-semibold text-foreground">{item.adName || item.campaignName || item.adId || '-'}</div>
-                        <div className="truncate text-xs text-muted-foreground">{item.campaignName || item.adsetName || '-'}</div>
+                        <div className="truncate font-semibold text-foreground">
+                          {item.adName || item.campaignName || item.adId || (Array.isArray(item.keywords) && item.keywords.length ? item.keywords.join(', ') : '-')}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {item.campaignName || item.adsetName || (Array.isArray(item.keywords) && item.keywords.length ? 'Palavra-chave configurada' : '-')}
+                        </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
@@ -1209,6 +1235,15 @@ export default function Dashboard() {
         if (card.title === 'Anúncio → agendamento') {
           return { ...card, value: formatPercentCard(metrics.adToAppointmentRate), subtitle: 'Agendamentos / conversas' };
         }
+        if (card.title === 'Investimento Meta') {
+          return { ...card, value: formatCurrency(acquisitionMetrics?.meta?.spend), subtitle: 'Gasto Meta no período' };
+        }
+        if (card.title === 'Cliques no link') {
+          return { ...card, value: formatInteger(acquisitionMetrics?.meta?.linkClicks || acquisitionMetrics?.meta?.inlineLinkClicks), subtitle: 'Link clicks da Meta' };
+        }
+        if (card.title === 'Conversas Meta') {
+          return { ...card, value: formatInteger(acquisitionMetrics?.meta?.messagingConversationStarted7d), subtitle: 'Agregado da Meta Ads' };
+        }
         return card;
       });
     }
@@ -1393,6 +1428,40 @@ export default function Dashboard() {
   }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpMetrics]);
 
   const displaySideCharts = useMemo(() => {
+    if (activeDashboard === 'aquisicao') {
+      const ads = Array.isArray(acquisitionMetrics?.ads)
+        ? acquisitionMetrics.ads
+            .slice()
+            .sort((left, right) => Number(right.spend || 0) - Number(left.spend || 0))
+            .slice(0, 8)
+        : [];
+      return current.sideCharts.map((chart) => {
+        if (chart.title === 'Investimento por anúncio') {
+          return {
+            ...chart,
+            labels: ads.map((item) => item.adName || item.campaignName || 'Sem anúncio'),
+            values: ads.map((item) => Number(item.spend || 0)),
+            valueFormatter: formatCurrency,
+          };
+        }
+        if (chart.title === 'Conversas Meta por anúncio') {
+          return {
+            ...chart,
+            labels: ads.map((item) => item.adName || item.campaignName || 'Sem anúncio'),
+            values: ads.map((item) => item.messagingConversationStarted7d || 0),
+          };
+        }
+        if (chart.title === 'Cliques no link por anúncio') {
+          return {
+            ...chart,
+            labels: ads.map((item) => item.adName || item.campaignName || 'Sem anúncio'),
+            values: ads.map((item) => item.linkClicks || item.inlineLinkClicks || 0),
+          };
+        }
+        return chart;
+      });
+    }
+
     if (activeDashboard === 'atendimento') {
       const byAgent = Array.isArray(attendanceMetrics?.byAgent)
         ? attendanceMetrics.byAgent.filter((item) => {
@@ -1518,7 +1587,7 @@ export default function Dashboard() {
     }
 
     return current.sideCharts;
-  }, [activeDashboard, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpMetrics]);
+  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpMetrics]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">
