@@ -113,6 +113,9 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   followUpRoutineNameKeywords: ['follow', 'recuper', 'retorno', 'corte'],
   followUpResponseMetricTagIds: ['follow_up_response'],
   postSaleRoutineNameKeywords: ['pos', 'pós', 'pos-venda', 'pós-venda', 'nps', 'satisfacao', 'satisfação'],
+  postSalePromoterMetricTagIds: ['post_sale_promoter', 'nps_promoter'],
+  postSalePassiveMetricTagIds: ['post_sale_passive', 'nps_passive'],
+  postSaleDetractorMetricTagIds: ['post_sale_detractor', 'nps_detractor'],
   templateResponseWindowDays: 7,
   templateRecoveryWindowDays: 30,
   newCustomerWindowDays: 30,
@@ -2507,6 +2510,18 @@ const normalizeDashboardSettings = (value = {}) => {
     postSaleRoutineNameKeywords: normalizeDashboardStringList(
       source.postSaleRoutineNameKeywords,
       DASHBOARD_SETTINGS_DEFAULT.postSaleRoutineNameKeywords,
+    ),
+    postSalePromoterMetricTagIds: normalizeDashboardStringList(
+      source.postSalePromoterMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.postSalePromoterMetricTagIds,
+    ),
+    postSalePassiveMetricTagIds: normalizeDashboardStringList(
+      source.postSalePassiveMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.postSalePassiveMetricTagIds,
+    ),
+    postSaleDetractorMetricTagIds: normalizeDashboardStringList(
+      source.postSaleDetractorMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.postSaleDetractorMetricTagIds,
     ),
     templateResponseWindowDays: normalizeDashboardPositiveInteger(
       source.templateResponseWindowDays,

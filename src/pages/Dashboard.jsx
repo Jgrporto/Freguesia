@@ -187,7 +187,6 @@ const dashboards = {
       { title: 'Notas abaixo de 6', value: '0', subtitle: 'Atenção operacional', icon: Target },
       { title: 'Envios Pós-Corte', value: '0', subtitle: 'Rotinas de pós-venda', icon: Send },
       { title: 'Taxa de Resposta', value: '0%', subtitle: 'Respostas pós-corte', icon: MessageCircle },
-      { title: 'Positivas Vs Negativas', value: '0 / 0', subtitle: 'Avaliações pós-venda', icon: HeartHandshake },
     ],
     main: {
       title: 'Distribuição das notas NPS',
@@ -207,6 +206,12 @@ const dashboards = {
         type: 'bars',
         labels: ['1º corte', '4º corte', 'Fiéis', 'Trimestral'],
         helper: 'Satisfação por fase da jornada.',
+      },
+      {
+        title: 'Pós Venda',
+        type: 'donut',
+        labels: ['Promotor', 'Passivo', 'Detrator'],
+        helper: 'Classificação pelas tags configuradas no chatbot.',
       },
     ],
   },
@@ -1562,13 +1567,6 @@ export default function Dashboard() {
         if (card.title === 'Taxa de Resposta') {
           return { ...card, value: formatPercentCard(metrics.postSaleResponseRate), subtitle: 'Respostas / envios pós-corte' };
         }
-        if (card.title === 'Positivas Vs Negativas') {
-          return {
-            ...card,
-            value: `${formatInteger(metrics.postSalePositive)} / ${formatInteger(metrics.postSaleNegative)}`,
-            subtitle: 'Positivas / negativas',
-          };
-        }
         return card;
       });
     }
@@ -1766,6 +1764,16 @@ export default function Dashboard() {
             ...chart,
             labels: bySegment.length ? bySegment.map((item) => item.label) : chart.labels,
             values: bySegment.length ? bySegment.map((item) => item.average || 0) : [],
+          };
+        }
+        if (chart.title === 'Pós Venda') {
+          return {
+            ...chart,
+            values: [
+              experienceMetrics?.cards?.postSalePromoter || 0,
+              experienceMetrics?.cards?.postSalePassive || 0,
+              experienceMetrics?.cards?.postSaleDetractor || 0,
+            ],
           };
         }
         return chart;

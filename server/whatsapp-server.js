@@ -7981,6 +7981,9 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   followUpRoutineNameKeywords: ["follow", "recuper", "retorno", "corte"],
   followUpResponseMetricTagIds: ["follow_up_response"],
   postSaleRoutineNameKeywords: ["pos", "pós", "pos-venda", "pós-venda", "nps", "satisfacao", "satisfação"],
+  postSalePromoterMetricTagIds: ["post_sale_promoter", "nps_promoter"],
+  postSalePassiveMetricTagIds: ["post_sale_passive", "nps_passive"],
+  postSaleDetractorMetricTagIds: ["post_sale_detractor", "nps_detractor"],
   templateResponseWindowDays: 7,
   templateRecoveryWindowDays: 30,
   newCustomerWindowDays: 30,
@@ -8041,6 +8044,18 @@ const normalizeDashboardSettings = (value = {}) => {
     postSaleRoutineNameKeywords: normalizeDashboardStringList(
       source.postSaleRoutineNameKeywords,
       DASHBOARD_SETTINGS_DEFAULT.postSaleRoutineNameKeywords,
+    ),
+    postSalePromoterMetricTagIds: normalizeDashboardStringList(
+      source.postSalePromoterMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.postSalePromoterMetricTagIds,
+    ),
+    postSalePassiveMetricTagIds: normalizeDashboardStringList(
+      source.postSalePassiveMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.postSalePassiveMetricTagIds,
+    ),
+    postSaleDetractorMetricTagIds: normalizeDashboardStringList(
+      source.postSaleDetractorMetricTagIds,
+      DASHBOARD_SETTINGS_DEFAULT.postSaleDetractorMetricTagIds,
     ),
     templateResponseWindowDays: normalizeDashboardPositiveInteger(
       source.templateResponseWindowDays,
@@ -9205,14 +9220,18 @@ const isDashboardTextMatch = (value, tokens = []) => {
 const resolveDashboardPostSaleSentiment = (...values) => {
   const score = extractDashboardScore(...values);
   if (score != null) {
-    if (score >= 7) return { score, sentiment: "positive" };
+    if (score >= 9) return { score, sentiment: "promoter" };
+    if (score >= 7) return { score, sentiment: "passive" };
     if (score <= 6) return { score, sentiment: "negative" };
-    return { score, sentiment: "neutral" };
+    return { score, sentiment: null };
   }
   const text = normalizeDashboardText(values.filter((value) => value != null).join(" "));
   if (!text) return { score: null, sentiment: null };
   if (["positivo", "positiva", "satisfeito", "satisfeita", "promotor", "promotora", "bom", "otimo", "excelente"].some((token) => text.includes(token))) {
-    return { score: null, sentiment: "positive" };
+    return { score: null, sentiment: "promoter" };
+  }
+  if (["passivo", "passiva", "neutro", "neutra", "regular"].some((token) => text.includes(token))) {
+    return { score: null, sentiment: "passive" };
   }
   if (["negativo", "negativa", "insatisfeito", "insatisfeita", "detrator", "detratora", "ruim", "problema", "reclamacao"].some((token) => text.includes(token))) {
     return { score: null, sentiment: "negative" };
@@ -9226,6 +9245,9 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
   const postSaleRoutineTokens = dashboardSettings.postSaleRoutineNameKeywords.map(normalizeDashboardText).filter(Boolean);
+  const postSalePromoterTagIds = new Set(dashboardSettings.postSalePromoterMetricTagIds.map(normalizeDashboardText).filter(Boolean));
+  const postSalePassiveTagIds = new Set(dashboardSettings.postSalePassiveMetricTagIds.map(normalizeDashboardText).filter(Boolean));
+  const postSaleDetractorTagIds = new Set(dashboardSettings.postSaleDetractorMetricTagIds.map(normalizeDashboardText).filter(Boolean));
   const responseWindowMs = dashboardSettings.templateResponseWindowDays * 24 * 60 * 60 * 1000;
   const scoreBuckets = Array.from({ length: 11 }, (_, score) => ({ score, count: 0 }));
   const npsBySegment = new Map([
@@ -9254,10 +9276,11 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
     const eventAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
     if (!isWithinDashboardRange(eventAtMs, normalizedStartMs, normalizedEndMs)) return;
     const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
+    const metricTagId = normalizeDashboardText(metadata.metricTagId || event?.metricTagId || "");
     const metricName = [metadata.metricTagName, metadata.metricTagId, event.type].join(" ");
     const conversationId = String(event?.conversation_id || event?.conversationId || "").trim();
     const phone = conversationPhoneById.get(conversationId);
-    const postSaleSentiment = resolveDashboardPostSaleSentiment(
+    const inferredPostSaleSentiment = resolveDashboardPostSaleSentiment(
       metadata.score,
       metadata.value,
       metadata.metricValue,
@@ -9265,15 +9288,22 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
       metadata.metricTagId,
       event.message,
     );
+    const postSaleSentiment = postSalePromoterTagIds.has(metricTagId)
+      ? "promoter"
+      : postSalePassiveTagIds.has(metricTagId)
+        ? "passive"
+        : postSaleDetractorTagIds.has(metricTagId)
+          ? "negative"
+          : inferredPostSaleSentiment.sentiment;
     if (
       phone &&
-      (postSaleSentiment.sentiment ||
+      (postSaleSentiment ||
         isDashboardTextMatch(metricName, ["nps", "satisfacao", "satisfação", "nota", "pos-venda", "pós-venda", "pos venda", "pós venda"]))
     ) {
       postSaleResponseCandidates.push({
         phone,
         eventAtMs,
-        sentiment: postSaleSentiment.sentiment,
+        sentiment: postSaleSentiment,
       });
     }
 
@@ -9330,8 +9360,9 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
     })
     .filter((item) => item.phone && Number.isFinite(item.sentAtMs));
   const postSaleResponseKeys = new Set();
-  let postSalePositive = 0;
-  let postSaleNegative = 0;
+  let postSalePromoter = 0;
+  let postSalePassive = 0;
+  let postSaleDetractor = 0;
   postSaleResponseCandidates
     .sort((left, right) => left.eventAtMs - right.eventAtMs)
     .forEach((candidate) => {
@@ -9342,8 +9373,9 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
       const responseKey = `${matchedSend.routineId}:${matchedSend.phone}:${matchedSend.sentAtMs}`;
       if (postSaleResponseKeys.has(responseKey)) return;
       postSaleResponseKeys.add(responseKey);
-      if (candidate.sentiment === "positive") postSalePositive += 1;
-      if (candidate.sentiment === "negative") postSaleNegative += 1;
+      if (candidate.sentiment === "promoter") postSalePromoter += 1;
+      if (candidate.sentiment === "passive") postSalePassive += 1;
+      if (candidate.sentiment === "negative") postSaleDetractor += 1;
     });
   const postSaleSent = postSaleLogs.length;
   const postSaleResponses = postSaleResponseKeys.size;
@@ -9360,8 +9392,9 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
       postSaleSent,
       postSaleResponses,
       postSaleResponseRate: postSaleSent > 0 ? postSaleResponses / postSaleSent : 0,
-      postSalePositive,
-      postSaleNegative,
+      postSalePromoter,
+      postSalePassive,
+      postSaleDetractor,
     },
     scoreDistribution: scoreBuckets,
     gauge: {
@@ -9385,6 +9418,9 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
       nps: "chatbot_metric_tag",
       postSale: "routine_logs_plus_chatbot_metric_tag",
       postSaleRoutineNameKeywords: dashboardSettings.postSaleRoutineNameKeywords,
+      postSalePromoterMetricTagIds: dashboardSettings.postSalePromoterMetricTagIds,
+      postSalePassiveMetricTagIds: dashboardSettings.postSalePassiveMetricTagIds,
+      postSaleDetractorMetricTagIds: dashboardSettings.postSaleDetractorMetricTagIds,
       templateResponseWindowDays: dashboardSettings.templateResponseWindowDays,
     },
   };

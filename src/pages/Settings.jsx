@@ -334,6 +334,9 @@ export default function Settings() {
   const [dashboardSettings, setDashboardSettings] = useState(DEFAULT_DASHBOARD_SETTINGS);
   const [dashboardAdKeywordInput, setDashboardAdKeywordInput] = useState('');
   const [dashboardFollowUpMetricTagInput, setDashboardFollowUpMetricTagInput] = useState('');
+  const [dashboardPostSalePromoterTagInput, setDashboardPostSalePromoterTagInput] = useState('');
+  const [dashboardPostSalePassiveTagInput, setDashboardPostSalePassiveTagInput] = useState('');
+  const [dashboardPostSaleDetractorTagInput, setDashboardPostSaleDetractorTagInput] = useState('');
   const [settingsAudit, setSettingsAudit] = useState(() => readJsonStorage(SETTINGS_AUDIT_STORAGE_KEY, []));
   const [activeSettingsTab, setActiveSettingsTab] = useState('profile');
   const [confirmDialog, setConfirmDialog] = useState({
@@ -813,6 +816,15 @@ export default function Settings() {
     }
     if (field === 'followUpResponseMetricTagIds') {
       setDashboardFollowUpMetricTagInput('');
+    }
+    if (field === 'postSalePromoterMetricTagIds') {
+      setDashboardPostSalePromoterTagInput('');
+    }
+    if (field === 'postSalePassiveMetricTagIds') {
+      setDashboardPostSalePassiveTagInput('');
+    }
+    if (field === 'postSaleDetractorMetricTagIds') {
+      setDashboardPostSaleDetractorTagInput('');
     }
   };
 
@@ -1695,6 +1707,45 @@ export default function Settings() {
                 emptyLabel="Nenhuma rotina de pós-venda selecionada."
               />
             </div>
+
+            <DashboardValueList
+              label="Tags pós-venda: Promotor"
+              description="Eventos do chatbot com estes IDs entram como Promotor no donut de Pós Venda."
+              values={dashboardSettings.postSalePromoterMetricTagIds}
+              inputValue={dashboardPostSalePromoterTagInput}
+              inputPlaceholder="Ex.: post_sale_promoter"
+              onInputChange={setDashboardPostSalePromoterTagInput}
+              onAddValue={(value) => handleDashboardListAdd('postSalePromoterMetricTagIds', value)}
+              onRemoveValue={(value) => handleDashboardListRemove('postSalePromoterMetricTagIds', value)}
+              disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+              emptyLabel="Nenhuma tag de promotor selecionada."
+            />
+
+            <DashboardValueList
+              label="Tags pós-venda: Passivo"
+              description="Eventos do chatbot com estes IDs entram como Passivo no donut de Pós Venda."
+              values={dashboardSettings.postSalePassiveMetricTagIds}
+              inputValue={dashboardPostSalePassiveTagInput}
+              inputPlaceholder="Ex.: post_sale_passive"
+              onInputChange={setDashboardPostSalePassiveTagInput}
+              onAddValue={(value) => handleDashboardListAdd('postSalePassiveMetricTagIds', value)}
+              onRemoveValue={(value) => handleDashboardListRemove('postSalePassiveMetricTagIds', value)}
+              disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+              emptyLabel="Nenhuma tag de passivo selecionada."
+            />
+
+            <DashboardValueList
+              label="Tags pós-venda: Detrator"
+              description="Eventos do chatbot com estes IDs entram como Detrator no donut de Pós Venda."
+              values={dashboardSettings.postSaleDetractorMetricTagIds}
+              inputValue={dashboardPostSaleDetractorTagInput}
+              inputPlaceholder="Ex.: post_sale_detractor"
+              onInputChange={setDashboardPostSaleDetractorTagInput}
+              onAddValue={(value) => handleDashboardListAdd('postSaleDetractorMetricTagIds', value)}
+              onRemoveValue={(value) => handleDashboardListRemove('postSaleDetractorMetricTagIds', value)}
+              disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+              emptyLabel="Nenhuma tag de detrator selecionada."
+            />
 
             <div className="lg:col-span-2">
               <DashboardValueList
