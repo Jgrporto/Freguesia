@@ -7446,6 +7446,8 @@ const normalizeDashboardPersistedAdCustomers = (value = []) =>
       lastMessageAt: String(item?.lastMessageAt || "").trim(),
       appointmentAt: String(item?.appointmentAt || "").trim(),
       resolvedAt: String(item?.resolvedAt || "").trim(),
+      firstScheduledAt: String(item?.firstScheduledAt || item?.appointmentAt || "").trim(),
+      firstAttendedAt: String(item?.firstAttendedAt || item?.resolvedAt || "").trim(),
       adId: String(item?.adId || item?.sourceId || "").trim(),
       sourceId: String(item?.sourceId || item?.adId || "").trim(),
       ctwaClid: String(item?.ctwaClid || "").trim(),
@@ -7473,6 +7475,8 @@ const upsertDashboardAdCustomerRecords = (operationStore = {}, records = []) => 
       ...(current || {}),
       ...normalized,
       firstAdSeenAt: current?.firstAdSeenAt && current.firstAdSeenAt < normalized.firstAdSeenAt ? current.firstAdSeenAt : normalized.firstAdSeenAt,
+      firstScheduledAt: current?.firstScheduledAt || normalized.firstScheduledAt || "",
+      firstAttendedAt: current?.firstAttendedAt || normalized.firstAttendedAt || "",
       updatedAt: nowIso(),
     };
     if (JSON.stringify(current || null) !== JSON.stringify(next)) {
@@ -8357,7 +8361,6 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   const metaAdById = new Map(metaRows.filter((row) => row.adId).map((row) => [row.adId, row]));
   const localByAdId = new Map();
   const whatsappConversationIds = new Set();
-  const appointmentPhones = new Set();
   const appBarberCustomerPhones = new Set();
   const newCustomerPhones = new Set();
   const keywordStats = new Map();
@@ -8415,7 +8418,6 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
           appointmentMs <= normalizedEndMs,
       );
       if (insideAttributionWindow) {
-        appointmentPhones.add(appBarberPhone || phone);
         hasAppointment = true;
         appointmentAt = Number.isFinite(pendingMs) ? new Date(pendingMs).toISOString() : "";
         resolvedAt = Number.isFinite(resolvedMs) ? new Date(resolvedMs).toISOString() : "";
@@ -8447,6 +8449,8 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
         lastMessageAt: lastMessageAtMs > 0 ? new Date(lastMessageAtMs).toISOString() : "",
         appointmentAt,
         resolvedAt,
+        firstScheduledAt: appointmentAt,
+        firstAttendedAt: resolvedAt,
         adId: adId || metaAd?.adId || "",
         sourceId: referral.sourceId || "",
         ctwaClid: referral.ctwaClid || "",
@@ -8470,7 +8474,6 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   }
 
   const conversationsStarted = whatsappConversationIds.size;
-  const appointments = appointmentPhones.size;
   const adCustomers = appBarberCustomerPhones.size;
   const newCustomers = newCustomerPhones.size;
   const spend = meta.spend || 0;
@@ -8487,6 +8490,11 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       localCustomers: Number(local.localCustomers || 0),
     };
   });
+  const persistedAppointments = persistedAdCustomers.items.filter((item) => item.firstScheduledAt || item.appointmentAt);
+  const persistedAttendances = persistedAdCustomers.items.filter((item) => item.firstAttendedAt || item.resolvedAt);
+  const scheduledCount = new Set(persistedAppointments.map((item) => item.phone).filter(Boolean)).size;
+  const attendedCount = new Set(persistedAttendances.map((item) => item.phone).filter(Boolean)).size;
+  const clicks = Number(meta.linkClicks || meta.inlineLinkClicks || meta.clicks || 0) || 0;
 
   return {
     period: {
@@ -8509,26 +8517,34 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     },
     local: {
       adConversations: whatsappConversationIds.size,
-      appointments,
+      appointments: scheduledCount,
+      attended: attendedCount,
       newCustomers,
       adCustomers,
     },
     cards: {
-      adCustomers,
+      investment: spend,
+      clicks,
+      costPerClick: clicks > 0 ? spend / clicks : 0,
       conversationsStarted,
-      adAppointments: appointments,
-      appointments,
-      cacPerAppointment: appointments > 0 ? spend / appointments : 0,
-      costPerAppointment: appointments > 0 ? spend / appointments : 0,
-      cacPerNewCustomer: newCustomers > 0 ? spend / newCustomers : 0,
+      costPerConversation: conversationsStarted > 0 ? spend / conversationsStarted : 0,
+      scheduledAppointments: scheduledCount,
+      appointments: scheduledCount,
+      attendances: attendedCount,
+      adAppointments: scheduledCount,
+      cacPerAppointment: scheduledCount > 0 ? spend / scheduledCount : 0,
+      costPerAppointment: scheduledCount > 0 ? spend / scheduledCount : 0,
+      cacPerAttendance: attendedCount > 0 ? spend / attendedCount : 0,
+      adCustomers,
       costPerNewCustomer: newCustomers > 0 ? spend / newCustomers : 0,
-      adToAppointmentRate: conversationsStarted > 0 ? appointments / conversationsStarted : 0,
+      adToAppointmentRate: conversationsStarted > 0 ? scheduledCount / conversationsStarted : 0,
       newCustomers,
     },
     funnel: {
+      clicks,
       conversations: conversationsStarted,
-      appointments,
-      newCustomers,
+      appointments: scheduledCount,
+      attendances: attendedCount,
     },
     adCustomers: persistedAdCustomers.items,
     customers: persistedAdCustomers.items,

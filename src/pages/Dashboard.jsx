@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Award,
   Calendar,
   CalendarDays,
   ChevronDown,
   Clock3,
+  ExternalLink,
   Filter,
   Gift,
   HeartHandshake,
   LineChart,
+  Loader2,
   Megaphone,
   MessageCircle,
   MessageSquare,
@@ -22,11 +25,13 @@ import {
   Target,
   TimerReset,
   TrendingUp,
-  UserCheck,
+  UserRound,
   Users,
 } from 'lucide-react';
 
 import PageShell from '@/components/layout/PageShell';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { fetchWhatsappHistoryMessages, fetchWhatsappMessages } from '@/lib/whatsapp-api';
 import { cn } from '@/lib/utils';
 
 const days = ['qua', 'qui', 'sex', 'sáb', 'dom', 'seg', 'ter'];
@@ -108,18 +113,21 @@ const dashboards = {
     title: 'Aquisição / Anúncios',
     subtitle: 'Mostra se o investimento em tráfego está trazendo clientes reais ou apenas conversas.',
     cards: [
-      { title: 'Clientes vindos do anúncio', value: '0', subtitle: 'Novos clientes identificados', icon: Users },
-      { title: 'Conversas iniciadas', value: '0', subtitle: 'Conversas vindas dos anúncios', icon: MessageCircle },
-      { title: 'Agendamentos do anúncio', value: '0', subtitle: 'Gerados por mídia paga', icon: CalendarDays },
-      { title: 'CAC por agendamento', value: 'R$ 0,00', subtitle: 'Investimento / agendas', icon: PiggyBank },
-      { title: 'CAC por cliente novo', value: 'R$ 0,00', subtitle: 'Investimento / clientes', icon: UserCheck },
-      { title: 'Anúncio → agendamento', value: '0%', subtitle: 'Conversão do tráfego', icon: TrendingUp },
+      { title: 'Investimento', value: 'R$ 0,00', subtitle: 'Total investido em anúncios', icon: PiggyBank },
+      { title: 'Cliques no anúncio', value: '0', subtitle: 'Total de cliques recebidos', icon: Target },
+      { title: 'Custo por clique (CPC)', value: 'R$ 0,00', subtitle: 'Custo médio por clique', icon: Target },
+      { title: 'Conversas iniciadas', value: '0', subtitle: 'Conversas com início no período', icon: MessageCircle },
+      { title: 'Custo por conversa', value: 'R$ 0,00', subtitle: 'Custo médio por conversa', icon: MessageCircle },
+      { title: 'Agendamentos', value: '0', subtitle: 'Agendamentos realizados', icon: CalendarDays },
+      { title: 'Comparecimentos', value: '0', subtitle: 'Clientes que compareceram', icon: UserRound },
+      { title: 'CAC por agendamento', value: '—', subtitle: 'Sem agendamentos no período', icon: TrendingUp },
+      { title: 'CAC por comparecimento', value: '—', subtitle: 'Sem comparecimentos no período', icon: UserRound },
     ],
     main: {
       title: 'Funil de aquisição',
       description: 'Da conversa no anuncio ao cliente novo.',
       type: 'funnel',
-      labels: ['Conversas', 'Agendamentos', 'Clientes novos'],
+      labels: ['Cliques', 'Conversas', 'Agendamentos', 'Comparecimentos'],
     },
     sideCharts: [],
   },
@@ -658,20 +666,30 @@ function AtendimentoConversionFunnel({ values }) {
 }
 
 function AcquisitionFunnel({ values }) {
+  const clicks = Number(values?.clicks ?? 0);
   const conversations = Number(values?.conversations ?? 0);
   const bookings = Number(values?.appointments ?? 0);
-  const newCustomers = Number(values?.newCustomers ?? 0);
+  const attendances = Number(values?.attendances ?? 0);
   const stages = [
-    { label: 'Conversas', value: conversations, icon: MessageSquare, tone: 'dark', rate: 100 },
-    { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'dark', rate: safeRate(bookings, conversations) },
-    { label: 'Clientes novos', value: newCustomers, icon: UserCheck, tone: 'light', rate: safeRate(newCustomers, conversations) },
+    { label: 'Cliques', value: clicks, icon: Target, tone: 'dark', helper: '100% do início' },
+    { label: 'Conversas', value: conversations, icon: MessageSquare, tone: 'dark', helper: `${formatPercent(safeRate(conversations, clicks))} dos cliques` },
+    { label: 'Agendamentos', value: bookings, icon: CalendarDays, tone: 'light', helper: `${formatPercent(safeRate(bookings, conversations))} das conversas` },
+    { label: 'Comparecimentos', value: attendances, icon: UserRound, tone: 'light', helper: `${formatPercent(safeRate(attendances, bookings))} dos agendamentos` },
   ];
+  const insight = bookings > 0
+    ? `${formatInteger(clicks)} cliques geraram ${formatInteger(conversations)} conversas e ${formatInteger(bookings)} agendamentos no período.`
+    : `${formatInteger(clicks)} cliques geraram ${formatInteger(conversations)} conversas. Nenhuma conversa virou agendamento no período.`;
 
   return (
     <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
-      <div className="mb-3">
-        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">FUNIL DE AQUISIÇÃO</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Conversas iniciadas por anuncio, agendamentos e clientes novos.</p>
+      <div className="mb-3 flex items-start gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Filter className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-sm font-bold text-foreground">Funil de aquisição</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do clique até o comparecimento.</p>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-[#efe5e5] bg-white p-3">
@@ -679,17 +697,20 @@ function AcquisitionFunnel({ values }) {
           {stages.map((stage, index) => {
             const Icon = stage.icon;
             const isFirst = index === 0;
+            const isSecond = index === 1;
             const isLast = index === stages.length - 1;
             return (
-              <div key={stage.label} className={cn('relative min-w-0', !isFirst && '-ml-8')} style={{ zIndex: index + 1, flex: isFirst ? '1.12 1 0' : '1 1 0' }}>
+              <div key={stage.label} className={cn('relative min-w-0', !isFirst && '-ml-5')} style={{ zIndex: index + 1, flex: '1 1 0' }}>
                 <div
-                  className={cn('flex min-h-[136px] items-center px-8 py-7', isLast ? 'text-[#111827]' : 'text-white')}
+                  className={cn('flex min-h-[112px] items-center px-7 py-5', isFirst || isSecond ? 'text-white' : 'text-[#111827]')}
                   style={{
                     background: isFirst
                       ? 'linear-gradient(135deg, #c50015 0%, #db061e 50%, #b30014 100%)'
-                      : isLast
-                        ? 'linear-gradient(90deg, #f3e2e3 0%, #efdddd 100%)'
-                        : 'linear-gradient(90deg, #eb8b90 0%, #e58187 38%, #d87078 100%)',
+                      : isSecond
+                        ? 'linear-gradient(90deg, #ef6b78 0%, #e34a59 100%)'
+                        : isLast
+                          ? 'linear-gradient(90deg, #f3e2e3 0%, #efdddd 100%)'
+                          : 'linear-gradient(90deg, #f2dfe1 0%, #efd6d9 100%)',
                     clipPath: isFirst
                       ? 'polygon(0 0, 90% 0, 96.5% 50%, 90% 100%, 0 100%)'
                       : isLast
@@ -700,10 +721,10 @@ function AcquisitionFunnel({ values }) {
                 >
                   <StageIconBox icon={Icon} tone={stage.tone} />
                   <div>
-                    <div className="text-[15px] font-bold">{stage.label}</div>
+                    <div className="text-[13px] font-bold">{index + 1}. {stage.label}</div>
                     <div className="mt-1 text-[48px] font-bold leading-none tracking-[-0.06em]">{stage.value}</div>
-                    <div className={cn('mt-2 text-[14px] font-semibold', isLast ? 'text-muted-foreground' : 'text-white/95')}>
-                      {formatPercent(stage.rate)} do início
+                    <div className={cn('mt-2 text-[13px] font-semibold', isFirst || isSecond ? 'text-white/95' : 'text-muted-foreground')}>
+                      {stage.helper}
                     </div>
                   </div>
                 </div>
@@ -714,15 +735,18 @@ function AcquisitionFunnel({ values }) {
 
         <div className="space-y-3 lg:hidden">
           {stages.map((stage, index) => (
-            <div key={stage.label} className={cn('rounded-xl p-4', index === stages.length - 1 ? 'bg-primary/10 text-foreground' : 'bg-primary text-white')}>
-              <div className="text-sm font-bold">{stage.label}</div>
+            <div key={stage.label} className={cn('rounded-xl p-4', index >= 2 ? 'bg-primary/10 text-foreground' : 'bg-primary text-white')}>
+              <div className="text-sm font-bold">{index + 1}. {stage.label}</div>
               <div className="mt-1 text-4xl font-bold">{stage.value}</div>
-              <div className={cn('mt-1 text-sm', index === stages.length - 1 ? 'text-muted-foreground' : 'text-white/85')}>
-                {formatPercent(stage.rate)} do início
+              <div className={cn('mt-1 text-sm', index >= 2 ? 'text-muted-foreground' : 'text-white/85')}>
+                {stage.helper}
               </div>
             </div>
           ))}
         </div>
+      </div>
+      <div className="mt-4 rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm font-medium text-foreground">
+        Insight do período: {insight}
       </div>
     </section>
   );
@@ -734,7 +758,92 @@ function formatDashboardDate(value) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function AcquisitionCustomersTable({ items = [] }) {
+const formatDashboardMessageTime = (value) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Sao_Paulo',
+  }).format(date);
+};
+
+function AcquisitionConversationDialog({ customer, open, onClose }) {
+  const conversationId = String(customer?.conversationId || '').trim();
+  const phone = String(customer?.phone || '').trim();
+
+  const messagesQuery = useQuery({
+    queryKey: ['dashboard', 'acquisition-conversation-preview', conversationId, phone],
+    enabled: open && Boolean(conversationId || phone),
+    queryFn: async () => {
+      if (conversationId) {
+        const recentMessages = await fetchWhatsappMessages(conversationId, { tail: 60 });
+        if (recentMessages.length > 0) return recentMessages;
+      }
+      const historyResult = await fetchWhatsappHistoryMessages(
+        { id: conversationId, contact_phone: phone, customer: { phone } },
+        { tail: 60, windowDays: 90 },
+      );
+      return Array.isArray(historyResult?.messages) ? historyResult.messages : [];
+    },
+    staleTime: 15000,
+    refetchOnWindowFocus: false,
+  });
+
+  const messages = Array.isArray(messagesQuery.data) ? messagesQuery.data : [];
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>{customer?.name || 'Cliente'}</DialogTitle>
+          <DialogDescription>{phone ? `Histórico do WhatsApp ${phone}` : 'Histórico do WhatsApp'}</DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-[520px] overflow-y-auto rounded-xl border border-border bg-muted/20 p-3">
+          {messagesQuery.isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Carregando conversa...
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">Nenhuma mensagem encontrada para este cliente.</div>
+          ) : (
+            <div className="space-y-2">
+              {messages.map((message) => {
+                const type = String(message.sender_type || message.type || message.direction || '').toLowerCase();
+                const isClient = type === 'client' || type === 'incoming' || message.fromMe === false || message.from_me === false;
+                const content = message.content || message.text || message.body || `[${message.message_type || message.messageType || 'mensagem'}]`;
+                return (
+                  <div key={message.id || message.message_key || `${message.created_date}-${content}`} className={cn('flex', isClient ? 'justify-start' : 'justify-end')}>
+                    <div className={cn('max-w-[82%] rounded-lg border px-3 py-2 text-sm shadow-sm', isClient ? 'border-border bg-background text-foreground' : 'border-primary/20 bg-primary/10 text-foreground')}>
+                      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+                        <span>{isClient ? 'Cliente' : message.sender_name || message.senderName || 'Atendimento'}</span>
+                        <span>{formatDashboardMessageTime(message.created_date || message.created_at || message.timestamp)}</span>
+                      </div>
+                      <p className="whitespace-pre-wrap break-words leading-relaxed">{content}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <button type="button" onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm font-medium hover:bg-muted">
+            Fechar
+          </button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
   const [periodDays, setPeriodDays] = useState('30');
@@ -814,6 +923,7 @@ function AcquisitionCustomersTable({ items = [] }) {
                 <th className="px-4 py-3 font-bold">Etapa</th>
                 <th className="px-4 py-3 font-bold">Primeira conversa</th>
                 <th className="px-4 py-3 font-bold">Dados possíveis</th>
+                <th className="px-4 py-3 font-bold">Conversa</th>
               </tr>
             </thead>
             <tbody>
@@ -845,11 +955,21 @@ function AcquisitionCustomersTable({ items = [] }) {
                         <div>Agendamento: {formatDashboardDate(item.appointmentAt || item.resolvedAt)}</div>
                       </div>
                     </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => onPreviewConversation?.(item)}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-foreground transition-colors hover:bg-muted"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Ver
+                      </button>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
                     Nenhum cliente de anuncio encontrado para os filtros.
                   </td>
                 </tr>
@@ -1012,6 +1132,7 @@ export default function Dashboard() {
   const [followUpMetrics, setFollowUpMetrics] = useState(null);
   const [baseMetrics, setBaseMetrics] = useState(null);
   const [experienceMetrics, setExperienceMetrics] = useState(null);
+  const [acquisitionConversationPreview, setAcquisitionConversationPreview] = useState(null);
   const current = dashboards[activeDashboard];
   const currentMain = useMemo(() => current.main, [current]);
 
@@ -1144,23 +1265,34 @@ export default function Dashboard() {
     if (activeDashboard === 'aquisicao') {
       const metrics = acquisitionMetrics?.cards || {};
       return current.cards.map((card) => {
-        if (card.title === 'Clientes vindos do anúncio') {
-          return { ...card, value: formatInteger(metrics.adCustomers), subtitle: 'Vieram de anúncio e entraram na base' };
+        if (card.title === 'Investimento') {
+          return { ...card, value: formatCurrency(metrics.investment), subtitle: 'Total investido em anúncios' };
+        }
+        if (card.title === 'Cliques no anúncio') {
+          return { ...card, value: formatInteger(metrics.clicks), subtitle: 'Total de cliques recebidos' };
+        }
+        if (card.title === 'Custo por clique (CPC)') {
+          return { ...card, value: formatCurrency(metrics.costPerClick), subtitle: 'Custo médio por clique' };
         }
         if (card.title === 'Conversas iniciadas') {
-          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Conversas identificadas por anúncio' };
+          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Conversas com início no período' };
         }
-        if (card.title === 'Agendamentos do anúncio') {
-          return { ...card, value: formatInteger(metrics.adAppointments), subtitle: 'Agendados ou realizados' };
+        if (card.title === 'Custo por conversa') {
+          return { ...card, value: formatCurrency(metrics.costPerConversation), subtitle: 'Custo médio por conversa' };
+        }
+        if (card.title === 'Agendamentos') {
+          return { ...card, value: formatInteger(metrics.scheduledAppointments), subtitle: 'Agendamentos realizados' };
+        }
+        if (card.title === 'Comparecimentos') {
+          return { ...card, value: formatInteger(metrics.attendances), subtitle: 'Clientes que compareceram' };
         }
         if (card.title === 'CAC por agendamento') {
-          return { ...card, value: formatCurrency(metrics.costPerAppointment ?? metrics.cacPerAppointment), subtitle: 'Spend / agendamentos' };
+          const hasValue = Number(metrics.scheduledAppointments || 0) > 0;
+          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAppointment) : '—', subtitle: hasValue ? 'Investimento / agendamentos' : 'Sem agendamentos no período' };
         }
-        if (card.title === 'CAC por cliente novo') {
-          return { ...card, value: formatCurrency(metrics.costPerNewCustomer ?? metrics.cacPerNewCustomer), subtitle: 'Spend / clientes novos' };
-        }
-        if (card.title === 'Anúncio → agendamento') {
-          return { ...card, value: formatPercentCard(metrics.adToAppointmentRate), subtitle: 'Agendamentos / conversas' };
+        if (card.title === 'CAC por comparecimento') {
+          const hasValue = Number(metrics.attendances || 0) > 0;
+          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAttendance) : '—', subtitle: hasValue ? 'Investimento / comparecimentos' : 'Sem comparecimentos no período' };
         }
         return card;
       });
@@ -1304,9 +1436,10 @@ export default function Dashboard() {
   const acquisitionFunnelValues = useMemo(() => {
     if (activeDashboard !== 'aquisicao') return null;
     return {
+      clicks: acquisitionMetrics?.funnel?.clicks ?? 0,
       conversations: acquisitionMetrics?.funnel?.conversations ?? 0,
       appointments: acquisitionMetrics?.funnel?.appointments ?? 0,
-      newCustomers: acquisitionMetrics?.funnel?.newCustomers ?? 0,
+      attendances: acquisitionMetrics?.funnel?.attendances ?? 0,
     };
   }, [activeDashboard, acquisitionMetrics]);
 
@@ -1502,7 +1635,10 @@ export default function Dashboard() {
       ) : activeDashboard === 'aquisicao' ? (
         <>
           <AcquisitionFunnel values={acquisitionFunnelValues} />
-          <AcquisitionCustomersTable items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []} />
+          <AcquisitionCustomersTable
+            items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []}
+            onPreviewConversation={setAcquisitionConversationPreview}
+          />
         </>
       ) : (
         <ChartCard
@@ -1522,7 +1658,12 @@ export default function Dashboard() {
           ))}
         </div>
       ) : null}
+
+      <AcquisitionConversationDialog
+        customer={acquisitionConversationPreview}
+        open={Boolean(acquisitionConversationPreview)}
+        onClose={() => setAcquisitionConversationPreview(null)}
+      />
     </PageShell>
   );
 }
-
