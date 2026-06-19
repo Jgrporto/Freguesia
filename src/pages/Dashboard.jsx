@@ -276,7 +276,7 @@ const getCurrentMonthDateRange = () => {
 
 const getAllDateRange = () => ({
   start: '2000-01-01',
-  end: '2099-12-31',
+  end: toDateInputValue(new Date()),
 });
 
 const dashboardDatePresets = [

@@ -8772,6 +8772,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
   const selectedRule = normalizeDashboardText(filters.rule || "");
   const selectedTemplate = normalizeDashboardText(filters.template || "");
+  const allowSummaryFallback = filters.allowSummaryFallback !== false;
   const matchesSelectedFilter = (selected, candidates = []) => {
     if (!selected || selected === "all" || selected === "todos" || selected === "todas") return true;
     return candidates.map(normalizeDashboardText).filter(Boolean).some((candidate) => candidate === selected);
@@ -8882,7 +8883,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     })
     .filter((item) => item && item.phone && Number.isFinite(item.sentAtMs));
 
-  const summarySent = selectedTemplate ? 0 : periodLogs.reduce((total, entry) => {
+  const summarySent = selectedTemplate || !allowSummaryFallback ? 0 : periodLogs.reduce((total, entry) => {
     if (entry?.summary && Number.isFinite(Number(entry.summary.sent))) return total + Number(entry.summary.sent || 0);
     return total;
   }, 0);
@@ -35080,6 +35081,7 @@ const server = http.createServer(async (req, res) => {
         filters: {
           rule: url.searchParams.get("rule") || "",
           template: url.searchParams.get("template") || "",
+          allowSummaryFallback: !hasViewFilters,
         },
       });
       if (!hasViewFilters && persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
