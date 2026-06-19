@@ -17,7 +17,6 @@ import {
   MessageSquare,
   PiggyBank,
   Repeat2,
-  RotateCcw,
   Scissors,
   Send,
   Sparkles,
@@ -370,13 +369,13 @@ function DashboardBrowserTabs({ activeTab, onChange }) {
 
 function DashboardStatCard({ title, value, subtitle, icon: Icon }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
-      <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+    <div className="group rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition-shadow hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)]">
+      <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10">
         <Icon className="h-5 w-5" />
       </div>
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      <div className="mt-2 text-3xl font-bold tracking-[-0.04em] text-foreground">{value}</div>
-      <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+      <p className="text-sm font-bold text-foreground">{title}</p>
+      <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-foreground">{value}</div>
+      <p className="mt-2 min-h-8 text-xs leading-relaxed text-muted-foreground">{subtitle}</p>
     </div>
   );
 }
@@ -550,33 +549,6 @@ function EmptyGauge({ value = 0 }) {
   );
 }
 
-function MetricTrend({ title, value, trend }) {
-  return (
-    <div className="px-8 py-4 text-left">
-      <div className="text-sm text-muted-foreground">{title}</div>
-      <div className="mt-1 flex items-center gap-3">
-        <span className="text-[16px] font-bold tracking-[-0.02em] text-foreground">{value}</span>
-        <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-emerald-500">
-          <TrendingUp className="h-3.5 w-3.5" />
-          {trend}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function LossBubble({ value, percent, leftClassName }) {
-  return (
-    <div className={cn('absolute top-1/2 z-20 hidden h-[88px] w-[88px] -translate-y-1/2 place-items-center rounded-full bg-white text-center shadow-[0_10px_25px_rgba(15,23,42,0.14)] ring-1 ring-[#ede5e5] lg:grid', leftClassName)}>
-      <div className="px-2 leading-tight">
-        <div className="text-[11px] font-medium text-muted-foreground">Perda</div>
-        <div className="mt-1 text-[18px] font-bold tracking-[-0.03em] text-foreground">{value}</div>
-        <div className="mt-1 text-[11px] text-muted-foreground">{percent}</div>
-      </div>
-    </div>
-  );
-}
-
 function StageIconBox({ icon: Icon, tone = 'light' }) {
   return (
     <div className={cn('mr-6 flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-2xl', tone === 'dark' ? 'bg-white/12 text-white' : 'bg-[#eed6d7] text-[#8b6a6c]')}>
@@ -585,81 +557,74 @@ function StageIconBox({ icon: Icon, tone = 'light' }) {
   );
 }
 
+function MiniFunnelStep({ stage, index, total }) {
+  const Icon = stage.icon;
+  const pct = stage.base > 0 ? safeRate(stage.value, stage.base) : 0;
+  const strokeDasharray = `${Math.max(0, Math.min(100, pct))} ${Math.max(0, 100 - pct)}`;
+  return (
+    <div className="relative flex min-w-0 flex-1 flex-col items-center rounded-2xl border border-border/70 bg-card px-4 py-5 text-center">
+      <div className="mb-3 text-xs font-black uppercase tracking-[0.12em] text-muted-foreground">{index + 1}. {stage.label}</div>
+      <div className="relative grid h-32 w-32 place-items-center">
+        <svg className="absolute inset-0 h-full w-full -rotate-90" viewBox="0 0 36 36" aria-hidden="true">
+          <circle cx="18" cy="18" r="15.5" fill="none" stroke="hsl(var(--primary) / 0.14)" strokeWidth="3.5" />
+          <circle
+            cx="18"
+            cy="18"
+            r="15.5"
+            fill="none"
+            stroke={index === total - 1 ? 'hsl(var(--primary))' : 'hsl(var(--primary) / 0.32)'}
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            pathLength="100"
+            strokeDasharray={strokeDasharray}
+          />
+        </svg>
+        <div className="relative text-center">
+          <Icon className="mx-auto mb-2 h-5 w-5 text-primary" />
+          <div className="text-3xl font-black tracking-[-0.05em] text-foreground">{formatInteger(stage.value)}</div>
+          <div className="mt-1 text-xs font-bold text-muted-foreground">{formatPercent(pct)}</div>
+        </div>
+      </div>
+      {stage.loss != null ? (
+        <div className="mt-4 rounded-xl bg-primary/5 px-3 py-2 text-xs font-semibold text-muted-foreground">
+          <span className="text-primary">-{formatInteger(stage.loss)}</span> perdas
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function AtendimentoConversionFunnel({ values }) {
   const conversations = Number(values?.conversations ?? 0);
+  const responded = Number(values?.responded ?? values?.answeredConversations ?? conversations);
+  const appointments = Number(values?.appointments ?? 0);
   const conversions = Number(values?.conversions ?? 0);
 
-  const loss = Math.max(conversations - conversions, 0);
-  const rateFinal = safeRate(conversions, conversations);
-  const lossRate = safeRate(loss, conversations);
+  const stages = [
+    { label: 'Conversas', value: conversations, base: conversations, icon: MessageSquare },
+    { label: 'Respondidas', value: responded, base: conversations, icon: MessageCircle, loss: Math.max(conversations - responded, 0) },
+    { label: 'Agendamentos', value: appointments, base: conversations, icon: CalendarDays, loss: Math.max(responded - appointments, 0) },
+    { label: 'Cortes realizados', value: conversions, base: conversations, icon: Scissors, loss: Math.max(appointments - conversions, 0) },
+  ];
+  const finalRate = safeRate(conversions, conversations);
+  const biggestLoss = [
+    { label: 'Conversas e Respondidas', loss: Math.max(conversations - responded, 0) },
+    { label: 'Respondidas e Agendamentos', loss: Math.max(responded - appointments, 0) },
+    { label: 'Agendamentos e Cortes', loss: Math.max(appointments - conversions, 0) },
+  ].sort((a, b) => b.loss - a.loss)[0];
 
   return (
-    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)] lg:p-4.5">
-      <div className="mb-3">
-        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">FUNIL DE CONVERSÃO</h3>
+    <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
+      <div className="mb-5">
+        <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Funil de conversão</h3>
         <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.</p>
       </div>
-
-      <div className="rounded-2xl border border-[#efe5e5] bg-white p-3">
-        <div className="relative hidden overflow-visible rounded-2xl lg:flex">
-          <div className="relative z-[1] w-[56%]">
-            <div
-              className="flex min-h-[136px] items-center px-10 py-7 text-white"
-              style={{
-                background: 'linear-gradient(135deg, #c50015 0%, #db061e 50%, #b30014 100%)',
-                clipPath: 'polygon(0 0, 90% 0, 96.5% 50%, 90% 100%, 0 100%)',
-                borderRadius: '16px 0 0 16px',
-              }}
-            >
-              <StageIconBox icon={MessageSquare} tone="dark" />
-              <div>
-                <div className="text-[15px] font-bold">Conversas</div>
-                <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em]">{conversations}</div>
-                <div className="mt-2 text-[15px] font-semibold text-white/95">100% do total</div>
-              </div>
-            </div>
-          </div>
-
-          <LossBubble value={loss} percent={formatPercent(lossRate)} leftClassName="left-[48%]" />
-
-          <div className="relative z-[2] -ml-8 w-[48%]">
-            <div
-              className="flex min-h-[136px] items-center px-10 py-7 text-foreground"
-              style={{
-                background: 'linear-gradient(90deg, #f3e2e3 0%, #efdddd 100%)',
-                clipPath: 'polygon(8% 0, 100% 0, 100% 100%, 8% 100%, 0 50%)',
-                borderRadius: '0 16px 16px 0',
-              }}
-            >
-              <StageIconBox icon={Scissors} tone="light" />
-              <div>
-                <div className="text-[15px] font-bold text-foreground">Cortes realizados</div>
-                <div className="mt-1 text-[58px] font-bold leading-none tracking-[-0.06em] text-foreground">{conversions}</div>
-                <div className="mt-2 text-[15px] font-semibold text-muted-foreground">Conversão: {formatPercent(rateFinal)}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 lg:hidden">
-          <div className="rounded-xl bg-primary p-4 text-white">
-            <div className="text-sm font-bold">Conversas</div>
-            <div className="mt-1 text-4xl font-bold">{conversations}</div>
-            <div className="mt-1 text-sm text-white/85">100% do total</div>
-          </div>
-          <div className="rounded-xl bg-primary/10 p-4 text-foreground">
-            <div className="text-sm font-bold">Cortes realizados</div>
-            <div className="mt-1 text-4xl font-bold">{conversions}</div>
-            <div className="mt-1 text-sm text-muted-foreground">Conversão: {formatPercent(rateFinal)}</div>
-          </div>
-        </div>
+      <div className="grid gap-4 lg:grid-cols-4">
+        {stages.map((stage, index) => <MiniFunnelStep key={stage.label} stage={stage} index={index} total={stages.length} />)}
       </div>
-
-      <div className="mt-3 grid overflow-hidden rounded-xl border border-[#ece7e7] bg-white lg:grid-cols-2">
-        <MetricTrend title="Cortes realizados" value={formatInteger(conversions)} trend={`${formatPercent(rateFinal)} das conversas`} />
-        <div className="border-t border-[#ece7e7] lg:border-l lg:border-t-0">
-          <MetricTrend title="Conversas sem corte" value={formatInteger(loss)} trend={`${formatPercent(lossRate)} das conversas`} />
-        </div>
+      <div className="mt-5 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground">
+        <span className="font-black text-primary">Insight:</span> {formatPercent(finalRate)} das conversas viraram cortes.
+        {biggestLoss?.loss > 0 ? ` O maior ponto de perda está entre ${biggestLoss.label}.` : ' Ainda não há perdas relevantes no período.'}
       </div>
     </section>
   );
@@ -1058,81 +1023,197 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
   );
 }
 
-function DashboardFilters({
-  open,
-  onOpenChange,
-  startDate,
-  endDate,
-  onDateRangeChange,
-}) {
+const dashboardFilterMeta = {
+  atendimento: [
+    { label: 'Atendente', value: 'Todos', icon: UserRound },
+    { label: 'Serviço', value: 'Todos', icon: Scissors },
+  ],
+  aquisicao: [
+    { label: 'Campanha', value: 'Todas', icon: Megaphone },
+    { label: 'Origem', value: 'Todas', icon: Target },
+  ],
+  followup: [
+    { label: 'Régua', value: 'Todas', icon: Filter },
+    { label: 'Template', value: 'Todos', icon: Send },
+  ],
+  base: [
+    { label: 'Serviço', value: 'Todos', icon: Scissors },
+    { label: 'Profissional', value: 'Todos', icon: UserRound },
+  ],
+  experiencia: [
+    { label: 'Tipo de cliente', value: 'Todos', icon: Users },
+    { label: 'Campanha', value: 'Todas', icon: Target },
+  ],
+};
+
+function CompactFilterSelect({ label, value, icon: Icon, children, onChange }) {
+  return (
+    <label className="flex min-w-[190px] items-center gap-3 rounded-xl border border-border/80 bg-background px-3 py-2.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)]">
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[11px] font-semibold text-muted-foreground">{label}</span>
+        {children ? (
+          <select value={value} onChange={onChange} className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm font-bold text-foreground outline-none">
+            {children}
+          </select>
+        ) : (
+          <span className="mt-0.5 block truncate text-sm font-bold text-foreground">{value}</span>
+        )}
+      </span>
+      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+    </label>
+  );
+}
+
+function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChange }) {
   const activePreset = dashboardDatePresets.find((preset) => {
     const range = preset.getRange();
     return range.start === startDate && range.end === endDate;
   })?.id || 'custom';
+  const meta = dashboardFilterMeta[activeDashboard] || dashboardFilterMeta.atendimento;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border/80 bg-card/95 shadow-[0_10px_34px_rgba(15,23,42,0.06)]">
-      <button
-        type="button"
-        className={cn(
-          'flex min-h-[74px] w-full items-center justify-between gap-4 px-5 text-left transition-colors hover:bg-muted/40',
-          open && 'border-b border-border/80',
-        )}
-        onClick={() => onOpenChange(!open)}
-        aria-expanded={open}
-      >
-        <span className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-2xl bg-primary/10 text-primary">
-            <Filter className="h-5 w-5" />
-          </span>
-          <span className="text-[15px] font-black uppercase tracking-[0.18em] text-foreground">Filtros</span>
-        </span>
-        <ChevronDown className={cn('h-5 w-5 text-muted-foreground transition-transform', open && 'rotate-180')} />
-      </button>
-
-      {open ? (
-        <div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_auto] lg:items-end">
-          <div>
-            <div className="mb-2 text-xs font-semibold text-muted-foreground">Pre filtros</div>
-            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-              {dashboardDatePresets.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => onDateRangeChange(preset.getRange())}
-                  className={cn(
-                    'h-11 rounded-xl border px-4 text-sm font-semibold transition-colors',
-                    activePreset === preset.id
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-background text-foreground hover:bg-muted',
-                  )}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-xs font-semibold text-muted-foreground">Periodo</div>
-            <DateFilter
-              startDate={startDate}
-              endDate={endDate}
-              onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
-              onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onDateRangeChange(getDefaultDateRange())}
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-5 text-sm font-bold text-foreground transition-colors hover:bg-muted"
+    <section className="rounded-2xl border border-border/80 bg-card/95 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <CompactFilterSelect
+            label="Período"
+            value={activePreset}
+            icon={Calendar}
+            onChange={(event) => {
+              const preset = dashboardDatePresets.find((item) => item.id === event.target.value);
+              if (preset) onDateRangeChange(preset.getRange());
+            }}
           >
-            <RotateCcw className="h-4 w-4" />
-            Limpar filtros
-          </button>
+            {dashboardDatePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+            <option value="custom">Personalizado</option>
+          </CompactFilterSelect>
+          {meta.map((item) => <CompactFilterSelect key={item.label} {...item} />)}
+          {activePreset === 'custom' ? (
+            <div className="flex flex-wrap gap-2">
+              <DateFilter
+                startDate={startDate}
+                endDate={endDate}
+                onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
+                onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
+              />
+            </div>
+          ) : null}
         </div>
-      ) : null}
+        <button
+          type="button"
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-border/80 bg-background px-5 text-sm font-black text-foreground shadow-[0_2px_10px_rgba(15,23,42,0.03)] transition-colors hover:bg-muted/60"
+        >
+          <ExternalLink className="h-4 w-4" />
+          Exportar relatório
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function aggregateAgentConversionRows(items = []) {
+  const rows = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const rawName = String(item?.name || '').trim();
+    const normalized = rawName
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .toLowerCase();
+    if (!normalized || normalized === 'sem atendente') return;
+    const key = normalized;
+    const current = rows.get(key) || { ...item, name: rawName, appointments: 0, conversations: 0 };
+    current.appointments += Number(item?.appointments || 0);
+    current.conversations += Number(item?.conversations || 0);
+    rows.set(key, current);
+  });
+  return Array.from(rows.values())
+    .map((item) => ({ ...item, conversionRate: item.conversations > 0 ? item.appointments / item.conversations : 0 }))
+    .sort((left, right) => right.appointments - left.appointments || left.name.localeCompare(right.name));
+}
+
+function CampaignPerformanceCard({ ads = [], fallbackMetrics = {} }) {
+  const rows = (Array.isArray(ads) ? ads : []).slice(0, 4).map((ad, index) => {
+    const label = ad.adName || ad.campaignName || ad.keyword || `Campanha ${index + 1}`;
+    return {
+      label,
+      investment: Number(ad.spend || ad.investment || 0),
+      conversations: Number(ad.localConversations || ad.conversations || 0),
+      cost: Number(ad.localConversations || ad.conversations || 0) > 0 ? Number(ad.spend || ad.investment || 0) / Number(ad.localConversations || ad.conversations || 0) : 0,
+    };
+  });
+  const finalRows = rows.length ? rows : [{ label: 'Campanha do período', investment: Number(fallbackMetrics.investment || 0), conversations: Number(fallbackMetrics.conversationsStarted || 0), cost: Number(fallbackMetrics.costPerConversation || 0) }];
+  const maxValue = Math.max(1, ...finalRows.flatMap((row) => [row.investment, row.conversations, row.cost]));
+
+  return (
+    <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
+      <div className="mb-5">
+        <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Performance por campanha</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Veja o desempenho financeiro e de conversão das campanhas.</p>
+      </div>
+      <div className="mb-4 flex flex-wrap gap-4 text-xs font-semibold text-muted-foreground">
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-primary" />Investimento</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-primary/35" />Conversas</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-foreground" />Custo/conversa</span>
+      </div>
+      <div className="flex h-[250px] items-end gap-5 rounded-2xl bg-muted/20 px-4 pb-5 pt-8">
+        {finalRows.map((row) => (
+          <div key={row.label} className="flex min-w-0 flex-1 flex-col items-center gap-3">
+            <div className="flex h-40 w-full items-end justify-center gap-1.5">
+              <div className="w-5 rounded-t-lg bg-primary" style={{ height: `${Math.max(2, (row.investment / maxValue) * 100)}%` }} />
+              <div className="w-5 rounded-t-lg bg-primary/35" style={{ height: `${Math.max(2, (row.conversations / maxValue) * 100)}%` }} />
+              <div className="w-1.5 rounded-t-lg bg-foreground" style={{ height: `${Math.max(2, (row.cost / maxValue) * 100)}%` }} />
+            </div>
+            <div className="line-clamp-2 text-center text-[11px] font-bold uppercase leading-tight text-muted-foreground" title={row.label}>{row.label}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FollowUpRulePerformanceCard({ items = [] }) {
+  const rows = (Array.isArray(items) ? items : []).slice(0, 4);
+  const fallback = [
+    { routineName: 'D+20', sent: 0, responses: 0, responseRate: 0, recovered: 0 },
+    { routineName: 'D+30', sent: 0, responses: 0, responseRate: 0, recovered: 0 },
+    { routineName: 'D+40', sent: 0, responses: 0, responseRate: 0, recovered: 0 },
+    { routineName: 'D+50', sent: 0, responses: 0, responseRate: 0, recovered: 0 },
+  ];
+  const data = rows.length ? rows : fallback;
+  const maxSent = Math.max(1, ...data.map((row) => Number(row.sent || 0)));
+  const maxResponses = Math.max(1, ...data.map((row) => Number(row.responses || 0)));
+
+  return (
+    <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
+      <div className="mb-5">
+        <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Performance por régua</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Compare o desempenho das réguas de follow-up.</p>
+      </div>
+      <div className="space-y-4">
+        {data.map((row) => {
+          const label = row.routineName || row.templateName || 'Sem régua';
+          const sent = Number(row.sent || 0);
+          const responses = Number(row.responses || 0);
+          const rate = Number(row.responseRate || 0);
+          const recovered = Number(row.recovered || 0);
+          return (
+            <div key={label} className="grid grid-cols-[72px_minmax(0,1fr)_minmax(0,1fr)_72px] items-center gap-3 text-xs">
+              <div className="truncate font-black text-foreground" title={label}>{label}</div>
+              <div>
+                <div className="mb-1 flex justify-between text-muted-foreground"><span>Disparos</span><span>{formatInteger(sent)}</span></div>
+                <div className="h-2.5 rounded-full bg-primary/10"><div className="h-2.5 rounded-full bg-primary" style={{ width: `${Math.max(0, (sent / maxSent) * 100)}%` }} /></div>
+              </div>
+              <div>
+                <div className="mb-1 flex justify-between text-muted-foreground"><span>Respostas</span><span>{formatInteger(responses)}</span></div>
+                <div className="h-2.5 rounded-full bg-primary/10"><div className="h-2.5 rounded-full bg-primary/55" style={{ width: `${Math.max(0, (responses / maxResponses) * 100)}%` }} /></div>
+              </div>
+              <div className="text-right"><div className="font-black text-foreground">{formatPercent(rate * 100)}</div><div className="text-muted-foreground">{formatInteger(recovered)} rec.</div></div>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -1140,7 +1221,6 @@ function DashboardFilters({
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
   const [{ start, end }, setDateRange] = useState(() => getDefaultDateRange());
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [attendanceMetrics, setAttendanceMetrics] = useState(null);
   const [acquisitionMetrics, setAcquisitionMetrics] = useState(null);
   const [followUpMetrics, setFollowUpMetrics] = useState(null);
@@ -1443,6 +1523,8 @@ export default function Dashboard() {
     return {
       ...currentMain.values,
       conversations: attendanceMetrics?.funnel?.conversations ?? 0,
+      responded: attendanceMetrics?.attendance?.answeredConversations ?? 0,
+      appointments: attendanceMetrics?.funnel?.appointments ?? 0,
       conversions: attendanceMetrics?.funnel?.conversions ?? 0,
     };
   }, [activeDashboard, attendanceMetrics, currentMain.values]);
@@ -1501,12 +1583,7 @@ export default function Dashboard() {
 
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
-      const byAgent = Array.isArray(attendanceMetrics?.byAgent)
-        ? attendanceMetrics.byAgent.filter((item) => {
-            const name = String(item?.name || '').trim().toLowerCase();
-            return name && name !== 'sem atendente';
-          })
-        : [];
+      const byAgent = aggregateAgentConversionRows(attendanceMetrics?.byAgent || []);
       const byDay = Array.isArray(attendanceMetrics?.byDay) ? attendanceMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Conversão por atendente') {
@@ -1526,6 +1603,7 @@ export default function Dashboard() {
             secondValues: byDay.length ? byDay.map((item) => item.tmrSeconds || 0) : [],
             firstLegend: '1ª resposta média',
             secondLegend: 'TMR',
+            valueFormatter: formatDurationSeconds,
           };
         }
         return chart;
@@ -1638,8 +1716,7 @@ export default function Dashboard() {
       </section>
 
       <DashboardFilters
-        open={filtersOpen}
-        onOpenChange={setFiltersOpen}
+        activeDashboard={activeDashboard}
         startDate={start}
         endDate={end}
         onDateRangeChange={(nextRange) => setDateRange((currentRange) => ({ ...currentRange, ...nextRange }))}
@@ -1651,36 +1728,53 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {currentMain.type === 'atendimentoFunnel' ? (
-        <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
-      ) : activeDashboard === 'followup' ? (
-        <AcquisitionFunnel values={mainChartProps.values} mode="followup" />
+      {activeDashboard === 'atendimento' ? (
+        <>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
+            <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
+            {displaySideCharts[0] ? <ChartCard {...displaySideCharts[0]} className="min-h-[360px]" /> : null}
+          </div>
+          {displaySideCharts[1] ? <ChartCard {...displaySideCharts[1]} className="min-h-[300px]" /> : null}
+        </>
       ) : activeDashboard === 'aquisicao' ? (
         <>
           <AcquisitionFunnel values={acquisitionFunnelValues} />
-          <AcquisitionCustomersTable
-            items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []}
-            onPreviewConversation={setAcquisitionConversationPreview}
-          />
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(560px,1.1fr)]">
+            <CampaignPerformanceCard ads={acquisitionMetrics?.ads || acquisitionMetrics?.byKeyword || []} fallbackMetrics={acquisitionMetrics?.cards || {}} />
+            <AcquisitionCustomersTable
+              items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []}
+              onPreviewConversation={setAcquisitionConversationPreview}
+            />
+          </div>
+        </>
+      ) : activeDashboard === 'followup' ? (
+        <>
+          <AcquisitionFunnel values={mainChartProps.values} mode="followup" />
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <FollowUpRulePerformanceCard items={followUpMetrics?.byTemplate || []} />
+            {displaySideCharts[0] ? <ChartCard {...displaySideCharts[0]} /> : null}
+          </div>
+          {displaySideCharts[1] ? <ChartCard {...displaySideCharts[1]} className="min-h-[300px]" /> : null}
         </>
       ) : (
-        <ChartCard
-          title={mainChartProps.title}
-          description={mainChartProps.description}
-          type={mainChartProps.type}
-          labels={mainChartProps.labels}
-          values={mainChartProps.values}
-          className="min-h-[260px]"
-        />
+        <>
+          <ChartCard
+            title={mainChartProps.title}
+            description={mainChartProps.description}
+            type={mainChartProps.type}
+            labels={mainChartProps.labels}
+            values={mainChartProps.values}
+            className="min-h-[260px]"
+          />
+          {displaySideCharts.length ? (
+            <div className={cn('grid grid-cols-1 gap-4', displaySideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
+              {displaySideCharts.map((chart) => (
+                <ChartCard key={chart.title} {...chart} />
+              ))}
+            </div>
+          ) : null}
+        </>
       )}
-
-      {displaySideCharts.length ? (
-        <div className={cn('grid grid-cols-1 gap-4', activeDashboard === 'followup' ? 'xl:grid-cols-3' : displaySideCharts.length === 2 ? 'xl:grid-cols-2' : 'xl:grid-cols-3')}>
-          {displaySideCharts.map((chart) => (
-            <ChartCard key={chart.title} {...chart} />
-          ))}
-        </div>
-      ) : null}
 
       <AcquisitionConversationDialog
         customer={acquisitionConversationPreview}
