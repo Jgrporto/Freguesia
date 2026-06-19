@@ -114,8 +114,8 @@ const dashboards = {
     subtitle: 'Mostra se o investimento em tráfego está trazendo clientes reais ou apenas conversas.',
     cards: [
       { title: 'Investimento', value: 'R$ 0,00', subtitle: 'Total investido em anúncios', icon: PiggyBank },
-      { title: 'Cliques no anúncio', value: '0', subtitle: 'Total de cliques recebidos', icon: Target },
-      { title: 'Custo por clique (CPC)', value: 'R$ 0,00', subtitle: 'Custo médio por clique', icon: Target },
+      { title: 'Cliques no anúncio', value: '0', subtitle: 'Conversas por mensagem', icon: Target },
+      { title: 'Custo por clique (CPC)', value: 'R$ 0,00', subtitle: 'Investimento / conversas por mensagem', icon: Target },
       { title: 'Conversas iniciadas', value: '0', subtitle: 'Conversas com início no período', icon: MessageCircle },
       { title: 'Custo por conversa', value: 'R$ 0,00', subtitle: 'Custo médio por conversa', icon: MessageCircle },
       { title: 'Agendamentos', value: '0', subtitle: 'Agendamentos realizados', icon: CalendarDays },
@@ -1269,10 +1269,10 @@ export default function Dashboard() {
           return { ...card, value: formatCurrency(metrics.investment), subtitle: 'Total investido em anúncios' };
         }
         if (card.title === 'Cliques no anúncio') {
-          return { ...card, value: formatInteger(metrics.clicks), subtitle: 'Total de cliques recebidos' };
+          return { ...card, value: formatInteger(metrics.clicks), subtitle: 'Conversas por mensagem' };
         }
         if (card.title === 'Custo por clique (CPC)') {
-          return { ...card, value: formatCurrency(metrics.costPerClick), subtitle: 'Custo médio por clique' };
+          return { ...card, value: formatCurrency(metrics.costPerClick), subtitle: 'Investimento / conversas por mensagem' };
         }
         if (card.title === 'Conversas iniciadas') {
           return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Conversas com início no período' };

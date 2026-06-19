@@ -8494,7 +8494,7 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   const persistedAttendances = persistedAdCustomers.items.filter((item) => item.firstAttendedAt || item.resolvedAt);
   const scheduledCount = new Set(persistedAppointments.map((item) => item.phone).filter(Boolean)).size;
   const attendedCount = new Set(persistedAttendances.map((item) => item.phone).filter(Boolean)).size;
-  const clicks = Number(meta.linkClicks || meta.inlineLinkClicks || meta.clicks || 0) || 0;
+  const clicks = Number(meta.messagingConversationStarted7d || 0) || 0;
 
   return {
     period: {
