@@ -8750,12 +8750,27 @@ const normalizeFollowUpDashboardFact = (value = {}) => {
   };
 };
 
-const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {} } = {}) => {
+const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {}, filters = {} } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
-  const configuredRoutines = resolveConfiguredFollowUpRoutines(operationStore, dashboardSettings);
+  const selectedRule = normalizeDashboardText(filters.rule || "");
+  const selectedTemplate = normalizeDashboardText(filters.template || "");
+  const matchesSelectedFilter = (selected, candidates = []) => {
+    if (!selected || selected === "all" || selected === "todos" || selected === "todas") return true;
+    return candidates.map(normalizeDashboardText).filter(Boolean).some((candidate) => candidate === selected);
+  };
+  const configuredRoutines = resolveConfiguredFollowUpRoutines(operationStore, dashboardSettings)
+    .filter((routine) =>
+      matchesSelectedFilter(selectedRule, [
+        routine?.id,
+        routine?.name,
+        routine?.title,
+        routine?.templateName,
+        routine?.hsm?.templateName,
+      ]),
+    );
   const configuredRoutineIds = new Set(configuredRoutines.map((routine) => String(routine?.id || "").trim()).filter(Boolean));
   const configuredRoutineNames = new Set(configuredRoutines.map((routine) => normalizeDashboardText(routine?.name)).filter(Boolean));
   const configuredById = new Map(configuredRoutines.map((routine) => [String(routine?.id || "").trim(), routine]).filter(([id]) => id));
@@ -8841,6 +8856,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
       const routine = resolveRoutineForLog(entry) || {};
       const row = buildRoutineRow(routine, entry);
+      if (!matchesSelectedFilter(selectedTemplate, [row.templateName, details.templateName, details.quickReplyTitle])) return null;
       if (!routineRows.has(row.routineId)) routineRows.set(row.routineId, row);
       return {
         entry,
@@ -8849,9 +8865,9 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
         sentAtMs: Date.parse(String(entry.createdAt || entry.created_at || "")),
       };
     })
-    .filter((item) => item.phone && Number.isFinite(item.sentAtMs));
+    .filter((item) => item && item.phone && Number.isFinite(item.sentAtMs));
 
-  const summarySent = periodLogs.reduce((total, entry) => {
+  const summarySent = selectedTemplate ? 0 : periodLogs.reduce((total, entry) => {
     if (entry?.summary && Number.isFinite(Number(entry.summary.sent))) return total + Number(entry.summary.sent || 0);
     return total;
   }, 0);
@@ -8976,6 +8992,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     if (!Number.isFinite(sentAtMs) || !isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) continue;
     const row = routineRows.get(normalizedFact.routineId);
     if (!row) continue;
+    if (!matchesSelectedFilter(selectedTemplate, [row.templateName])) continue;
     const factKey = getFollowUpDashboardFactKey(normalizedFact.routineId, normalizedFact.phone);
     if (normalizedFact.appointment && !scheduledPhones.has(factKey)) {
       scheduledPhones.add(factKey);
@@ -8995,6 +9012,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   }
 
   const templateRows = Array.from(routineRows.values())
+    .filter((item) => matchesSelectedFilter(selectedTemplate, [item.templateName]))
     .map((item) => ({
       ...item,
       responseRate: item.sent > 0 ? item.responses / item.sent : 0,
@@ -9034,12 +9052,22 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     },
     byTemplate: templateRows,
     byDay,
-    dispatchFacts: Array.from(dispatchFactsByKey.values()).map(normalizeFollowUpDashboardFact).slice(0, 500),
+    dispatchFacts: Array.from(dispatchFactsByKey.values())
+      .map(normalizeFollowUpDashboardFact)
+      .filter((fact) => {
+        const sentAtMs = Date.parse(String(fact.sentAt || ""));
+        if (!isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) return false;
+        const row = routineRows.get(fact.routineId);
+        return row && matchesSelectedFilter(selectedTemplate, [row.templateName]);
+      })
+      .slice(0, 500),
     settings: {
       followUpRoutineNameKeywords: dashboardSettings.followUpRoutineNameKeywords,
       followUpResponseMetricTagIds: dashboardSettings.followUpResponseMetricTagIds,
       templateResponseWindowDays: dashboardSettings.templateResponseWindowDays,
       templateRecoveryWindowDays: dashboardSettings.templateRecoveryWindowDays,
+      selectedRule: filters.rule || "",
+      selectedTemplate: filters.template || "",
       responseSource: "client_reply_or_chatbot_metric_tag",
     },
   };
@@ -9081,25 +9109,29 @@ const buildBaseDashboardMetrics = (operationStore = {}, { startMs, endMs } = {})
     const totalAppointments = getDashboardCustomerTotalAppointments(customer);
     const hasResolvedCut = Number.isFinite(resolvedMs) && resolvedMs > 0;
     const hasPending = Number.isFinite(pendingMs) && pendingMs > 0;
-    if (hasResolvedCut || hasPending) activeCustomers += 1;
+    const resolvedInPeriod = hasResolvedCut && resolvedMs >= normalizedStartMs && resolvedMs <= normalizedEndMs;
+    const pendingInPeriod = hasPending && pendingMs >= normalizedStartMs && pendingMs <= normalizedEndMs;
+    const activeInPeriod = resolvedInPeriod || pendingInPeriod;
+    if (activeInPeriod) activeCustomers += 1;
     if (hasResolvedCut) customersWithCuts += 1;
-    if (hasResolvedCut && resolvedMs >= normalizedStartMs && resolvedMs <= normalizedEndMs) returnedInPeriod += 1;
+    if (resolvedInPeriod) returnedInPeriod += 1;
 
-    if (resolvedTotal <= 0) return;
-    if (resolvedTotal === 1) distribution.firstCut += 1;
-    else if (resolvedTotal <= 4) distribution.recurring += 1;
-    else distribution.loyal += 1;
+    if (resolvedInPeriod) {
+      if (resolvedTotal === 1) distribution.firstCut += 1;
+      else if (resolvedTotal <= 4) distribution.recurring += 1;
+      else distribution.loyal += 1;
+    }
 
     const daysSinceLastCut = getDashboardCustomerDaysSinceLastCut(customer, normalizedEndMs);
-    if (Number.isFinite(daysSinceLastCut) && daysSinceLastCut >= 50) distribution.stopped += 1;
-    if (Number.isFinite(daysSinceLastCut)) {
+    if (!activeInPeriod && Number.isFinite(daysSinceLastCut) && daysSinceLastCut >= 50) distribution.stopped += 1;
+    if (!activeInPeriod && Number.isFinite(daysSinceLastCut)) {
       if (daysSinceLastCut >= 50) stoppedPeriods.set("D+50", stoppedPeriods.get("D+50") + 1);
       else if (daysSinceLastCut >= 40) stoppedPeriods.set("D+40", stoppedPeriods.get("D+40") + 1);
       else if (daysSinceLastCut >= 30) stoppedPeriods.set("D+30", stoppedPeriods.get("D+30") + 1);
       else if (daysSinceLastCut >= 20) stoppedPeriods.set("D+20", stoppedPeriods.get("D+20") + 1);
     }
 
-    if (hasResolvedCut) {
+    if (resolvedInPeriod) {
       const monthKey = getDashboardMonthKey(resolvedMs);
       const item = monthly.get(monthKey) || { month: monthKey, returns: 0, firstCuts: 0, activeCustomers: 0, averageCycleDays: 0 };
       item.returns += resolvedTotal > 1 ? 1 : 0;
@@ -9109,7 +9141,7 @@ const buildBaseDashboardMetrics = (operationStore = {}, { startMs, endMs } = {})
     }
 
     const registrationMs = getDashboardCustomerRegistrationMs(customer);
-    if (Number.isFinite(registrationMs) && hasResolvedCut && totalAppointments > 1 && resolvedMs > registrationMs) {
+    if (Number.isFinite(registrationMs) && resolvedInPeriod && totalAppointments > 1 && resolvedMs > registrationMs) {
       totalCutIntervals += (resolvedMs - registrationMs) / (24 * 60 * 60 * 1000) / Math.max(1, totalAppointments - 1);
       intervalCount += 1;
     }
@@ -34999,7 +35031,15 @@ const server = http.createServer(async (req, res) => {
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
       const operationStore = await readOperationStore();
       const store = await readStore({ mutable: false });
-      const metrics = buildFollowUpDashboardMetrics(operationStore, { startMs, endMs, store });
+      const metrics = buildFollowUpDashboardMetrics(operationStore, {
+        startMs,
+        endMs,
+        store,
+        filters: {
+          rule: url.searchParams.get("rule") || "",
+          template: url.searchParams.get("template") || "",
+        },
+      });
       if (persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
         await writeOperationStore(operationStore);
       }
