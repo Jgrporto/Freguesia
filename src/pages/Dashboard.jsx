@@ -734,58 +734,6 @@ function formatDashboardDate(value) {
   return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function AcquisitionMetaSummary({ meta = {}, ads = [] }) {
-  const configured = Boolean(meta?.configured);
-  const error = String(meta?.error || '').trim();
-  const topAds = (Array.isArray(ads) ? ads : [])
-    .slice()
-    .sort((left, right) => Number(right.spend || 0) - Number(left.spend || 0))
-    .slice(0, 3);
-  const items = [
-    { label: 'Gasto Meta', value: formatCurrency(meta?.spend) },
-    { label: 'Cliques', value: formatInteger(meta?.clicks) },
-    { label: 'Cliques no link', value: formatInteger(meta?.linkClicks || meta?.inlineLinkClicks) },
-    { label: 'Conversas 7d Meta', value: formatInteger(meta?.messagingConversationStarted7d) },
-    { label: 'Primeira mensagem', value: formatInteger(meta?.messagingFirstReply) },
-  ];
-
-  return (
-    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">Meta Ads</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {configured ? 'Métricas agregadas por anúncio, vindas da Marketing API.' : 'Marketing API não configurada; os dados locais continuam carregando.'}
-          </p>
-          {error ? <p className="mt-1 text-xs font-semibold text-primary">Falha na Meta Ads: {error}</p> : null}
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:min-w-[560px] lg:grid-cols-5">
-          {items.map((item) => (
-            <div key={item.label} className="rounded-lg border border-border/80 bg-background px-3 py-2">
-              <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{item.label}</div>
-              <div className="mt-1 text-lg font-bold tabular-nums text-foreground">{item.value}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-      {topAds.length ? (
-        <div className="mt-3 grid gap-2 lg:grid-cols-3">
-          {topAds.map((ad) => (
-            <div key={ad.adId || ad.adName} className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2">
-              <div className="truncate text-xs font-bold uppercase tracking-[0.06em] text-foreground">{ad.adName || 'Anúncio sem nome'}</div>
-              <div className="mt-1 truncate text-xs text-muted-foreground">{ad.campaignName || ad.adsetName || '-'}</div>
-              <div className="mt-2 flex items-center justify-between text-xs font-semibold text-muted-foreground">
-                <span>{formatCurrency(ad.spend)}</span>
-                <span>{formatInteger(ad.messagingConversationStarted7d)} conversas Meta</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 function AcquisitionCustomersTable({ items = [] }) {
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
@@ -839,6 +787,7 @@ function AcquisitionCustomersTable({ items = [] }) {
               <option value="all">Todas</option>
               <option value="conversation">Conversa</option>
               <option value="appointment">Agendamento</option>
+              <option value="appbarber_customer">Cliente AppBarber</option>
               <option value="new_customer">Cliente novo</option>
             </select>
           </label>
@@ -862,11 +811,9 @@ function AcquisitionCustomersTable({ items = [] }) {
                 <th className="px-4 py-3 font-bold">Cliente</th>
                 <th className="px-4 py-3 font-bold">Telefone</th>
                 <th className="px-4 py-3 font-bold">Anúncio/Campanha</th>
-                <th className="px-4 py-3 font-bold">Headline</th>
                 <th className="px-4 py-3 font-bold">Etapa</th>
                 <th className="px-4 py-3 font-bold">Primeira conversa</th>
-                <th className="px-4 py-3 font-bold">Último sinal</th>
-                <th className="px-4 py-3 font-bold">Agendamento</th>
+                <th className="px-4 py-3 font-bold">Dados possíveis</th>
               </tr>
             </thead>
             <tbody>
@@ -885,22 +832,24 @@ function AcquisitionCustomersTable({ items = [] }) {
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      <div className="max-w-[220px] truncate">{item.headline || item.body || '-'}</div>
-                    </td>
                     <td className="px-4 py-3">
                       <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
                         {item.stageLabel || 'Conversa'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDashboardDate(item.firstAdSeenAt)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatDashboardDate(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatDashboardDate(item.appointmentAt || item.resolvedAt)}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      <div className="max-w-[280px] space-y-1 text-xs">
+                        {item.headline || item.body ? <div className="truncate">{item.headline || item.body}</div> : null}
+                        <div>Último sinal: {formatDashboardDate(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt)}</div>
+                        <div>Agendamento: {formatDashboardDate(item.appointmentAt || item.resolvedAt)}</div>
+                      </div>
+                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">
                     Nenhum cliente de anuncio encontrado para os filtros.
                   </td>
                 </tr>
@@ -1576,3 +1525,4 @@ export default function Dashboard() {
     </PageShell>
   );
 }
+
