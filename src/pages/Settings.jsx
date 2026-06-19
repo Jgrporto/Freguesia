@@ -1683,6 +1683,21 @@ export default function Settings() {
 
             <div className="lg:col-span-2">
               <DashboardValueList
+                label="Rotinas/templates de pós-venda"
+                description="Os envios pós-corte usam somente as rotinas/templates selecionados aqui."
+                values={dashboardSettings.postSaleRoutineNameKeywords}
+                options={dashboardRoutineOptions}
+                optionPlaceholder={routinesLoading ? 'Carregando rotinas...' : 'Adicionar rotina cadastrada'}
+                isLoadingOptions={routinesLoading}
+                onAddValue={(value) => handleDashboardListAdd('postSaleRoutineNameKeywords', value)}
+                onRemoveValue={(value) => handleDashboardListRemove('postSaleRoutineNameKeywords', value)}
+                disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                emptyLabel="Nenhuma rotina de pós-venda selecionada."
+              />
+            </div>
+
+            <div className="lg:col-span-2">
+              <DashboardValueList
                 label="Tags metricas de resposta"
                 description="Eventos de chatbot com estes IDs entram em Respostas recebidas no Dashboard de follow-up."
                 values={dashboardSettings.followUpResponseMetricTagIds}

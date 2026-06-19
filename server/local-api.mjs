@@ -112,6 +112,7 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   attendantRoleKeywords: ['atendente'],
   followUpRoutineNameKeywords: ['follow', 'recuper', 'retorno', 'corte'],
   followUpResponseMetricTagIds: ['follow_up_response'],
+  postSaleRoutineNameKeywords: ['pos', 'pós', 'pos-venda', 'pós-venda', 'nps', 'satisfacao', 'satisfação'],
   templateResponseWindowDays: 7,
   templateRecoveryWindowDays: 30,
   newCustomerWindowDays: 30,
@@ -2502,6 +2503,10 @@ const normalizeDashboardSettings = (value = {}) => {
     followUpResponseMetricTagIds: normalizeDashboardStringList(
       source.followUpResponseMetricTagIds,
       DASHBOARD_SETTINGS_DEFAULT.followUpResponseMetricTagIds,
+    ),
+    postSaleRoutineNameKeywords: normalizeDashboardStringList(
+      source.postSaleRoutineNameKeywords,
+      DASHBOARD_SETTINGS_DEFAULT.postSaleRoutineNameKeywords,
     ),
     templateResponseWindowDays: normalizeDashboardPositiveInteger(
       source.templateResponseWindowDays,

@@ -7980,6 +7980,7 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   attendantRoleKeywords: ["atendente"],
   followUpRoutineNameKeywords: ["follow", "recuper", "retorno", "corte"],
   followUpResponseMetricTagIds: ["follow_up_response"],
+  postSaleRoutineNameKeywords: ["pos", "pós", "pos-venda", "pós-venda", "nps", "satisfacao", "satisfação"],
   templateResponseWindowDays: 7,
   templateRecoveryWindowDays: 30,
   newCustomerWindowDays: 30,
@@ -8036,6 +8037,10 @@ const normalizeDashboardSettings = (value = {}) => {
     followUpResponseMetricTagIds: normalizeDashboardStringList(
       source.followUpResponseMetricTagIds,
       DASHBOARD_SETTINGS_DEFAULT.followUpResponseMetricTagIds,
+    ),
+    postSaleRoutineNameKeywords: normalizeDashboardStringList(
+      source.postSaleRoutineNameKeywords,
+      DASHBOARD_SETTINGS_DEFAULT.postSaleRoutineNameKeywords,
     ),
     templateResponseWindowDays: normalizeDashboardPositiveInteger(
       source.templateResponseWindowDays,
@@ -9165,10 +9170,31 @@ const isDashboardTextMatch = (value, tokens = []) => {
   return Boolean(text) && tokens.some((token) => text.includes(token));
 };
 
+const resolveDashboardPostSaleSentiment = (...values) => {
+  const score = extractDashboardScore(...values);
+  if (score != null) {
+    if (score >= 7) return { score, sentiment: "positive" };
+    if (score <= 6) return { score, sentiment: "negative" };
+    return { score, sentiment: "neutral" };
+  }
+  const text = normalizeDashboardText(values.filter((value) => value != null).join(" "));
+  if (!text) return { score: null, sentiment: null };
+  if (["positivo", "positiva", "satisfeito", "satisfeita", "promotor", "promotora", "bom", "otimo", "excelente"].some((token) => text.includes(token))) {
+    return { score: null, sentiment: "positive" };
+  }
+  if (["negativo", "negativa", "insatisfeito", "insatisfeita", "detrator", "detratora", "ruim", "problema", "reclamacao"].some((token) => text.includes(token))) {
+    return { score: null, sentiment: "negative" };
+  }
+  return { score: null, sentiment: null };
+};
+
 const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {} } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
+  const postSaleRoutineTokens = dashboardSettings.postSaleRoutineNameKeywords.map(normalizeDashboardText).filter(Boolean);
+  const responseWindowMs = dashboardSettings.templateResponseWindowDays * 24 * 60 * 60 * 1000;
   const scoreBuckets = Array.from({ length: 11 }, (_, score) => ({ score, count: 0 }));
   const npsBySegment = new Map([
     ["1º corte", { label: "1º corte", total: 0, count: 0 }],
@@ -9178,7 +9204,7 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
   ]);
   const byDay = new Map();
   const ensureDay = (dayKey) => {
-    if (!byDay.has(dayKey)) byDay.set(dayKey, { date: dayKey, referrals: 0, birthdayMessages: 0, birthdayAppointments: 0 });
+    if (!byDay.has(dayKey)) byDay.set(dayKey, { date: dayKey });
     return byDay.get(dayKey);
   };
   enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach(ensureDay);
@@ -9190,15 +9216,34 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
   let scoreCount = 0;
   let promoters = 0;
   let detractors = 0;
-  let reportSent = 0;
-  let referrals = 0;
+  const postSaleResponseCandidates = [];
 
   chatbotEvents.forEach((event) => {
     const eventAtMs = Date.parse(String(event?.created_date || event?.createdAt || ""));
     if (!isWithinDashboardRange(eventAtMs, normalizedStartMs, normalizedEndMs)) return;
     const metadata = event?.metadata && typeof event.metadata === "object" ? event.metadata : {};
     const metricName = [metadata.metricTagName, metadata.metricTagId, event.type].join(" ");
-    const day = ensureDay(new Date(eventAtMs).toISOString().slice(0, 10));
+    const conversationId = String(event?.conversation_id || event?.conversationId || "").trim();
+    const phone = conversationPhoneById.get(conversationId);
+    const postSaleSentiment = resolveDashboardPostSaleSentiment(
+      metadata.score,
+      metadata.value,
+      metadata.metricValue,
+      metadata.metricTagName,
+      metadata.metricTagId,
+      event.message,
+    );
+    if (
+      phone &&
+      (postSaleSentiment.sentiment ||
+        isDashboardTextMatch(metricName, ["nps", "satisfacao", "satisfação", "nota", "pos-venda", "pós-venda", "pos venda", "pós venda"]))
+    ) {
+      postSaleResponseCandidates.push({
+        phone,
+        eventAtMs,
+        sentiment: postSaleSentiment.sentiment,
+      });
+    }
 
     if (isDashboardTextMatch(metricName, ["nps", "satisfacao", "satisfacao", "nota"])) {
       const score = extractDashboardScore(metadata.score, metadata.value, metadata.metricValue, metadata.metricTagName, event.message);
@@ -9208,8 +9253,6 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
         scoreCount += 1;
         if (score >= 9) promoters += 1;
         if (score <= 6) detractors += 1;
-
-        const phone = conversationPhoneById.get(String(event?.conversation_id || event?.conversationId || "").trim());
         const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
         const resolvedTotal = customer ? getDashboardCustomerResolvedAppointmentsTotal(customer) : 0;
         const segment = resolvedTotal <= 1 ? "1º corte" : resolvedTotal > 4 ? "Fiéis" : resolvedTotal === 4 ? "4º corte" : "Trimestral";
@@ -9220,42 +9263,58 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
       }
     }
 
-    if (isDashboardTextMatch(metricName, ["relatorio", "critico", "problema"])) reportSent += 1;
-    if (isDashboardTextMatch(metricName, ["indicacao", "indicação", "referral", "amigo"])) {
-      referrals += 1;
-      day.referrals += 1;
-    }
   });
 
   const routineLogs = Array.isArray(operationStore?.routines?.logs) ? operationStore.routines.logs : [];
-  let birthdayMessages = 0;
-  const birthdayPhones = new Set();
-  routineLogs.forEach((entry) => {
-    const createdAtMs = Date.parse(String(entry?.createdAt || entry?.created_at || ""));
-    if (!isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs)) return;
-    const text = [entry?.routineName, entry?.message, entry?.details?.templateName].join(" ");
-    if (!isDashboardTextMatch(text, ["aniversario", "aniversário", "birthday"])) return;
-    const status = String(entry?.status || entry?.level || "").toLowerCase();
-    if (!["success", "warning"].includes(status)) return;
-    birthdayMessages += 1;
-    const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
-    const phone = normalizePhone(details.phone || entry.phone || "");
-    if (phone) birthdayPhones.add(phone);
-    ensureDay(new Date(createdAtMs).toISOString().slice(0, 10)).birthdayMessages += 1;
-  });
-
-  let birthdayAppointments = 0;
-  birthdayPhones.forEach((phone) => {
-    const customer = findDashboardCustomerByPhone(customerIndex, phone);
-    const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
-    if (
-      isWithinDashboardRange(pendingMs, normalizedStartMs, normalizedEndMs) ||
-      isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)
-    ) {
-      birthdayAppointments += 1;
-    }
-  });
-
+  const postSaleLogs = routineLogs
+    .filter((entry) => {
+      const createdAtMs = Date.parse(String(entry?.createdAt || entry?.created_at || ""));
+      if (!isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs)) return false;
+      const status = String(entry?.status || entry?.level || "").toLowerCase();
+      if (!["success", "warning"].includes(status)) return false;
+      const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+      const phone = normalizePhone(details.phone || entry.phone || "");
+      if (!phone) return false;
+      const haystack = normalizeDashboardText([
+        entry?.routineId,
+        entry?.routineName,
+        details.routineId,
+        details.routineName,
+        details.templateName,
+        details.quickReplyTitle,
+        entry?.message,
+      ].join(" "));
+      if (!haystack) return false;
+      if (!postSaleRoutineTokens.length) return true;
+      return postSaleRoutineTokens.some((token) => token && haystack.includes(token));
+    })
+    .map((entry) => {
+      const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
+      return {
+        phone: normalizePhone(details.phone || entry.phone || ""),
+        routineId: String(entry?.routineId || details.routineId || entry?.routineName || "pos-venda").trim(),
+        sentAtMs: Date.parse(String(entry?.createdAt || entry?.created_at || "")),
+      };
+    })
+    .filter((item) => item.phone && Number.isFinite(item.sentAtMs));
+  const postSaleResponseKeys = new Set();
+  let postSalePositive = 0;
+  let postSaleNegative = 0;
+  postSaleResponseCandidates
+    .sort((left, right) => left.eventAtMs - right.eventAtMs)
+    .forEach((candidate) => {
+      const matchedSend = postSaleLogs
+        .filter((log) => log.phone === candidate.phone && log.sentAtMs <= candidate.eventAtMs && candidate.eventAtMs <= log.sentAtMs + responseWindowMs)
+        .sort((left, right) => right.sentAtMs - left.sentAtMs)[0];
+      if (!matchedSend) return;
+      const responseKey = `${matchedSend.routineId}:${matchedSend.phone}:${matchedSend.sentAtMs}`;
+      if (postSaleResponseKeys.has(responseKey)) return;
+      postSaleResponseKeys.add(responseKey);
+      if (candidate.sentiment === "positive") postSalePositive += 1;
+      if (candidate.sentiment === "negative") postSaleNegative += 1;
+    });
+  const postSaleSent = postSaleLogs.length;
+  const postSaleResponses = postSaleResponseKeys.size;
   const npsAverage = scoreCount > 0 ? scoreTotal / scoreCount : 0;
   return {
     period: {
@@ -9266,9 +9325,11 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
       npsAverage,
       promoters,
       detractors,
-      reportSent,
-      referrals,
-      birthdayAppointments,
+      postSaleSent,
+      postSaleResponses,
+      postSaleResponseRate: postSaleSent > 0 ? postSaleResponses / postSaleSent : 0,
+      postSalePositive,
+      postSaleNegative,
     },
     scoreDistribution: scoreBuckets,
     gauge: {
@@ -9285,12 +9346,14 @@ const buildExperienceDashboardMetrics = (operationStore = {}, { startMs, endMs, 
     byDay: Array.from(byDay.values()).sort((left, right) => left.date.localeCompare(right.date)),
     totals: {
       responses: scoreCount,
-      birthdayMessages,
+      postSaleSent,
+      postSaleResponses,
     },
     sources: {
       nps: "chatbot_metric_tag",
-      referrals: "chatbot_metric_tag",
-      birthday: "routine_logs",
+      postSale: "routine_logs_plus_chatbot_metric_tag",
+      postSaleRoutineNameKeywords: dashboardSettings.postSaleRoutineNameKeywords,
+      templateResponseWindowDays: dashboardSettings.templateResponseWindowDays,
     },
   };
 };

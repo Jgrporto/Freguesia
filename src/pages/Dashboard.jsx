@@ -8,9 +8,7 @@ import {
   Clock3,
   ExternalLink,
   Filter,
-  Gift,
   HeartHandshake,
-  LineChart,
   Loader2,
   Megaphone,
   MessageCircle,
@@ -187,9 +185,9 @@ const dashboards = {
       { title: 'NPS Médio', value: '0,0', subtitle: 'Percepção pós-atendimento', icon: Star },
       { title: 'Notas 9 e 10', value: '0', subtitle: 'Promotores imediatos', icon: Award },
       { title: 'Notas abaixo de 6', value: '0', subtitle: 'Atenção operacional', icon: Target },
-      { title: 'Enviados para relatório', value: '0', subtitle: 'Casos críticos', icon: LineChart },
-      { title: 'Indicações geradas', value: '0', subtitle: 'Clientes indicando', icon: HeartHandshake },
-      { title: 'Agendas por aniversário', value: '0', subtitle: 'Recompras por data', icon: Gift },
+      { title: 'Envios Pós-Corte', value: '0', subtitle: 'Rotinas de pós-venda', icon: Send },
+      { title: 'Taxa de Resposta', value: '0%', subtitle: 'Respostas pós-corte', icon: MessageCircle },
+      { title: 'Positivas Vs Negativas', value: '0 / 0', subtitle: 'Avaliações pós-venda', icon: HeartHandshake },
     ],
     main: {
       title: 'Distribuição das notas NPS',
@@ -1558,14 +1556,18 @@ export default function Dashboard() {
         if (card.title === 'Notas abaixo de 6') {
           return { ...card, value: formatInteger(metrics.detractors), subtitle: 'Detratores e alertas' };
         }
-        if (card.title === 'Enviados para relatório') {
-          return { ...card, value: formatInteger(metrics.reportSent), subtitle: 'Eventos críticos marcados' };
+        if (card.title === 'Envios Pós-Corte') {
+          return { ...card, value: formatInteger(metrics.postSaleSent), subtitle: 'Rotinas de pós-venda configuradas' };
         }
-        if (card.title === 'Indicações geradas') {
-          return { ...card, value: formatInteger(metrics.referrals), subtitle: 'Eventos de indicação' };
+        if (card.title === 'Taxa de Resposta') {
+          return { ...card, value: formatPercentCard(metrics.postSaleResponseRate), subtitle: 'Respostas / envios pós-corte' };
         }
-        if (card.title === 'Agendas por aniversário') {
-          return { ...card, value: formatInteger(metrics.birthdayAppointments), subtitle: 'Após rotina de aniversário' };
+        if (card.title === 'Positivas Vs Negativas') {
+          return {
+            ...card,
+            value: `${formatInteger(metrics.postSalePositive)} / ${formatInteger(metrics.postSaleNegative)}`,
+            subtitle: 'Positivas / negativas',
+          };
         }
         return card;
       });
