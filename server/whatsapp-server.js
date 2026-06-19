@@ -35067,6 +35067,12 @@ const server = http.createServer(async (req, res) => {
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
       const operationStore = await readOperationStore();
       const store = await readStore({ mutable: false });
+      const hasViewFilters = Boolean(
+        url.searchParams.get("start") ||
+          url.searchParams.get("end") ||
+          url.searchParams.get("rule") ||
+          url.searchParams.get("template"),
+      );
       const metrics = buildFollowUpDashboardMetrics(operationStore, {
         startMs,
         endMs,
@@ -35076,7 +35082,7 @@ const server = http.createServer(async (req, res) => {
           template: url.searchParams.get("template") || "",
         },
       });
-      if (persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
+      if (!hasViewFilters && persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
         await writeOperationStore(operationStore);
       }
       res.writeHead(200, { "Content-Type": "application/json" });

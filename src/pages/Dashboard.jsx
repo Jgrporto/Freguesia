@@ -172,7 +172,7 @@ const dashboards = {
       },
       {
         title: 'Taxa de retorno por mês',
-        type: 'line',
+        type: 'horizontalBars',
         labels: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun'],
         helper: 'Percentual de clientes que retornaram.',
       },
@@ -228,6 +228,12 @@ function formatCurrency(value) {
   }).format(Number(value) || 0);
 }
 
+function formatMonthLabel(monthKey) {
+  const [year, month] = String(monthKey || '').split('-');
+  if (!year || !month) return String(monthKey || '-');
+  return `${month}/${year}`;
+}
+
 function safeRate(part, total) {
   if (!total) return 0;
   return (part / total) * 100;
@@ -268,7 +274,13 @@ const getCurrentMonthDateRange = () => {
   };
 };
 
+const getAllDateRange = () => ({
+  start: '2000-01-01',
+  end: '2099-12-31',
+});
+
 const dashboardDatePresets = [
+  { id: 'all', label: 'Todos', getRange: getAllDateRange },
   { id: 'today', label: 'Hoje', getRange: () => getDateRangeForLastDays(1) },
   { id: '7days', label: '7 dias', getRange: () => getDateRangeForLastDays(7) },
   { id: '30days', label: '30 dias', getRange: () => getDateRangeForLastDays(30) },
@@ -1157,6 +1169,7 @@ function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChan
     const range = preset.getRange();
     return range.start === startDate && range.end === endDate;
   })?.id || 'custom';
+  const isAllPeriod = activePreset === 'all';
   const activePresetLabel =
     activePreset === 'custom'
       ? 'Personalizado'
@@ -1214,12 +1227,14 @@ function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChan
           );
         })}
 
-        <DateFilter
-          startDate={startDate}
-          endDate={endDate}
-          onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
-          onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
-        />
+        {!isAllPeriod ? (
+          <DateFilter
+            startDate={startDate}
+            endDate={endDate}
+            onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
+            onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -1739,7 +1754,7 @@ export default function Dashboard() {
         if (chart.title === 'Taxa de retorno por mês') {
           return {
             ...chart,
-            labels: byMonth.length ? byMonth.map((item) => item.month.slice(5)) : chart.labels,
+            labels: byMonth.length ? byMonth.map((item) => formatMonthLabel(item.month)) : chart.labels,
             values: byMonth.length ? byMonth.map((item) => Math.round((Number(item.returnRate) || 0) * 1000) / 10) : [],
             valueFormatter: formatPercent,
             firstLegend: 'Retorno',
