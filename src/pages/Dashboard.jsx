@@ -1125,6 +1125,76 @@ const matchesFilterOption = (selectedValue, candidates = []) => {
   return candidates.some((candidate) => normalizeFilterCompareValue(candidate) === normalizedSelected);
 };
 
+const parseDashboardDateMs = (value, boundary = 'start') => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const suffix = boundary === 'end' ? 'T23:59:59.999' : 'T00:00:00.000';
+  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}${suffix}` : raw);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const isWithinDashboardDateRange = (value, startDate, endDate) => {
+  const timestampMs = Date.parse(String(value || ''));
+  const startMs = parseDashboardDateMs(startDate, 'start');
+  const endMs = parseDashboardDateMs(endDate, 'end');
+  if (!Number.isFinite(timestampMs)) return false;
+  if (Number.isFinite(startMs) && timestampMs < startMs) return false;
+  if (Number.isFinite(endMs) && timestampMs > endMs) return false;
+  return true;
+};
+
+const buildFollowUpRowsFromFacts = ({ facts = [], startDate, endDate, filters = {} } = {}) => {
+  const rows = new Map();
+  (Array.isArray(facts) ? facts : [])
+    .filter((fact) => isWithinDashboardDateRange(fact?.sentAt || fact?.sent_at, startDate, endDate))
+    .filter((fact) => matchesFilterOption(filters.rule, [fact?.routineName, fact?.routineId]))
+    .filter((fact) => matchesFilterOption(filters.template, [fact?.templateName]))
+    .forEach((fact) => {
+      const routineId = String(fact?.routineId || fact?.routineName || 'sem-rotina').trim();
+      const templateName = String(fact?.templateName || 'Sem template').trim() || 'Sem template';
+      const key = `${routineId}:${templateName}`;
+      const row = rows.get(key) || {
+        routineId,
+        routineName: String(fact?.routineName || routineId || 'Sem rotina').trim() || 'Sem rotina',
+        templateName,
+        sent: 0,
+        responses: 0,
+        appointments: 0,
+        recovered: 0,
+      };
+      row.sent += 1;
+      if (fact?.responded) row.responses += 1;
+      if (fact?.appointment) row.appointments += 1;
+      if (fact?.recovered) row.recovered += 1;
+      rows.set(key, row);
+    });
+
+  return Array.from(rows.values())
+    .map((row) => ({
+      ...row,
+      responseRate: row.sent > 0 ? row.responses / row.sent : 0,
+      recoveryRate: row.sent > 0 ? row.recovered / row.sent : 0,
+      appointmentRate: row.sent > 0 ? row.appointments / row.sent : 0,
+    }))
+    .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
+};
+
+const summarizeFollowUpRows = (rows = []) => {
+  const sent = rows.reduce((total, row) => total + Number(row.sent || 0), 0);
+  const responses = rows.reduce((total, row) => total + Number(row.responses || 0), 0);
+  const appointments = rows.reduce((total, row) => total + Number(row.appointments || 0), 0);
+  const recoveredCustomers = rows.reduce((total, row) => total + Number(row.recovered || 0), 0);
+  const bestTemplate = rows.find((row) => Number(row.responses || 0) > 0)?.templateName || rows[0]?.templateName || '';
+  return {
+    sent,
+    responses,
+    appointments,
+    recoveredCustomers,
+    bestTemplate,
+    responseRate: sent > 0 ? responses / sent : 0,
+  };
+};
+
 const npsCustomerTypeOptions = [
   buildFilterOption(ALL_FILTER_VALUE, 'Todos'),
   buildFilterOption('detrator', 'Detrator'),
@@ -1330,6 +1400,21 @@ export default function Dashboard() {
   const followUpFilters = dashboardFilters.followup || {};
   const experienceFilters = dashboardFilters.experiencia || {};
 
+  const followUpViewRows = useMemo(() => {
+    const factRows = buildFollowUpRowsFromFacts({
+      facts: followUpMetrics?.dispatchFacts || [],
+      startDate: start,
+      endDate: end,
+      filters: followUpFilters,
+    });
+    if (factRows.length || Array.isArray(followUpMetrics?.dispatchFacts)) return factRows;
+    return (Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [])
+      .filter((item) => matchesFilterOption(followUpFilters.rule, [item.routineName, item.routineId]))
+      .filter((item) => matchesFilterOption(followUpFilters.template, [item.templateName]));
+  }, [end, followUpFilters, followUpMetrics, start]);
+
+  const followUpViewCards = useMemo(() => summarizeFollowUpRows(followUpViewRows), [followUpViewRows]);
+
   const handleDashboardFilterChange = (dashboardId, key, value) => {
     setDashboardFilters((currentFilters) => ({
       ...currentFilters,
@@ -1518,7 +1603,7 @@ export default function Dashboard() {
     }
 
     if (activeDashboard === 'followup') {
-      const metrics = followUpMetrics?.cards || {};
+      const metrics = followUpViewCards || {};
       return current.cards.map((card) => {
         if (card.title === 'Disparos enviados') {
           return { ...card, value: formatInteger(metrics.sent), subtitle: 'Rotinas/templates configurados' };
@@ -1637,7 +1722,7 @@ export default function Dashboard() {
 
       return card;
     });
-  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, baseMetrics, current.cards, experienceMetrics, followUpMetrics]);
+  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, baseMetrics, current.cards, experienceMetrics, followUpViewCards, followUpMetrics]);
 
   const atendimentoFunnelValues = useMemo(() => {
     if (activeDashboard !== 'atendimento') return currentMain.values;
@@ -1685,8 +1770,8 @@ export default function Dashboard() {
     }
 
     if (activeDashboard !== 'followup') return currentMain;
-    const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
-    const metrics = followUpMetrics?.cards || {};
+    const byTemplate = followUpViewRows.slice(0, 8);
+    const metrics = followUpViewCards || {};
     return {
       ...currentMain,
       labels: currentMain.labels,
@@ -1700,7 +1785,7 @@ export default function Dashboard() {
         ? 'Disparos das rotinas configuradas, respostas por tag de métrica, agendas e cortes atribuídos.'
         : 'Configure rotinas de follow-up na Dashboard para acompanhar o funil.',
     };
-  }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpMetrics]);
+  }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpViewCards, followUpViewRows]);
 
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
@@ -1723,10 +1808,7 @@ export default function Dashboard() {
     }
 
     if (activeDashboard === 'followup') {
-      const byTemplate = (Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [])
-        .filter((item) => matchesFilterOption(followUpFilters.rule, [item.routineName, item.routineId]))
-        .filter((item) => matchesFilterOption(followUpFilters.template, [item.templateName]))
-        .slice(0, 8);
+      const byTemplate = followUpViewRows.slice(0, 8);
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Taxa de resposta por template') {
           return {
@@ -1796,7 +1878,7 @@ export default function Dashboard() {
     }
 
     return current.sideCharts;
-  }, [activeDashboard, acquisitionMetrics, attendanceFilters.attendant, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpFilters.rule, followUpFilters.template, followUpMetrics]);
+  }, [activeDashboard, acquisitionMetrics, attendanceFilters.attendant, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpViewRows]);
 
   const filteredAcquisitionCustomers = useMemo(() => {
     const rows = acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || [];
@@ -1806,11 +1888,8 @@ export default function Dashboard() {
   }, [acquisitionFilters.campaign, acquisitionMetrics]);
 
   const filteredFollowUpRows = useMemo(() => {
-    const rows = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [];
-    return rows
-      .filter((item) => matchesFilterOption(followUpFilters.rule, [item.routineName, item.routineId]))
-      .filter((item) => matchesFilterOption(followUpFilters.template, [item.templateName]));
-  }, [followUpFilters.rule, followUpFilters.template, followUpMetrics]);
+    return followUpViewRows;
+  }, [followUpViewRows]);
 
   const dashboardFilterOptions = useMemo(() => {
     const attendantSource = Array.isArray(attendanceMetrics?.filters?.attendants)
