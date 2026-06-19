@@ -344,13 +344,18 @@ function DashboardBrowserTabs({ activeTab, onChange }) {
 
 function DashboardStatCard({ title, value, subtitle, icon: Icon }) {
   return (
-    <div className="group rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition-shadow hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)]">
+    <div className="group min-w-0 overflow-hidden rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)] transition-shadow hover:shadow-[0_12px_30px_rgba(15,23,42,0.07)]">
       <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/10">
         <Icon className="h-5 w-5" />
       </div>
-      <p className="text-sm font-bold text-foreground">{title}</p>
-      <div className="mt-2 text-3xl font-black tracking-[-0.05em] text-foreground">{value}</div>
-      <p className="mt-2 min-h-8 text-xs leading-relaxed text-muted-foreground">{subtitle}</p>
+      <p className="truncate text-sm font-bold text-foreground" title={title}>{title}</p>
+      <div
+        className="mt-2 min-w-0 break-words text-2xl font-black leading-tight text-foreground sm:text-3xl"
+        title={String(value ?? '')}
+      >
+        {value}
+      </div>
+      <p className="mt-2 min-h-8 break-words text-xs leading-relaxed text-muted-foreground">{subtitle}</p>
     </div>
   );
 }
@@ -1054,8 +1059,7 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
   return (
     <div className="flex flex-wrap items-center gap-3 xl:justify-end">
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
-        <Calendar className="h-4 w-4 text-muted-foreground" />
-        <span className="font-medium">Data Início</span>
+        <span className="font-medium">Data início</span>
         <input
           type="date"
           value={startDate}
@@ -1064,14 +1068,13 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
         />
       </label>
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
-        <span className="font-medium">Data Fim</span>
+        <span className="font-medium">Data fim</span>
         <input
           type="date"
           value={endDate}
           onChange={(event) => onEndDateChange(event.target.value)}
           className="w-32 border-0 bg-transparent p-0 font-semibold text-foreground outline-none"
         />
-        <Calendar className="h-4 w-4 text-muted-foreground" />
       </label>
     </div>
   );
@@ -1152,6 +1155,10 @@ function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChan
     const range = preset.getRange();
     return range.start === startDate && range.end === endDate;
   })?.id || 'custom';
+  const activePresetLabel =
+    activePreset === 'custom'
+      ? 'Personalizado'
+      : dashboardDatePresets.find((preset) => preset.id === activePreset)?.label || 'Período';
 
   const selectFields = {
     atendimento: [
@@ -1176,6 +1183,7 @@ function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChan
         <CompactFilterSelect
           label="Período"
           value={activePreset}
+          displayValue={activePresetLabel}
           icon={Calendar}
           onChange={(event) => {
             const preset = dashboardDatePresets.find((item) => item.id === event.target.value);
@@ -1189,11 +1197,13 @@ function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChan
         {selectFields.map((field) => {
           const options = uniqFilterOptions(field.options || []);
           const value = filterValues[field.key] || ALL_FILTER_VALUE;
+          const selectedOption = options.find((option) => option.value === value);
           return (
             <CompactFilterSelect
               key={field.key}
               label={field.label}
               value={value}
+              displayValue={selectedOption?.label || value}
               icon={field.icon}
               onChange={(event) => onFilterChange?.(activeDashboard, field.key, event.target.value)}
             >

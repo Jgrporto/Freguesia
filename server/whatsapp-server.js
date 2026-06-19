@@ -8917,7 +8917,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
         : hasResolvedAppointment
           ? new Date(resolvedMs).toISOString()
           : previousFact.appointmentAt || null,
-      recovered: hasResolvedAppointment,
+      recovered: Boolean(previousFact.recovered || hasResolvedAppointment),
       recoveredAt: hasResolvedAppointment ? new Date(resolvedMs).toISOString() : previousFact.recoveredAt || null,
     });
   });
