@@ -415,6 +415,11 @@ const META_AD_ACCOUNT_ID = String(
     process.env.META_MARKETING_AD_ACCOUNT_ID ||
     "",
 ).trim();
+const META_GRAPH_VERSION = String(process.env.META_GRAPH_VERSION || API_VERSION || "v19.0").trim();
+const META_INSIGHTS_CACHE_TTL_MS = Number.parseInt(process.env.META_INSIGHTS_CACHE_TTL_MS || "900000", 10);
+const META_AD_LOOKBACK_DAYS = Number.parseInt(process.env.META_AD_LOOKBACK_DAYS || "30", 10);
+const META_AD_ENRICHMENT_ENABLED = String(process.env.META_AD_ENRICHMENT_ENABLED || "true").trim().toLowerCase() !== "false";
+const metaAcquisitionInsightsCache = new Map();
 
 
 
@@ -7390,8 +7395,8 @@ const getDashboardConversationDisplayName = (conversation = {}, customer = null)
   );
 
 const getDashboardAppointmentStage = ({ hasAppointment = false, hasCustomer = false } = {}) => {
-  if (hasCustomer) return { id: "new_customer", label: "Cliente novo" };
   if (hasAppointment) return { id: "appointment", label: "Agendamento" };
+  if (hasCustomer) return { id: "new_customer", label: "Cliente novo" };
   return { id: "conversation", label: "Conversa" };
 };
 
@@ -7441,6 +7446,15 @@ const normalizeDashboardPersistedAdCustomers = (value = []) =>
       lastMessageAt: String(item?.lastMessageAt || "").trim(),
       appointmentAt: String(item?.appointmentAt || "").trim(),
       resolvedAt: String(item?.resolvedAt || "").trim(),
+      adId: String(item?.adId || item?.sourceId || "").trim(),
+      sourceId: String(item?.sourceId || item?.adId || "").trim(),
+      ctwaClid: String(item?.ctwaClid || "").trim(),
+      campaignName: String(item?.campaignName || "").trim(),
+      adsetName: String(item?.adsetName || "").trim(),
+      adName: String(item?.adName || "").trim(),
+      headline: String(item?.headline || "").trim(),
+      body: String(item?.body || "").trim(),
+      sourceUrl: String(item?.sourceUrl || "").trim(),
       keywords: Array.isArray(item?.keywords) ? item.keywords.map((keyword) => String(keyword || "").trim()).filter(Boolean) : [],
       updatedAt: String(item?.updatedAt || "").trim(),
     }))
@@ -8002,28 +8016,85 @@ const normalizeMetaAdAccountId = (value = "") => {
 
 const toDashboardDateKey = (timestampMs) => new Date(timestampMs).toISOString().slice(0, 10);
 
-const sumMetaActionValues = (rows = [], matchers = []) =>
-  rows.reduce((total, row) => {
-    const actions = Array.isArray(row?.actions) ? row.actions : [];
-    return (
-      total +
-      actions.reduce((sum, action) => {
-        const type = String(action?.action_type || "").toLowerCase();
-        if (!matchers.some((matcher) => type.includes(matcher))) return sum;
-        return sum + (Number(action?.value) || 0);
-      }, 0)
-    );
-  }, 0);
+const getMetaActionValue = (row = {}, actionType = "") => {
+  const actions = Array.isArray(row?.actions) ? row.actions : [];
+  const action = actions.find((item) => String(item?.action_type || "") === actionType);
+  return Number(action?.value || 0) || 0;
+};
+
+const getMetaCostPerActionValue = (row = {}, actionType = "") => {
+  const actions = Array.isArray(row?.cost_per_action_type) ? row.cost_per_action_type : [];
+  const action = actions.find((item) => String(item?.action_type || "") === actionType);
+  return Number(action?.value || 0) || 0;
+};
+
+const normalizeMetaAdInsightRow = (row = {}) => {
+  const spend = Number(row?.spend || 0) || 0;
+  const clicks = Number(row?.clicks || 0) || 0;
+  const inlineLinkClicks = Number(row?.inline_link_clicks || 0) || 0;
+  const linkClicks = getMetaActionValue(row, "link_click");
+  const messagingConversationStarted7d = getMetaActionValue(row, "onsite_conversion.messaging_conversation_started_7d");
+  const messagingFirstReply = getMetaActionValue(row, "onsite_conversion.messaging_first_reply");
+  return {
+    dateStart: String(row?.date_start || "").trim(),
+    dateStop: String(row?.date_stop || "").trim(),
+    accountId: String(row?.account_id || "").trim(),
+    accountName: String(row?.account_name || "").trim(),
+    campaignId: String(row?.campaign_id || "").trim(),
+    campaignName: String(row?.campaign_name || "").trim(),
+    adsetId: String(row?.adset_id || "").trim(),
+    adsetName: String(row?.adset_name || "").trim(),
+    adId: String(row?.ad_id || "").trim(),
+    adName: String(row?.ad_name || "").trim(),
+    spend,
+    impressions: Number(row?.impressions || 0) || 0,
+    reach: Number(row?.reach || 0) || 0,
+    clicks,
+    inlineLinkClicks,
+    linkClicks,
+    messagingConversationStarted7d,
+    messagingFirstReply,
+    costPerLinkClick: getMetaCostPerActionValue(row, "link_click"),
+    costPerMessagingConversationStarted7d: getMetaCostPerActionValue(row, "onsite_conversion.messaging_conversation_started_7d"),
+    raw: row,
+  };
+};
+
+const buildMetaAdInsightsSummary = (rows = []) =>
+  rows.reduce(
+    (summary, row) => ({
+      spend: summary.spend + (Number(row.spend) || 0),
+      clicks: summary.clicks + (Number(row.clicks) || 0),
+      inlineLinkClicks: summary.inlineLinkClicks + (Number(row.inlineLinkClicks) || 0),
+      linkClicks: summary.linkClicks + (Number(row.linkClicks) || 0),
+      messagingConversationStarted7d:
+        summary.messagingConversationStarted7d + (Number(row.messagingConversationStarted7d) || 0),
+      messagingFirstReply: summary.messagingFirstReply + (Number(row.messagingFirstReply) || 0),
+    }),
+    {
+      spend: 0,
+      clicks: 0,
+      inlineLinkClicks: 0,
+      linkClicks: 0,
+      messagingConversationStarted7d: 0,
+      messagingFirstReply: 0,
+    },
+  );
 
 const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
   const accessToken = String(META_MARKETING_ACCESS_TOKEN || "").trim();
   const adAccountId = normalizeMetaAdAccountId(META_AD_ACCOUNT_ID);
-  if (!accessToken || !adAccountId) {
+  if (!META_AD_ENRICHMENT_ENABLED || !accessToken || !adAccountId) {
     return {
-      configured: false,
+      configured: Boolean(accessToken && adAccountId),
+      enabled: META_AD_ENRICHMENT_ENABLED,
+      adAccountId,
       spend: 0,
       clicks: 0,
-      conversationsStarted: 0,
+      inlineLinkClicks: 0,
+      linkClicks: 0,
+      messagingConversationStarted7d: 0,
+      messagingFirstReply: 0,
       rows: [],
     };
   }
@@ -8031,36 +8102,66 @@ const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
-  const endpoint = new URL(`https://graph.facebook.com/${API_VERSION}/${adAccountId}/insights`);
-  endpoint.searchParams.set("fields", "spend,clicks,inline_link_clicks,actions,date_start,date_stop");
-  endpoint.searchParams.set("level", "account");
-  endpoint.searchParams.set("time_range", JSON.stringify({
-    since: toDashboardDateKey(normalizedStartMs),
-    until: toDashboardDateKey(normalizedEndMs),
-  }));
-  endpoint.searchParams.set("access_token", accessToken);
-
-  const response = await fetch(endpoint.toString(), { method: "GET" });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error?.message || "Meta acquisition insights error");
+  const since = toDashboardDateKey(normalizedStartMs);
+  const until = toDashboardDateKey(normalizedEndMs);
+  const cacheKey = `${adAccountId}:${since}:${until}:${META_GRAPH_VERSION}`;
+  const ttl = Number.isFinite(META_INSIGHTS_CACHE_TTL_MS) && META_INSIGHTS_CACHE_TTL_MS > 0 ? META_INSIGHTS_CACHE_TTL_MS : 900000;
+  const cached = metaAcquisitionInsightsCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < ttl) {
+    return cached.value;
   }
 
-  const rows = Array.isArray(data?.data) ? data.data : [];
-  const spend = rows.reduce((sum, row) => sum + (Number(row?.spend) || 0), 0);
-  const clicks = rows.reduce((sum, row) => sum + (Number(row?.clicks) || 0), 0);
-  const inlineLinkClicks = rows.reduce((sum, row) => sum + (Number(row?.inline_link_clicks) || 0), 0);
-  const clickToWhatsappActions = sumMetaActionValues(rows, ["click_to_whatsapp", "whatsapp"]);
-  const messagingStartedActions = sumMetaActionValues(rows, ["messaging_conversation_started"]);
-  const resolvedClicks = clickToWhatsappActions || inlineLinkClicks || clicks;
+  const rows = [];
+  let nextUrl = new URL(`https://graph.facebook.com/${META_GRAPH_VERSION}/${adAccountId}/insights`);
+  nextUrl.searchParams.set(
+    "fields",
+    [
+      "date_start",
+      "date_stop",
+      "account_id",
+      "account_name",
+      "campaign_id",
+      "campaign_name",
+      "adset_id",
+      "adset_name",
+      "ad_id",
+      "ad_name",
+      "spend",
+      "impressions",
+      "reach",
+      "clicks",
+      "inline_link_clicks",
+      "actions",
+      "cost_per_action_type",
+    ].join(","),
+  );
+  nextUrl.searchParams.set("level", "ad");
+  nextUrl.searchParams.set("time_range", JSON.stringify({ since, until }));
+  nextUrl.searchParams.set("limit", "200");
+  nextUrl.searchParams.set("access_token", accessToken);
 
-  return {
+  for (let page = 0; nextUrl && page < 25; page += 1) {
+    const response = await fetch(nextUrl.toString(), { method: "GET" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error?.message || "Meta acquisition insights error");
+    }
+    rows.push(...(Array.isArray(data?.data) ? data.data.map(normalizeMetaAdInsightRow) : []));
+    const pagingNext = String(data?.paging?.next || "").trim();
+    nextUrl = pagingNext ? new URL(pagingNext) : null;
+  }
+
+  const summary = buildMetaAdInsightsSummary(rows);
+  const value = {
     configured: true,
-    spend,
-    clicks: resolvedClicks,
-    conversationsStarted: messagingStartedActions || resolvedClicks,
+    enabled: true,
+    adAccountId,
+    ...summary,
     rows,
   };
+  metaAcquisitionInsightsCache.set(cacheKey, { cachedAt: Date.now(), value });
+
+  return value;
 };
 
 const buildCustomerPhoneIndex = (customers = {}) => {
@@ -8102,50 +8203,69 @@ const customerHasAppointmentSignal = (customer = {}) => {
   });
 };
 
-const hasAdReferralSignal = (value, keywords = getAcquisitionAdKeywords()) => {
-  if (!value) return false;
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  const normalized = text.toLowerCase();
-  return keywords.some((keyword) => normalized.includes(keyword));
+const normalizeDashboardAdReferral = (value = {}) => {
+  if (!value || typeof value !== "object") return null;
+  const normalized = {
+    sourceType: String(value.sourceType || value.source_type || "").trim(),
+    adId: String(value.adId || value.ad_id || value.sourceId || value.source_id || "").trim(),
+    sourceId: String(value.sourceId || value.source_id || value.adId || value.ad_id || "").trim(),
+    sourceUrl: String(value.sourceUrl || value.source_url || "").trim(),
+    ctwaClid: String(value.ctwaClid || value.ctwa_clid || "").trim(),
+    headline: String(value.headline || "").trim(),
+    body: String(value.body || "").trim(),
+  };
+  if (
+    normalized.sourceType ||
+    normalized.adId ||
+    normalized.sourceId ||
+    normalized.sourceUrl ||
+    normalized.ctwaClid ||
+    normalized.headline ||
+    normalized.body
+  ) {
+    return normalized;
+  }
+  return null;
 };
 
 const resolveAdSignalDetails = (conversation = {}, messages = [], settings = {}) => {
-  const keywords = getAcquisitionAdKeywords(settings);
-  const matchedKeywords = new Set();
-  const collectKeywordMatches = (value) => {
-    if (!value) return false;
-    const text = typeof value === "string" ? value : JSON.stringify(value);
-    const normalized = text.toLowerCase();
-    let matched = false;
-    keywords.forEach((keyword) => {
-      if (normalized.includes(keyword)) {
-        matchedKeywords.add(keyword);
-        matched = true;
-      }
+  void settings;
+  let referral =
+    normalizeDashboardAdReferral(conversation?.adReferral) ||
+    normalizeDashboardAdReferral(conversation?.ad_referral) ||
+    normalizeDashboardAdReferral({
+      sourceType: conversation?.source === "meta_ads" || conversation?.origin === "meta_ads" ? "ad" : "",
+      adId: conversation?.meta_ad_id,
+      sourceId: conversation?.meta_source_id,
+      sourceUrl: conversation?.meta_source_url,
+      ctwaClid: conversation?.meta_ctwa_clid,
+      headline: conversation?.meta_ad_headline,
+      body: conversation?.meta_ad_body,
     });
-    return matched;
-  };
-
-  const conversationSignal =
-    Boolean(conversation?.adReferral || conversation?.ad_referral) ||
-    collectKeywordMatches(conversation?.adReferral || conversation?.ad_referral || conversation?.source || conversation?.origin);
-
   let firstSignalAtMs = toTimeMs(conversation?.ad_first_seen_at || conversation?.ad_last_seen_at);
+  let lastSignalAtMs = toTimeMs(conversation?.ad_last_seen_at || conversation?.ad_first_seen_at);
   for (const message of Array.isArray(messages) ? messages : []) {
-    const hasSignal =
-      Boolean(message?.adReferral || message?.ad_referral) ||
-      collectKeywordMatches(message?.adReferral || message?.ad_referral || message?.content || message?.text);
-    if (!hasSignal) continue;
+    const messageReferral =
+      normalizeDashboardAdReferral(message?.adReferral) ||
+      normalizeDashboardAdReferral(message?.ad_referral) ||
+      normalizeDashboardAdReferral(message?.referral) ||
+      normalizeDashboardAdReferral(message?.context?.referral);
+    if (!messageReferral) continue;
+    referral = referral || messageReferral;
     const ts = resolveDashboardMessageTimestampMs(message);
     if (Number.isFinite(ts) && (!Number.isFinite(firstSignalAtMs) || ts < firstSignalAtMs)) {
       firstSignalAtMs = ts;
     }
+    if (Number.isFinite(ts) && (!Number.isFinite(lastSignalAtMs) || ts > lastSignalAtMs)) {
+      lastSignalAtMs = ts;
+    }
   }
 
   return {
-    hasSignal: conversationSignal || matchedKeywords.size > 0 || Boolean(conversation?.adReferral || conversation?.ad_referral),
+    hasSignal: Boolean(referral),
     firstSignalAtMs: Number.isFinite(firstSignalAtMs) ? firstSignalAtMs : null,
-    keywords: Array.from(matchedKeywords),
+    lastSignalAtMs: Number.isFinite(lastSignalAtMs) ? lastSignalAtMs : null,
+    referral,
   };
 };
 
@@ -8160,18 +8280,25 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
   } catch (error) {
     meta = {
       configured: Boolean(String(META_MARKETING_ACCESS_TOKEN || "").trim() && normalizeMetaAdAccountId(META_AD_ACCOUNT_ID)),
+      enabled: META_AD_ENRICHMENT_ENABLED,
+      adAccountId: normalizeMetaAdAccountId(META_AD_ACCOUNT_ID),
       spend: 0,
       clicks: 0,
-      conversationsStarted: 0,
+      inlineLinkClicks: 0,
+      linkClicks: 0,
+      messagingConversationStarted7d: 0,
+      messagingFirstReply: 0,
       rows: [],
       error: error?.message || "Meta acquisition insights error",
     };
   }
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
+  const metaAdById = new Map((Array.isArray(meta.rows) ? meta.rows : []).filter((row) => row.adId).map((row) => [row.adId, row]));
+  const localByAdId = new Map();
   const adConversationIds = new Set();
   const appointmentPhones = new Set();
-  const customerPhones = new Set();
-  const keywordStats = new Map();
+  const adCustomerPhones = new Set();
+  const newCustomerPhones = new Set();
   const adCustomerRecords = [];
   const appointmentWindowMs = dashboardSettings.appointmentAttributionWindowDays * 24 * 60 * 60 * 1000;
 
@@ -8194,11 +8321,20 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     adConversationIds.add(conversationId);
     const phone = resolveDashboardConversationPhone(conversation, conversationId);
     const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
+    if (phone) adCustomerPhones.add(phone);
+    const referral = adSignal.referral || {};
+    const adId = referral.adId || referral.sourceId || "";
+    const metaAd = adId ? metaAdById.get(adId) : null;
+    const localStats = adId ? localByAdId.get(adId) || { localConversations: 0, localAppointments: 0, localCustomers: 0 } : null;
+    if (localStats) {
+      localStats.localConversations += 1;
+      if (phone) localStats.localCustomers += 1;
+      localByAdId.set(adId, localStats);
+    }
     let hasAppointment = false;
     let appointmentAt = "";
     let resolvedAt = "";
     if (customer) {
-      customerPhones.add(phone);
       const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
       const attributionStartMs = adSignal.firstSignalAtMs || normalizedStartMs;
       const insideAttributionWindow = [pendingMs, resolvedMs].some(
@@ -8214,9 +8350,20 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
         hasAppointment = true;
         appointmentAt = Number.isFinite(pendingMs) ? new Date(pendingMs).toISOString() : "";
         resolvedAt = Number.isFinite(resolvedMs) ? new Date(resolvedMs).toISOString() : "";
+        if (localStats) {
+          localStats.localAppointments += 1;
+          localByAdId.set(adId, localStats);
+        }
+      }
+      const registrationMs = getDashboardCustomerRegistrationMs(customer);
+      const firstAdMs = adSignal.firstSignalAtMs || normalizedStartMs;
+      // Some AppBarber imports do not expose the original registration date. In that case,
+      // treat the first ad referral as the safest available acquisition timestamp.
+      if (!Number.isFinite(registrationMs) || registrationMs >= firstAdMs - 24 * 60 * 60 * 1000) {
+        newCustomerPhones.add(getDashboardCustomerPhone(customer) || phone);
       }
     }
-    const stage = getDashboardAppointmentStage({ hasAppointment, hasCustomer: Boolean(customer) });
+    const stage = getDashboardAppointmentStage({ hasAppointment, hasCustomer: Boolean(customer && newCustomerPhones.has(getDashboardCustomerPhone(customer) || phone)) });
     const normalizedPhone = (customer && getDashboardCustomerPhone(customer)) || phone;
     if (normalizedPhone) {
       adCustomerRecords.push({
@@ -8227,57 +8374,79 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
         stageId: stage.id,
         stageLabel: stage.label,
         firstAdSeenAt: adSignal.firstSignalAtMs ? new Date(adSignal.firstSignalAtMs).toISOString() : "",
-        lastAdSeenAt: new Date(Math.max(adSignal.firstSignalAtMs || 0, adSeenAt || 0, lastMessageAtMs || 0, normalizedStartMs)).toISOString(),
+        lastAdSeenAt: new Date(Math.max(adSignal.lastSignalAtMs || 0, adSeenAt || 0, lastMessageAtMs || 0, normalizedStartMs)).toISOString(),
         lastMessageAt: lastMessageAtMs > 0 ? new Date(lastMessageAtMs).toISOString() : "",
         appointmentAt,
         resolvedAt,
-        keywords: adSignal.keywords,
+        adId,
+        sourceId: referral.sourceId || "",
+        ctwaClid: referral.ctwaClid || "",
+        campaignName: metaAd?.campaignName || "",
+        adsetName: metaAd?.adsetName || "",
+        adName: metaAd?.adName || "",
+        headline: referral.headline || "",
+        body: referral.body || "",
+        sourceUrl: referral.sourceUrl || "",
+        keywords: [],
       });
     }
-    const keywords = adSignal.keywords.length ? adSignal.keywords : ["sem-palavra-chave"];
-    keywords.forEach((keyword) => {
-      const current = keywordStats.get(keyword) || { keyword, conversations: 0, appointments: 0 };
-      current.conversations += 1;
-      if (customer && appointmentPhones.has(getDashboardCustomerPhone(customer) || phone)) {
-        current.appointments += 1;
-      }
-      keywordStats.set(keyword, current);
-    });
   }
 
-  const conversationsStarted = meta.conversationsStarted || adConversationIds.size;
+  const conversationsStarted = adConversationIds.size;
   const appointments = appointmentPhones.size;
-  const newCustomers = customerPhones.size;
+  const adCustomers = adCustomerPhones.size;
+  const newCustomers = newCustomerPhones.size;
   const spend = meta.spend || 0;
   const persistedAdCustomers = upsertDashboardAdCustomerRecords(operationStore, adCustomerRecords);
   if (mutationState && persistedAdCustomers.mutated) {
     mutationState.mutated = true;
   }
+  const ads = (Array.isArray(meta.rows) ? meta.rows : []).map((row) => {
+    const local = localByAdId.get(row.adId) || {};
+    return {
+      ...row,
+      localConversations: Number(local.localConversations || 0),
+      localAppointments: Number(local.localAppointments || 0),
+      localCustomers: Number(local.localCustomers || 0),
+    };
+  });
 
   return {
     period: {
+      since: toDashboardDateKey(normalizedStartMs),
+      until: toDashboardDateKey(normalizedEndMs),
       start: new Date(normalizedStartMs).toISOString(),
       end: new Date(normalizedEndMs).toISOString(),
     },
     meta: {
       configured: meta.configured,
+      enabled: meta.enabled !== false,
+      adAccountId: meta.adAccountId || normalizeMetaAdAccountId(META_AD_ACCOUNT_ID),
       error: meta.error || null,
       spend,
       clicks: meta.clicks || 0,
-      conversationsStarted,
+      inlineLinkClicks: meta.inlineLinkClicks || 0,
+      linkClicks: meta.linkClicks || 0,
+      messagingConversationStarted7d: meta.messagingConversationStarted7d || 0,
+      messagingFirstReply: meta.messagingFirstReply || 0,
     },
     local: {
       adConversations: adConversationIds.size,
       appointments,
       newCustomers,
+      adCustomers,
     },
     cards: {
-      adCustomers: newCustomers,
+      adCustomers,
       conversationsStarted,
       adAppointments: appointments,
+      appointments,
       cacPerAppointment: appointments > 0 ? spend / appointments : 0,
+      costPerAppointment: appointments > 0 ? spend / appointments : 0,
       cacPerNewCustomer: newCustomers > 0 ? spend / newCustomers : 0,
+      costPerNewCustomer: newCustomers > 0 ? spend / newCustomers : 0,
       adToAppointmentRate: conversationsStarted > 0 ? appointments / conversationsStarted : 0,
+      newCustomers,
     },
     funnel: {
       conversations: conversationsStarted,
@@ -8285,12 +8454,14 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       newCustomers,
     },
     adCustomers: persistedAdCustomers.items,
-    byKeyword: Array.from(keywordStats.values()).sort(
-      (left, right) => right.appointments - left.appointments || right.conversations - left.conversations,
-    ),
+    customers: persistedAdCustomers.items,
+    ads,
     settings: {
-      adKeywords: dashboardSettings.adKeywords,
       appointmentAttributionWindowDays: dashboardSettings.appointmentAttributionWindowDays,
+      metaInsightsCacheTtlMs: META_INSIGHTS_CACHE_TTL_MS,
+      metaAdLookbackDays: META_AD_LOOKBACK_DAYS,
+      localSource: "whatsapp_ad_referral",
+      appointmentSource: "appbarber_by_phone",
     },
   };
 };
@@ -26961,6 +27132,14 @@ const upsertStoredMessage = async ({
   if (adReferral && typeof adReferral === "object") {
     existingConversation.adReferral = adReferral;
     existingConversation.ad_referral = adReferral;
+    existingConversation.origin = "meta_ads";
+    existingConversation.source = "meta_ads";
+    existingConversation.meta_ad_id = adReferral.adId || adReferral.sourceId || existingConversation.meta_ad_id || "";
+    existingConversation.meta_source_id = adReferral.sourceId || existingConversation.meta_source_id || "";
+    existingConversation.meta_ctwa_clid = adReferral.ctwaClid || existingConversation.meta_ctwa_clid || "";
+    existingConversation.meta_ad_headline = adReferral.headline || existingConversation.meta_ad_headline || "";
+    existingConversation.meta_ad_body = adReferral.body || existingConversation.meta_ad_body || "";
+    existingConversation.meta_source_url = adReferral.sourceUrl || existingConversation.meta_source_url || "";
     existingConversation.ad_first_seen_at = existingConversation.ad_first_seen_at || eventAt;
     existingConversation.ad_last_seen_at = eventAt;
   }
@@ -28802,15 +28981,20 @@ const normalizeAdReferral = (message = {}) => {
           body: message?.body,
         };
   const normalized = {
+    origin: "meta_ads",
+    source: "meta_ads",
     sourceType: String(candidate?.source_type || candidate?.sourceType || "").trim(),
     sourceId: String(candidate?.source_id || candidate?.sourceId || candidate?.ad_id || candidate?.adId || "").trim(),
+    adId: String(candidate?.ad_id || candidate?.adId || candidate?.source_id || candidate?.sourceId || "").trim(),
     sourceUrl: String(candidate?.source_url || candidate?.sourceUrl || "").trim(),
     ctwaClid: String(candidate?.ctwa_clid || candidate?.ctwaClid || "").trim(),
     headline: String(candidate?.headline || "").trim(),
     body: String(candidate?.body || "").trim(),
   };
   if (
+    normalized.sourceType ||
     normalized.sourceId ||
+    normalized.adId ||
     normalized.sourceUrl ||
     normalized.ctwaClid ||
     /ad|advert|click|whatsapp|facebook|instagram|utm_/i.test(
@@ -55668,12 +55852,3 @@ server.listen(PORT, () => {
 } else {
   console.log("[freguesia-worker] HTTP server disabled; running background schedulers only");
 }
-
-
-
-
-
-
-
-
-
