@@ -100,12 +100,6 @@ const dashboards = {
         labels: ['Juliana A.', 'Atendente 2'],
         helper: 'Cortes realizados por responsável.',
       },
-      {
-        title: 'Tempo de resposta por dia',
-        type: 'line',
-        labels: days,
-        helper: '1ª resposta e TMR ao longo da semana.',
-      },
     ],
   },
   aquisicao: {
@@ -154,12 +148,6 @@ const dashboards = {
         labels: ['Template D+20', 'Template D+30', 'Template D+40', 'Template D+50'],
         helper: 'Mensagens com maior resposta e recuperação.',
       },
-      {
-        title: 'Recuperação ao longo do tempo',
-        type: 'line',
-        labels: days,
-        helper: 'Agendamentos e clientes recuperados por dia.',
-      },
     ],
   },
   base: {
@@ -192,12 +180,6 @@ const dashboards = {
         labels: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun'],
         helper: 'Percentual de clientes que retornaram.',
       },
-      {
-        title: 'Tempo médio entre cortes',
-        type: 'line',
-        labels: ['jan', 'fev', 'mar', 'abr', 'mai', 'jun'],
-        helper: 'Ciclo real de recompra da barbearia.',
-      },
     ],
   },
   experiencia: {
@@ -229,12 +211,6 @@ const dashboards = {
         type: 'bars',
         labels: ['1º corte', '4º corte', 'Fiéis', 'Trimestral'],
         helper: 'Satisfação por fase da jornada.',
-      },
-      {
-        title: 'Indicações e aniversários',
-        type: 'line',
-        labels: days,
-        helper: 'Indicações, aniversários enviados e agendas por aniversário.',
       },
     ],
   },
@@ -826,6 +802,8 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
   const [periodDays, setPeriodDays] = useState('30');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const filteredItems = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -834,7 +812,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
 
     return (Array.isArray(items) ? items : []).filter((item) => {
       const referenceMs = Date.parse(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt || '');
-      const matchesPeriod = !cutoffMs || (Number.isFinite(referenceMs) && referenceMs >= cutoffMs);
+      const matchesPeriod = periodDays === 'all' || !cutoffMs || (Number.isFinite(referenceMs) && referenceMs >= cutoffMs);
       const matchesStage = stageFilter === 'all' || String(item.stageId || '') === stageFilter;
       const haystack = [item.name, item.phone, item.stageLabel, item.campaignName, item.adsetName, item.adName, item.headline]
         .join(' ')
@@ -844,20 +822,42 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
     });
   }, [items, periodDays, search, stageFilter]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const visibleItems = filteredItems.slice((safeCurrentPage - 1) * pageSize, safeCurrentPage * pageSize);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [periodDays, search, stageFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
   return (
-    <section className="rounded-xl border border-border bg-card p-4 shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-foreground">Clientes dos anuncios</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Lista persistida dos contatos identificados por anuncio e etapa atual.</p>
+    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
+      <div className="flex flex-col gap-4 border-b border-border/80 p-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Megaphone className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="truncate text-sm font-bold uppercase tracking-[0.08em] text-foreground">Clientes dos anúncios</h3>
+              <p className="mt-0.5 max-w-xl text-xs text-muted-foreground">
+                Lista dos contatos identificados por anúncio e etapa atual.
+              </p>
+            </div>
+          </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <label className="space-y-1 text-xs font-semibold text-muted-foreground">
-            Periodo
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-32">
+            Período
             <select
               value={periodDays}
               onChange={(event) => setPeriodDays(event.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground"
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none transition-colors focus:border-primary/50"
             >
               <option value="30">30 dias</option>
               <option value="7">7 dias</option>
@@ -865,12 +865,12 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
               <option value="all">Todos</option>
             </select>
           </label>
-          <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+          <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-36">
             Etapa
             <select
               value={stageFilter}
               onChange={(event) => setStageFilter(event.target.value)}
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground"
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none transition-colors focus:border-primary/50"
             >
               <option value="all">Todas</option>
               <option value="conversation">Conversa</option>
@@ -879,82 +879,140 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
               <option value="new_customer">Cliente novo</option>
             </select>
           </label>
-          <label className="space-y-1 text-xs font-semibold text-muted-foreground">
+          <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-44">
             Buscar
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Nome ou telefone"
-              className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground outline-none"
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/50"
             />
           </label>
         </div>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-xl border border-border">
-        <div className="max-h-[420px] overflow-auto">
-          <table className="w-full min-w-[760px] border-collapse text-sm">
-            <thead className="sticky top-0 bg-muted text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-bold">Cliente</th>
-                <th className="px-4 py-3 font-bold">Telefone</th>
-                <th className="px-4 py-3 font-bold">Anúncio/Campanha</th>
-                <th className="px-4 py-3 font-bold">Etapa</th>
-                <th className="px-4 py-3 font-bold">Primeira conversa</th>
-                <th className="px-4 py-3 font-bold">Dados possíveis</th>
-                <th className="px-4 py-3 font-bold">Conversa</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.length ? (
-                filteredItems.map((item) => (
-                  <tr key={item.id || `${item.phone}-${item.conversationId}`} className="border-t border-border">
-                    <td className="px-4 py-3 font-semibold text-foreground">{item.name || 'Cliente sem nome'}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{item.phone || '-'}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      <div className="max-w-[220px]">
-                        <div className="truncate font-semibold text-foreground">
-                          {item.adName || item.campaignName || item.adId || (Array.isArray(item.keywords) && item.keywords.length ? item.keywords.join(', ') : '-')}
-                        </div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {item.campaignName || item.adsetName || (Array.isArray(item.keywords) && item.keywords.length ? 'Palavra-chave configurada' : '-')}
-                        </div>
+      <div className="overflow-hidden">
+        <table className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col className="w-[16%]" />
+            <col className="w-[15%]" />
+            <col className="w-[30%]" />
+            <col className="w-[14%]" />
+            <col className="w-[17%]" />
+            <col className="w-[8%]" />
+          </colgroup>
+          <thead className="bg-muted/70 text-left text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+            <tr>
+              <th className="px-4 py-3 font-bold">Cliente</th>
+              <th className="px-4 py-3 font-bold">Telefone</th>
+              <th className="px-4 py-3 font-bold">Anúncio/Campanha</th>
+              <th className="px-4 py-3 font-bold">Etapa</th>
+              <th className="px-4 py-3 font-bold">Primeira conversa</th>
+              <th className="px-4 py-3 text-center font-bold">Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleItems.length ? (
+              visibleItems.map((item) => {
+                const campaignTitle = item.adName || item.campaignName || item.adId || (Array.isArray(item.keywords) && item.keywords.length ? item.keywords.join(', ') : '-');
+                const campaignSubtitle = item.campaignName || item.adsetName || (Array.isArray(item.keywords) && item.keywords.length ? 'Palavra-chave configurada' : '-');
+
+                return (
+                  <tr key={item.id || `${item.phone}-${item.conversationId}`} className="border-t border-border/80 transition-colors hover:bg-muted/30">
+                    <td className="px-4 py-3 align-middle">
+                      <div className="truncate font-semibold text-foreground" title={item.name || 'Cliente sem nome'}>
+                        {item.name || 'Cliente sem nome'}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
-                        {item.stageLabel || 'Conversa'}
+                    <td className="px-4 py-3 align-middle text-muted-foreground">
+                      <span className="block truncate" title={item.phone || '-'}>
+                        {item.phone || '-'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatDashboardDate(item.firstAdSeenAt)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      <div className="max-w-[280px] space-y-1 text-xs">
-                        {item.headline || item.body ? <div className="truncate">{item.headline || item.body}</div> : null}
-                        <div>Último sinal: {formatDashboardDate(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt)}</div>
-                        <div>Agendamento: {formatDashboardDate(item.appointmentAt || item.resolvedAt)}</div>
+                    <td className="px-4 py-3 align-middle">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold text-foreground" title={campaignTitle}>
+                          {campaignTitle}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground" title={campaignSubtitle}>
+                          {campaignSubtitle}
+                        </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => onPreviewConversation?.(item)}
-                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-foreground transition-colors hover:bg-muted"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Ver
-                      </button>
+                    <td className="px-4 py-3 align-middle">
+                      <span className="inline-flex max-w-full items-center rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary">
+                        <span className="truncate">{item.stageLabel || 'Conversa'}</span>
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 align-middle text-muted-foreground">
+                      <span className="block truncate">{formatDashboardDate(item.firstAdSeenAt)}</span>
+                    </td>
+                    <td className="px-4 py-3 align-middle">
+                      <div className="flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => onPreviewConversation?.(item)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-foreground transition-colors hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                          title="Ver conversa"
+                          aria-label="Ver conversa"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
-                    Nenhum cliente de anuncio encontrado para os filtros.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                  Nenhum cliente de anúncio encontrado para os filtros.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-border/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-xs text-muted-foreground">
+          Exibindo <span className="font-semibold text-foreground">{visibleItems.length}</span> de{' '}
+          <span className="font-semibold text-foreground">{filteredItems.length}</span> contatos
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={safeCurrentPage <= 1}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-xs font-bold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Página anterior"
+          >
+            ‹
+          </button>
+          <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg bg-primary px-2 text-xs font-bold text-primary-foreground">
+            {safeCurrentPage}
+          </span>
+          <span className="text-xs text-muted-foreground">de {totalPages}</span>
+          <button
+            type="button"
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={safeCurrentPage >= totalPages}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-xs font-bold text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label="Próxima página"
+          >
+            ›
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setStageFilter('all');
+              setPeriodDays('all');
+            }}
+            className="ml-1 hidden h-8 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-foreground transition-colors hover:bg-muted sm:inline-flex"
+          >
+            Ver todos
+          </button>
         </div>
       </div>
     </section>
@@ -1131,46 +1189,6 @@ function aggregateAgentConversionRows(items = []) {
   return Array.from(rows.values())
     .map((item) => ({ ...item, conversionRate: item.conversations > 0 ? item.appointments / item.conversations : 0 }))
     .sort((left, right) => right.appointments - left.appointments || left.name.localeCompare(right.name));
-}
-
-function CampaignPerformanceCard({ ads = [], fallbackMetrics = {} }) {
-  const rows = (Array.isArray(ads) ? ads : []).slice(0, 4).map((ad, index) => {
-    const label = ad.adName || ad.campaignName || ad.keyword || `Campanha ${index + 1}`;
-    return {
-      label,
-      investment: Number(ad.spend || ad.investment || 0),
-      conversations: Number(ad.localConversations || ad.conversations || 0),
-      cost: Number(ad.localConversations || ad.conversations || 0) > 0 ? Number(ad.spend || ad.investment || 0) / Number(ad.localConversations || ad.conversations || 0) : 0,
-    };
-  });
-  const finalRows = rows.length ? rows : [{ label: 'Campanha do período', investment: Number(fallbackMetrics.investment || 0), conversations: Number(fallbackMetrics.conversationsStarted || 0), cost: Number(fallbackMetrics.costPerConversation || 0) }];
-  const maxValue = Math.max(1, ...finalRows.flatMap((row) => [row.investment, row.conversations, row.cost]));
-
-  return (
-    <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
-      <div className="mb-5">
-        <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Performance por campanha</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Veja o desempenho financeiro e de conversão das campanhas.</p>
-      </div>
-      <div className="mb-4 flex flex-wrap gap-4 text-xs font-semibold text-muted-foreground">
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-primary" />Investimento</span>
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-primary/35" />Conversas</span>
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-foreground" />Custo/conversa</span>
-      </div>
-      <div className="flex h-[250px] items-end gap-5 rounded-2xl bg-muted/20 px-4 pb-5 pt-8">
-        {finalRows.map((row) => (
-          <div key={row.label} className="flex min-w-0 flex-1 flex-col items-center gap-3">
-            <div className="flex h-40 w-full items-end justify-center gap-1.5">
-              <div className="w-5 rounded-t-lg bg-primary" style={{ height: `${Math.max(2, (row.investment / maxValue) * 100)}%` }} />
-              <div className="w-5 rounded-t-lg bg-primary/35" style={{ height: `${Math.max(2, (row.conversations / maxValue) * 100)}%` }} />
-              <div className="w-1.5 rounded-t-lg bg-foreground" style={{ height: `${Math.max(2, (row.cost / maxValue) * 100)}%` }} />
-            </div>
-            <div className="line-clamp-2 text-center text-[11px] font-bold uppercase leading-tight text-muted-foreground" title={row.label}>{row.label}</div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
 }
 
 function FollowUpRulePerformanceCard({ items = [] }) {
@@ -1584,7 +1602,6 @@ export default function Dashboard() {
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
       const byAgent = aggregateAgentConversionRows(attendanceMetrics?.byAgent || []);
-      const byDay = Array.isArray(attendanceMetrics?.byDay) ? attendanceMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Conversão por atendente') {
           return {
@@ -1595,24 +1612,12 @@ export default function Dashboard() {
             valueFormatter: formatPercent,
           };
         }
-        if (chart.title === 'Tempo de resposta por dia') {
-          return {
-            ...chart,
-            labels: byDay.map((item) => String(item.date || '').slice(5) || '-'),
-            values: byDay.length ? byDay.map((item) => item.firstResponseAverageSeconds || 0) : [],
-            secondValues: byDay.length ? byDay.map((item) => item.tmrSeconds || 0) : [],
-            firstLegend: '1ª resposta média',
-            secondLegend: 'TMR',
-            valueFormatter: formatDurationSeconds,
-          };
-        }
         return chart;
       });
     }
 
     if (activeDashboard === 'followup') {
       const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
-      const byDay = Array.isArray(followUpMetrics?.byDay) ? followUpMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Taxa de resposta por template') {
           return {
@@ -1620,17 +1625,6 @@ export default function Dashboard() {
             labels: byTemplate.length ? byTemplate.map((item) => item.templateName || item.routineName || 'Sem template') : chart.labels,
             values: byTemplate.length ? byTemplate.map((item) => Math.round((Number(item.responseRate) || 0) * 100)) : [],
             valueFormatter: formatPercent,
-          };
-        }
-        if (chart.title === 'Recuperação ao longo do tempo') {
-          return {
-            ...chart,
-            labels: byDay.length ? byDay.map((item) => String(item.date || '').slice(5) || '-') : chart.labels,
-            values: byDay.length ? byDay.map((item) => item.recovered || 0) : [],
-            secondValues: byDay.length ? byDay.map((item) => item.appointments || 0) : [],
-            firstLegend: 'Recuperados',
-            secondLegend: 'Agendamentos',
-            className: 'xl:col-span-2',
           };
         }
         return chart;
@@ -1658,22 +1652,12 @@ export default function Dashboard() {
             secondLegend: '',
           };
         }
-        if (chart.title === 'Tempo médio entre cortes') {
-          return {
-            ...chart,
-            labels: byMonth.length ? byMonth.map((item) => item.month.slice(5)) : chart.labels,
-            values: byMonth.length ? byMonth.map(() => baseMetrics?.cards?.averageCycleDays || 0) : [],
-            firstLegend: 'Dias',
-            secondLegend: '',
-          };
-        }
         return chart;
       });
     }
 
     if (activeDashboard === 'experiencia') {
       const bySegment = Array.isArray(experienceMetrics?.bySegment) ? experienceMetrics.bySegment : [];
-      const byDay = Array.isArray(experienceMetrics?.byDay) ? experienceMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
         if (chart.title === 'NPS geral') {
           return {
@@ -1686,16 +1670,6 @@ export default function Dashboard() {
             ...chart,
             labels: bySegment.length ? bySegment.map((item) => item.label) : chart.labels,
             values: bySegment.length ? bySegment.map((item) => item.average || 0) : [],
-          };
-        }
-        if (chart.title === 'Indicações e aniversários') {
-          return {
-            ...chart,
-            labels: byDay.length ? byDay.map((item) => String(item.date || '').slice(5) || '-') : chart.labels,
-            values: byDay.length ? byDay.map((item) => item.referrals || 0) : [],
-            secondValues: byDay.length ? byDay.map((item) => item.birthdayAppointments || 0) : [],
-            firstLegend: 'Indicações',
-            secondLegend: 'Agendas por aniversário',
           };
         }
         return chart;
@@ -1734,18 +1708,14 @@ export default function Dashboard() {
             <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
             {displaySideCharts[0] ? <ChartCard {...displaySideCharts[0]} className="min-h-[360px]" /> : null}
           </div>
-          {displaySideCharts[1] ? <ChartCard {...displaySideCharts[1]} className="min-h-[300px]" /> : null}
         </>
       ) : activeDashboard === 'aquisicao' ? (
         <>
           <AcquisitionFunnel values={acquisitionFunnelValues} />
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(560px,1.1fr)]">
-            <CampaignPerformanceCard ads={acquisitionMetrics?.ads || acquisitionMetrics?.byKeyword || []} fallbackMetrics={acquisitionMetrics?.cards || {}} />
-            <AcquisitionCustomersTable
-              items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []}
-              onPreviewConversation={setAcquisitionConversationPreview}
-            />
-          </div>
+          <AcquisitionCustomersTable
+            items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []}
+            onPreviewConversation={setAcquisitionConversationPreview}
+          />
         </>
       ) : activeDashboard === 'followup' ? (
         <>
@@ -1754,7 +1724,6 @@ export default function Dashboard() {
             <FollowUpRulePerformanceCard items={followUpMetrics?.byTemplate || []} />
             {displaySideCharts[0] ? <ChartCard {...displaySideCharts[0]} /> : null}
           </div>
-          {displaySideCharts[1] ? <ChartCard {...displaySideCharts[1]} className="min-h-[300px]" /> : null}
         </>
       ) : (
         <>
