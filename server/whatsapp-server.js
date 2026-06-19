@@ -7625,12 +7625,44 @@ const resolveDashboardMessageAgentRef = (message = {}, fallback = {}) => ({
   role_name: message.agent_role_name || message.agentRoleName || fallback.role_name || "",
 });
 
-const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore = {} } = {}) => {
+const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore = {}, filters = {} } = {}) => {
   const fallbackRange = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : fallbackRange.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : fallbackRange.endMs;
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
+  const selectedAttendant = normalizeDashboardText(filters.attendant || '');
+  const attendantUsers = getDashboardAttendantUsers(operationStore, dashboardSettings);
+  const matchesSelectedAttendant = (agentRef = {}) => {
+    if (!selectedAttendant || selectedAttendant === 'all' || selectedAttendant === 'todos') return true;
+    const candidates = [
+      agentRef.id,
+      agentRef.email,
+      agentRef.username,
+      agentRef.name,
+      agentRef.full_name,
+      agentRef.fullName,
+    ].map(normalizeDashboardText).filter(Boolean);
+    return candidates.includes(selectedAttendant);
+  };
+  const resolveConversationAssignedAgentRef = (conversation = {}) => ({
+    id: conversation.assigned_agent_id || conversation.assignedAgentId || '',
+    email: conversation.assigned_agent_email || conversation.assigned_agent || conversation.assignedAgent || '',
+    username: conversation.assigned_agent_username || conversation.assignedAgentUsername || '',
+    name: conversation.assigned_agent_name || conversation.assignedAgentName || conversation.assigned_agent || 'Sem atendente',
+    role: conversation.assigned_agent_role || conversation.assignedAgentRole || '',
+    role_name: conversation.assigned_agent_role_name || conversation.assignedAgentRoleName || '',
+  });
+  const preferenceByConversationId = new Map(
+    (Array.isArray(operationStore.conversationPreferences) ? operationStore.conversationPreferences : [])
+      .map((preference) => [String(preference?.conversation_id || preference?.conversationId || preference?.id || '').trim(), preference])
+      .filter(([conversationId]) => conversationId),
+  );
+  const isScheduledResolutionPreference = (preference = null) => {
+    if (!preference || String(preference?.resolution_status || '').trim() !== 'resolved') return false;
+    const type = normalizeDashboardText(preference?.resolution_type || preference?.type || '');
+    return ['scheduled', 'agendado', 'agendada', 'appointment', 'appointment_scheduled', 'agendamento'].includes(type);
+  };
 
   const normalizeDashboardMessageType = (message = {}) => {
     if (
@@ -7705,6 +7737,8 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const conversationsById = store?.conversations && typeof store.conversations === "object" ? store.conversations : {};
 
   for (const [conversationId, rawMessages] of Object.entries(store?.messages || {})) {
+    const conversation = conversationsById[conversationId] || {};
+    const assignedAgentRef = resolveConversationAssignedAgentRef(conversation);
     const messages = getSortedMessages(conversationId, rawMessages)
       .map((message) => ({
         ...message,
@@ -7728,7 +7762,10 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
         firstClientMessageInPeriodIndex,
         firstClientMessage.__ts,
       );
-      if (nextAgentMessage) {
+      const firstResponseAgentRef = nextAgentMessage
+        ? resolveDashboardMessageAgentRef(nextAgentMessage, assignedAgentRef)
+        : assignedAgentRef;
+      if (nextAgentMessage && matchesSelectedAttendant(firstResponseAgentRef)) {
         const firstResponseSeconds = Math.max(
           0,
           Math.round((nextAgentMessage.__ts - firstClientMessage.__ts) / 1000),
@@ -7748,13 +7785,17 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       if (message.__kind !== "client") continue;
       if (message.__ts < normalizedStartMs || message.__ts > normalizedEndMs) continue;
 
+      const nextAgentMessage = findNextAgentMessage(messages, index, message.__ts);
+      const responseAgentRef = nextAgentMessage
+        ? resolveDashboardMessageAgentRef(nextAgentMessage, assignedAgentRef)
+        : assignedAgentRef;
+      if (!matchesSelectedAttendant(responseAgentRef)) continue;
+
       clientMessages += 1;
       conversationIdsWithClientMessages.add(conversationId);
       const dayStatsEntry = ensureDayStats(dayKeyFromMs(message.__ts));
       dayStatsEntry.conversationIds.add(conversationId);
       dayStatsEntry.clientMessages += 1;
-
-      const nextAgentMessage = findNextAgentMessage(messages, index, message.__ts);
 
       if (!nextAgentMessage) {
         unansweredClientMessages += 1;
@@ -7797,20 +7838,14 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     return current;
   };
 
-  getDashboardAttendantUsers(operationStore, dashboardSettings).forEach((agentRef) => {
+  attendantUsers.filter(matchesSelectedAttendant).forEach((agentRef) => {
     ensureAgentConversionStats(agentRef);
   });
 
   for (const conversationId of conversationIdsWithClientMessages) {
     const conversation = conversationsById[conversationId] || {};
 
-    const assignedAgentRef = {
-      id: conversation.assigned_agent_id || conversation.assignedAgentId || "",
-      email: conversation.assigned_agent_email || conversation.assigned_agent || conversation.assignedAgent || "",
-      name: conversation.assigned_agent_name || conversation.assignedAgentName || conversation.assigned_agent || "Sem atendente",
-      role: conversation.assigned_agent_role || conversation.assignedAgentRole || "",
-      role_name: conversation.assigned_agent_role_name || conversation.assignedAgentRoleName || "",
-    };
+    const assignedAgentRef = resolveConversationAssignedAgentRef(conversation);
     const agentRef = resolveDashboardMessageAgentRef(
       firstAgentResponseByConversationId.get(conversationId),
       assignedAgentRef,
@@ -7822,14 +7857,20 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
 
     const phone = resolveDashboardConversationPhone(conversation, conversationId);
     const customer = findDashboardCustomerByPhone(customerIndex, phone);
-    const normalizedPhone = getDashboardCustomerPhone(customer) || phone;
-    if (!customer || !normalizedPhone) continue;
+    const normalizedPhone = getDashboardCustomerPhone(customer) || phone || conversationId;
 
-    const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
-    if (isWithinDashboardRange(pendingMs, normalizedStartMs, normalizedEndMs)) {
-      appointmentPhones.add(normalizedPhone);
+    if (customer) {
+      const { pendingMs } = getDashboardCustomerAppointmentStatusDates(customer);
+      if (isWithinDashboardRange(pendingMs, normalizedStartMs, normalizedEndMs)) {
+        appointmentPhones.add(normalizedPhone);
+      }
     }
-    if (!isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)) continue;
+
+    const preference = preferenceByConversationId.get(conversationId);
+    const scheduledResolutionMs = isScheduledResolutionPreference(preference)
+      ? Date.parse(String(preference?.resolved_at || preference?.updated_date || preference?.created_date || ''))
+      : null;
+    if (!isWithinDashboardRange(scheduledResolutionMs, normalizedStartMs, normalizedEndMs)) continue;
     if (conversionPhones.has(normalizedPhone)) continue;
     conversionPhones.add(normalizedPhone);
     if (agentStats) agentStats.appointments += 1;
@@ -7902,7 +7943,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       },
       conversions: {
         count: conversions,
-        source: "appbarber_resolved",
+        source: "conversation_resolution_scheduled",
       },
     },
     funnel: {
@@ -7918,6 +7959,14 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     },
     byDay,
     byAgent,
+    filters: {
+      attendants: attendantUsers.map((agentRef) => ({
+        id: String(agentRef.id || agentRef.email || agentRef.username || agentRef.name || '').trim(),
+        name: String(agentRef.name || agentRef.full_name || agentRef.username || agentRef.email || 'Sem atendente').trim(),
+        email: String(agentRef.email || '').trim(),
+        username: String(agentRef.username || '').trim(),
+      })),
+    },
     settings: {
       attendantRoleKeywords: dashboardSettings.attendantRoleKeywords,
     },
@@ -34836,7 +34885,14 @@ const server = http.createServer(async (req, res) => {
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
       const store = await readStore({ mutable: false });
       const operationStore = await readOperationStore();
-      const metrics = buildAttendanceDashboardMetrics(store, { startMs, endMs, operationStore });
+      const metrics = buildAttendanceDashboardMetrics(store, {
+        startMs,
+        endMs,
+        operationStore,
+        filters: {
+          attendant: url.searchParams.get('attendant') || '',
+        },
+      });
       if (persistDashboardMetricSnapshot(operationStore, "attendance", metrics)) {
         await writeOperationStore(operationStore);
       }

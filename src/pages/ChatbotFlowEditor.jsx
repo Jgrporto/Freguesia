@@ -437,6 +437,7 @@ function PropertyPanel({
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="resolved">Resolvido</SelectItem>
+                  <SelectItem value="scheduled">Agendado</SelectItem>
                   <SelectItem value="no_interaction">Falta de Interacao</SelectItem>
                 </SelectContent>
               </Select>

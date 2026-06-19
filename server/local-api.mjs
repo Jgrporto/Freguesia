@@ -1648,7 +1648,11 @@ const finishChatbotConversation = (store, conversationId, nodeData) => {
     id: index >= 0 ? preferences[index].id : `preference-${crypto.randomUUID()}`,
     conversation_id: conversationId,
     resolution_status: 'resolved',
-    resolution_type: nodeData.finishType === 'no_interaction' ? 'no_interaction' : 'resolved',
+    resolution_type: nodeData.finishType === 'no_interaction'
+      ? 'no_interaction'
+      : nodeData.finishType === 'scheduled'
+        ? 'scheduled'
+        : 'resolved',
     resolved_at: timestamp,
     resolved_until: null,
     updated_date: timestamp,

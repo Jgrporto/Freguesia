@@ -17,7 +17,6 @@ import {
   MessageSquare,
   PiggyBank,
   Repeat2,
-  Scissors,
   Send,
   Sparkles,
   Star,
@@ -76,17 +75,17 @@ const dashboardTabs = [
 const dashboards = {
   atendimento: {
     title: 'Atendimento e Conversão',
-    subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em cortes.',
+    subtitle: 'Mede se as atendentes estão respondendo rápido e transformando conversas em agendamentos.',
     cards: [
       { title: 'Conversas recebidas', value: '0', subtitle: 'Volume total no período', icon: MessageSquare },
       { title: '1ª resposta média', value: '00:00', subtitle: 'Tempo até o primeiro retorno', icon: TimerReset },
       { title: 'TMR', value: '00:00', subtitle: 'Tempo médio de resposta', icon: Clock3 },
-      { title: 'Cortes realizados', value: '0', subtitle: 'Conversas que viraram corte', icon: Scissors },
-      { title: 'Taxa de conversão', value: '0%', subtitle: 'Cortes / conversas', icon: Target },
+      { title: 'Agendamentos realizados', value: '0', subtitle: 'Finalizações marcadas como agendado', icon: CalendarDays },
+      { title: 'Taxa de conversão', value: '0%', subtitle: 'Agendamentos / conversas', icon: Target },
     ],
     main: {
       title: 'Funil de conversão',
-      description: 'Acompanhe a passagem de conversas para cortes realizados.',
+      description: 'Acompanhe a passagem de conversas para agendamentos realizados.',
       type: 'atendimentoFunnel',
       values: {
         conversations: 0,
@@ -98,7 +97,7 @@ const dashboards = {
         title: 'Conversão por atendente',
         type: 'bars',
         labels: ['Juliana A.', 'Atendente 2'],
-        helper: 'Cortes realizados por responsável.',
+        helper: 'Agendamentos realizados por responsável.',
       },
     ],
   },
@@ -271,7 +270,7 @@ const dashboardDatePresets = [
   { id: 'today', label: 'Hoje', getRange: () => getDateRangeForLastDays(1) },
   { id: '7days', label: '7 dias', getRange: () => getDateRangeForLastDays(7) },
   { id: '30days', label: '30 dias', getRange: () => getDateRangeForLastDays(30) },
-  { id: 'month', label: 'Este mes', getRange: getCurrentMonthDateRange },
+  { id: 'month', label: 'Este Mês', getRange: getCurrentMonthDateRange },
 ];
 
 const formatDurationSeconds = (seconds) => {
@@ -580,13 +579,13 @@ function AtendimentoConversionFunnel({ values }) {
     { label: 'Conversas', value: conversations, base: conversations, icon: MessageSquare },
     { label: 'Respondidas', value: responded, base: conversations, icon: MessageCircle, loss: Math.max(conversations - responded, 0) },
     { label: 'Agendamentos', value: appointments, base: conversations, icon: CalendarDays, loss: Math.max(responded - appointments, 0) },
-    { label: 'Cortes realizados', value: conversions, base: conversations, icon: Scissors, loss: Math.max(appointments - conversions, 0) },
+    { label: 'Agendamentos realizados', value: conversions, base: conversations, icon: CalendarDays, loss: Math.max(appointments - conversions, 0) },
   ];
   const finalRate = safeRate(conversions, conversations);
   const biggestLoss = [
     { label: 'Conversas e Respondidas', loss: Math.max(conversations - responded, 0) },
     { label: 'Respondidas e Agendamentos', loss: Math.max(responded - appointments, 0) },
-    { label: 'Agendamentos e Cortes', loss: Math.max(appointments - conversions, 0) },
+    { label: 'Agendamentos e Realizados', loss: Math.max(appointments - conversions, 0) },
   ].sort((a, b) => b.loss - a.loss)[0];
 
   return (
@@ -599,7 +598,7 @@ function AtendimentoConversionFunnel({ values }) {
         {stages.map((stage, index) => <MiniFunnelStep key={stage.label} stage={stage} index={index} total={stages.length} />)}
       </div>
       <div className="mt-5 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground">
-        <span className="font-black text-primary">Insight:</span> {formatPercent(finalRate)} das conversas viraram cortes.
+        <span className="font-black text-primary">Insight:</span> {formatPercent(finalRate)} das conversas viraram agendamentos realizados.
         {biggestLoss?.loss > 0 ? ` O maior ponto de perda está entre ${biggestLoss.label}.` : ' Ainda não há perdas relevantes no período.'}
       </div>
     </section>
@@ -1059,7 +1058,7 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
     <div className="flex flex-wrap items-center gap-3 xl:justify-end">
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
         <Calendar className="h-4 w-4 text-muted-foreground" />
-        <span className="font-medium">Início</span>
+        <span className="font-medium">Data Início</span>
         <input
           type="date"
           value={startDate}
@@ -1068,7 +1067,7 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
         />
       </label>
       <label className="inline-flex h-11 items-center gap-3 rounded-xl border border-border bg-card px-3.5 text-sm text-muted-foreground shadow-[0_2px_8px_rgba(15,23,42,0.05)]">
-        <span className="font-medium">Fim</span>
+        <span className="font-medium">Data Fim</span>
         <input
           type="date"
           value={endDate}
@@ -1081,32 +1080,47 @@ function DateFilter({ startDate, endDate, onStartDateChange, onEndDateChange }) 
   );
 }
 
-const dashboardFilterMeta = {
-  atendimento: [
-    { label: 'Atendente', value: 'Todos', icon: UserRound },
-    { label: 'Serviço', value: 'Todos', icon: Scissors },
-  ],
-  aquisicao: [
-    { label: 'Campanha', value: 'Todas', icon: Megaphone },
-    { label: 'Origem', value: 'Todas', icon: Target },
-  ],
-  followup: [
-    { label: 'Régua', value: 'Todas', icon: Filter },
-    { label: 'Template', value: 'Todos', icon: Send },
-  ],
-  base: [
-    { label: 'Serviço', value: 'Todos', icon: Scissors },
-    { label: 'Profissional', value: 'Todos', icon: UserRound },
-  ],
-  experiencia: [
-    { label: 'Tipo de cliente', value: 'Todos', icon: Users },
-    { label: 'Campanha', value: 'Todas', icon: Target },
-  ],
+const ALL_FILTER_VALUE = 'all';
+
+const buildFilterOption = (value, label) => ({
+  value: String(value || '').trim() || ALL_FILTER_VALUE,
+  label: String(label || value || '').trim() || 'Sem nome',
+});
+
+const uniqFilterOptions = (options = []) => {
+  const seen = new Set();
+  return options.filter((option) => {
+    const value = String(option?.value || '').trim();
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    return true;
+  });
 };
 
-function CompactFilterSelect({ label, value, icon: Icon, children, onChange }) {
+const normalizeFilterCompareValue = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+const matchesFilterOption = (selectedValue, candidates = []) => {
+  const normalizedSelected = normalizeFilterCompareValue(selectedValue);
+  if (!normalizedSelected || normalizedSelected === ALL_FILTER_VALUE) return true;
+  return candidates.some((candidate) => normalizeFilterCompareValue(candidate) === normalizedSelected);
+};
+
+const npsCustomerTypeOptions = [
+  buildFilterOption(ALL_FILTER_VALUE, 'Todos'),
+  buildFilterOption('detrator', 'Detrator'),
+  buildFilterOption('passivo', 'Passivo'),
+  buildFilterOption('promotor', 'Promotor'),
+];
+
+function CompactFilterSelect({ label, value, icon: Icon, children, onChange, className }) {
   return (
-    <label className="flex min-w-[190px] items-center gap-3 rounded-xl border border-border/80 bg-background px-3 py-2.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)]">
+    <label className={cn('flex min-w-[190px] items-center gap-3 rounded-xl border border-border/80 bg-background px-3 py-2.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)]', className)}>
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0 flex-1">
         <span className="block text-[11px] font-semibold text-muted-foreground">{label}</span>
@@ -1123,48 +1137,67 @@ function CompactFilterSelect({ label, value, icon: Icon, children, onChange }) {
   );
 }
 
-function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChange }) {
+function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChange, filterValues = {}, filterOptions = {}, onFilterChange }) {
   const activePreset = dashboardDatePresets.find((preset) => {
     const range = preset.getRange();
     return range.start === startDate && range.end === endDate;
   })?.id || 'custom';
-  const meta = dashboardFilterMeta[activeDashboard] || dashboardFilterMeta.atendimento;
+
+  const selectFields = {
+    atendimento: [
+      { key: 'attendant', label: 'Atendente', icon: UserRound, options: filterOptions.attendants || [buildFilterOption(ALL_FILTER_VALUE, 'Todos')] },
+    ],
+    aquisicao: [
+      { key: 'campaign', label: 'Campanha', icon: Megaphone, options: filterOptions.campaigns || [buildFilterOption(ALL_FILTER_VALUE, 'Todas')] },
+    ],
+    followup: [
+      { key: 'rule', label: 'Régua', icon: Filter, options: filterOptions.rules || [buildFilterOption(ALL_FILTER_VALUE, 'Todas')] },
+      { key: 'template', label: 'Template', icon: Send, options: filterOptions.templates || [buildFilterOption(ALL_FILTER_VALUE, 'Todos')] },
+    ],
+    base: [],
+    experiencia: [
+      { key: 'customerType', label: 'Tipo de cliente', icon: Users, options: npsCustomerTypeOptions },
+    ],
+  }[activeDashboard] || [];
 
   return (
     <section className="rounded-2xl border border-border/80 bg-card/95 p-4 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
-          <CompactFilterSelect
-            label="Período"
-            value={activePreset}
-            icon={Calendar}
-            onChange={(event) => {
-              const preset = dashboardDatePresets.find((item) => item.id === event.target.value);
-              if (preset) onDateRangeChange(preset.getRange());
-            }}
-          >
-            {dashboardDatePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-            <option value="custom">Personalizado</option>
-          </CompactFilterSelect>
-          {meta.map((item) => <CompactFilterSelect key={item.label} {...item} />)}
-          {activePreset === 'custom' ? (
-            <div className="flex flex-wrap gap-2">
-              <DateFilter
-                startDate={startDate}
-                endDate={endDate}
-                onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
-                onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
-              />
-            </div>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-border/80 bg-background px-5 text-sm font-black text-foreground shadow-[0_2px_10px_rgba(15,23,42,0.03)] transition-colors hover:bg-muted/60"
+      <div className="flex flex-wrap items-end gap-3">
+        <CompactFilterSelect
+          label="Período"
+          value={activePreset}
+          icon={Calendar}
+          onChange={(event) => {
+            const preset = dashboardDatePresets.find((item) => item.id === event.target.value);
+            if (preset) onDateRangeChange(preset.getRange());
+          }}
         >
-          <ExternalLink className="h-4 w-4" />
-          Exportar relatório
-        </button>
+          {activePreset === 'custom' ? <option value="custom">Personalizado</option> : null}
+          {dashboardDatePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+        </CompactFilterSelect>
+
+        {selectFields.map((field) => {
+          const options = uniqFilterOptions(field.options || []);
+          const value = filterValues[field.key] || ALL_FILTER_VALUE;
+          return (
+            <CompactFilterSelect
+              key={field.key}
+              label={field.label}
+              value={value}
+              icon={field.icon}
+              onChange={(event) => onFilterChange?.(activeDashboard, field.key, event.target.value)}
+            >
+              {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </CompactFilterSelect>
+          );
+        })}
+
+        <DateFilter
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={(nextStart) => onDateRangeChange({ start: nextStart, end: endDate })}
+          onEndDateChange={(nextEnd) => onDateRangeChange({ start: startDate, end: nextEnd })}
+        />
       </div>
     </section>
   );
@@ -1238,7 +1271,14 @@ function FollowUpRulePerformanceCard({ items = [] }) {
 
 export default function Dashboard() {
   const [activeDashboard, setActiveDashboard] = useState('atendimento');
-  const [{ start, end }, setDateRange] = useState(() => getDefaultDateRange());
+  const [{ start, end }, setDateRange] = useState(() => getDateRangeForLastDays(30));
+  const [dashboardFilters, setDashboardFilters] = useState({
+    atendimento: { attendant: ALL_FILTER_VALUE },
+    aquisicao: { campaign: ALL_FILTER_VALUE },
+    followup: { rule: ALL_FILTER_VALUE, template: ALL_FILTER_VALUE },
+    base: {},
+    experiencia: { customerType: ALL_FILTER_VALUE },
+  });
   const [attendanceMetrics, setAttendanceMetrics] = useState(null);
   const [acquisitionMetrics, setAcquisitionMetrics] = useState(null);
   const [followUpMetrics, setFollowUpMetrics] = useState(null);
@@ -1247,6 +1287,21 @@ export default function Dashboard() {
   const [acquisitionConversationPreview, setAcquisitionConversationPreview] = useState(null);
   const current = dashboards[activeDashboard];
   const currentMain = useMemo(() => current.main, [current]);
+  const activeFilterValues = dashboardFilters[activeDashboard] || {};
+  const attendanceFilters = dashboardFilters.atendimento || {};
+  const acquisitionFilters = dashboardFilters.aquisicao || {};
+  const followUpFilters = dashboardFilters.followup || {};
+  const experienceFilters = dashboardFilters.experiencia || {};
+
+  const handleDashboardFilterChange = (dashboardId, key, value) => {
+    setDashboardFilters((currentFilters) => ({
+      ...currentFilters,
+      [dashboardId]: {
+        ...(currentFilters[dashboardId] || {}),
+        [key]: value || ALL_FILTER_VALUE,
+      },
+    }));
+  };
 
   useEffect(() => {
     if (activeDashboard !== 'atendimento') return;
@@ -1255,6 +1310,9 @@ export default function Dashboard() {
     const searchParams = new URLSearchParams();
     if (start) searchParams.set('start', start);
     if (end) searchParams.set('end', end);
+    if (attendanceFilters.attendant && attendanceFilters.attendant !== ALL_FILTER_VALUE) {
+      searchParams.set('attendant', attendanceFilters.attendant);
+    }
 
     fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/attendance?${searchParams.toString()}`), {
       signal: controller.signal,
@@ -1271,7 +1329,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, [activeDashboard, start, end]);
+  }, [activeDashboard, attendanceFilters.attendant, start, end]);
 
   useEffect(() => {
     if (activeDashboard !== 'aquisicao') return;
@@ -1280,6 +1338,9 @@ export default function Dashboard() {
     const searchParams = new URLSearchParams();
     if (start) searchParams.set('start', start);
     if (end) searchParams.set('end', end);
+    if (acquisitionFilters.campaign && acquisitionFilters.campaign !== ALL_FILTER_VALUE) {
+      searchParams.set('campaign', acquisitionFilters.campaign);
+    }
 
     fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/acquisition?${searchParams.toString()}`), {
       signal: controller.signal,
@@ -1296,7 +1357,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, [activeDashboard, start, end]);
+  }, [activeDashboard, acquisitionFilters.campaign, start, end]);
 
   useEffect(() => {
     if (activeDashboard !== 'followup') return;
@@ -1305,6 +1366,12 @@ export default function Dashboard() {
     const searchParams = new URLSearchParams();
     if (start) searchParams.set('start', start);
     if (end) searchParams.set('end', end);
+    if (followUpFilters.rule && followUpFilters.rule !== ALL_FILTER_VALUE) {
+      searchParams.set('rule', followUpFilters.rule);
+    }
+    if (followUpFilters.template && followUpFilters.template !== ALL_FILTER_VALUE) {
+      searchParams.set('template', followUpFilters.template);
+    }
 
     fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/followup?${searchParams.toString()}`), {
       signal: controller.signal,
@@ -1321,7 +1388,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, [activeDashboard, start, end]);
+  }, [activeDashboard, followUpFilters.rule, followUpFilters.template, start, end]);
 
   useEffect(() => {
     if (activeDashboard !== 'base') return;
@@ -1355,6 +1422,9 @@ export default function Dashboard() {
     const searchParams = new URLSearchParams();
     if (start) searchParams.set('start', start);
     if (end) searchParams.set('end', end);
+    if (experienceFilters.customerType && experienceFilters.customerType !== ALL_FILTER_VALUE) {
+      searchParams.set('customerType', experienceFilters.customerType);
+    }
 
     fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/experience?${searchParams.toString()}`), {
       signal: controller.signal,
@@ -1371,7 +1441,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, [activeDashboard, start, end]);
+  }, [activeDashboard, experienceFilters.customerType, start, end]);
 
   const cards = useMemo(() => {
     if (activeDashboard === 'aquisicao') {
@@ -1515,11 +1585,11 @@ export default function Dashboard() {
         };
       }
 
-      if (card.title === 'Cortes realizados') {
+      if (card.title === 'Agendamentos realizados') {
         return {
           ...card,
           value: formatInteger(appointments),
-          subtitle: 'Com conversa no WhatsApp + resolvidos',
+          subtitle: 'Finalização Agendado no WhatsApp',
         };
       }
 
@@ -1527,7 +1597,7 @@ export default function Dashboard() {
         return {
           ...card,
           value: formatPercentCard(conversionRate),
-          subtitle: 'Cortes / conversas',
+          subtitle: 'Agendamentos / conversas'
         };
       }
 
@@ -1601,14 +1671,17 @@ export default function Dashboard() {
 
   const displaySideCharts = useMemo(() => {
     if (activeDashboard === 'atendimento') {
-      const byAgent = aggregateAgentConversionRows(attendanceMetrics?.byAgent || []);
+      const selectedAttendant = attendanceFilters.attendant || ALL_FILTER_VALUE;
+      const byAgent = aggregateAgentConversionRows(attendanceMetrics?.byAgent || []).filter((item) =>
+        matchesFilterOption(selectedAttendant, [item.id, item.name, item.email, item.username]),
+      );
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Conversão por atendente') {
           return {
             ...chart,
             labels: byAgent.map((item) => item.name || 'Sem atendente'),
             values: byAgent.length ? byAgent.map((item) => Math.round((Number(item.conversionRate) || 0) * 1000) / 10) : [],
-            helper: 'Percentual de conversas que viraram corte por atendente.',
+            helper: 'Percentual de conversas que viraram agendamento por atendente.',
             valueFormatter: formatPercent,
           };
         }
@@ -1617,7 +1690,10 @@ export default function Dashboard() {
     }
 
     if (activeDashboard === 'followup') {
-      const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
+      const byTemplate = (Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [])
+        .filter((item) => matchesFilterOption(followUpFilters.rule, [item.routineName, item.routineId]))
+        .filter((item) => matchesFilterOption(followUpFilters.template, [item.templateName]))
+        .slice(0, 8);
       return current.sideCharts.map((chart) => {
         if (chart.title === 'Taxa de resposta por template') {
           return {
@@ -1677,7 +1753,69 @@ export default function Dashboard() {
     }
 
     return current.sideCharts;
-  }, [activeDashboard, acquisitionMetrics, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpMetrics]);
+  }, [activeDashboard, acquisitionMetrics, attendanceFilters.attendant, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpFilters.rule, followUpFilters.template, followUpMetrics]);
+
+  const filteredAcquisitionCustomers = useMemo(() => {
+    const rows = acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || [];
+    return (Array.isArray(rows) ? rows : []).filter((item) =>
+      matchesFilterOption(acquisitionFilters.campaign, [item.campaignName, item.campaign, item.adName, item.adId]),
+    );
+  }, [acquisitionFilters.campaign, acquisitionMetrics]);
+
+  const filteredFollowUpRows = useMemo(() => {
+    const rows = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [];
+    return rows
+      .filter((item) => matchesFilterOption(followUpFilters.rule, [item.routineName, item.routineId]))
+      .filter((item) => matchesFilterOption(followUpFilters.template, [item.templateName]));
+  }, [followUpFilters.rule, followUpFilters.template, followUpMetrics]);
+
+  const dashboardFilterOptions = useMemo(() => {
+    const attendantSource = Array.isArray(attendanceMetrics?.filters?.attendants)
+      ? attendanceMetrics.filters.attendants
+      : Array.isArray(attendanceMetrics?.byAgent)
+        ? attendanceMetrics.byAgent
+        : [];
+    const attendants = [
+      buildFilterOption(ALL_FILTER_VALUE, 'Todos'),
+      ...attendantSource.map((item) => buildFilterOption(item.id || item.name, item.name || item.id)),
+    ];
+
+    const acquisitionRows = [
+      ...(Array.isArray(acquisitionMetrics?.ads) ? acquisitionMetrics.ads : []),
+      ...(Array.isArray(acquisitionMetrics?.customers) ? acquisitionMetrics.customers : []),
+      ...(Array.isArray(acquisitionMetrics?.adCustomers) ? acquisitionMetrics.adCustomers : []),
+    ];
+    const campaigns = [
+      buildFilterOption(ALL_FILTER_VALUE, 'Todas'),
+      ...acquisitionRows
+        .map((item) => item.campaignName || item.campaign || item.adName || item.adId || '')
+        .filter(Boolean)
+        .map((name) => buildFilterOption(name, name)),
+    ];
+
+    const followRows = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [];
+    const rules = [
+      buildFilterOption(ALL_FILTER_VALUE, 'Todas'),
+      ...followRows
+        .map((item) => item.routineName || item.routineId || '')
+        .filter(Boolean)
+        .map((name) => buildFilterOption(name, name)),
+    ];
+    const templates = [
+      buildFilterOption(ALL_FILTER_VALUE, 'Todos'),
+      ...followRows
+        .map((item) => item.templateName || '')
+        .filter(Boolean)
+        .map((name) => buildFilterOption(name, name)),
+    ];
+
+    return {
+      attendants: uniqFilterOptions(attendants),
+      campaigns: uniqFilterOptions(campaigns),
+      rules: uniqFilterOptions(rules),
+      templates: uniqFilterOptions(templates),
+    };
+  }, [acquisitionMetrics, attendanceMetrics, followUpMetrics]);
 
   return (
     <PageShell className="gap-5 lg:gap-6">
@@ -1693,6 +1831,9 @@ export default function Dashboard() {
         activeDashboard={activeDashboard}
         startDate={start}
         endDate={end}
+        filterValues={activeFilterValues}
+        filterOptions={dashboardFilterOptions}
+        onFilterChange={handleDashboardFilterChange}
         onDateRangeChange={(nextRange) => setDateRange((currentRange) => ({ ...currentRange, ...nextRange }))}
       />
 
@@ -1713,7 +1854,7 @@ export default function Dashboard() {
         <>
           <AcquisitionFunnel values={acquisitionFunnelValues} />
           <AcquisitionCustomersTable
-            items={acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || []}
+            items={filteredAcquisitionCustomers}
             onPreviewConversation={setAcquisitionConversationPreview}
           />
         </>
@@ -1721,7 +1862,7 @@ export default function Dashboard() {
         <>
           <AcquisitionFunnel values={mainChartProps.values} mode="followup" />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <FollowUpRulePerformanceCard items={followUpMetrics?.byTemplate || []} />
+            <FollowUpRulePerformanceCard items={filteredFollowUpRows} />
             {displaySideCharts[0] ? <ChartCard {...displaySideCharts[0]} /> : null}
           </div>
         </>

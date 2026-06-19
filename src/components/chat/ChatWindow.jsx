@@ -2230,7 +2230,12 @@ export default function ChatWindow({
       Number.isFinite(lastClientMessageMs) && lastClientMessageMs > 0
         ? new Date(lastClientMessageMs + 24 * 60 * 60 * 1000).toISOString()
         : new Date(Date.parse(resolvedAt) + 24 * 60 * 60 * 1000).toISOString();
-    const resolutionLabel = resolveType === 'lack_of_interaction' ? 'falta de interação' : 'atendimento encerrado';
+    const resolutionLabels = {
+      resolved: 'atendimento encerrado',
+      scheduled: 'agendado',
+      lack_of_interaction: 'falta de interação',
+    };
+    const resolutionLabel = resolutionLabels[resolveType] || 'atendimento encerrado';
 
     setIsResolvingConversation(true);
 
@@ -2798,6 +2803,18 @@ export default function ChatWindow({
             >
               <p className="text-sm font-medium text-foreground">Resolvido</p>
               <p className="text-xs text-muted-foreground">Finaliza o atendimento com sucesso.</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setResolveType('scheduled')}
+              className={cn(
+                'w-full rounded-xl border px-4 py-3 text-left transition-colors',
+                resolveType === 'scheduled' ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40'
+              )}
+            >
+              <p className="text-sm font-medium text-foreground">Agendado</p>
+              <p className="text-xs text-muted-foreground">Conta como agendamento realizado na dashboard.</p>
             </button>
 
             <button

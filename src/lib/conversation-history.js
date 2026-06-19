@@ -13,7 +13,12 @@ const createStableHash = (value) => {
 
 export const buildConversationResolutionSystemMessage = ({ conversationId, type, agentName }) => {
   const createdAt = new Date().toISOString();
-  const typeLabel = type === 'lack_of_interaction' ? 'Falta de interação' : 'Resolvido';
+  const typeLabels = {
+    resolved: 'Resolvido',
+    scheduled: 'Agendado',
+    lack_of_interaction: 'Falta de interação',
+  };
+  const typeLabel = typeLabels[type] || 'Resolvido';
 
   return {
     id: `conversation-resolution-${createStableHash(`${conversationId}|${type}|${createdAt}`)}`,
