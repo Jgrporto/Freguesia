@@ -8670,6 +8670,32 @@ const buildDashboardClientMessagesByPhone = (store = {}) => {
   return byPhone;
 };
 
+const getFollowUpDashboardFactKey = (routineId = "", phone = "") => `${String(routineId || "sem-rotina").trim()}:${normalizePhone(phone)}`;
+
+const normalizeFollowUpDashboardFact = (value = {}) => {
+  const sentAtMs = Date.parse(String(value?.sentAt || value?.sent_at || ""));
+  const responseAtMs = Date.parse(String(value?.responseAt || value?.response_at || ""));
+  const appointmentAtMs = Date.parse(String(value?.appointmentAt || value?.appointment_at || ""));
+  const recoveredAtMs = Date.parse(String(value?.recoveredAt || value?.recovered_at || ""));
+  const phone = normalizePhone(value?.phone || "");
+  const routineId = String(value?.routineId || value?.routine_id || "sem-rotina").trim() || "sem-rotina";
+  return {
+    ...value,
+    routineId,
+    routineName: String(value?.routineName || value?.routine_name || "Sem rotina").trim() || "Sem rotina",
+    templateName: String(value?.templateName || value?.template_name || "Sem template").trim() || "Sem template",
+    phone,
+    sentAt: Number.isFinite(sentAtMs) ? new Date(sentAtMs).toISOString() : null,
+    responded: Boolean(value?.responded),
+    responseAt: Number.isFinite(responseAtMs) ? new Date(responseAtMs).toISOString() : null,
+    responseSource: value?.responseSource || value?.response_source || null,
+    appointment: Boolean(value?.appointment),
+    appointmentAt: Number.isFinite(appointmentAtMs) ? new Date(appointmentAtMs).toISOString() : null,
+    recovered: Boolean(value?.recovered),
+    recoveredAt: Number.isFinite(recoveredAtMs) ? new Date(recoveredAtMs).toISOString() : null,
+  };
+};
+
 const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {} } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
@@ -8683,7 +8709,6 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const logs = Array.isArray(operationStore?.routines?.logs) ? operationStore.routines.logs : [];
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
   const conversationPhoneById = resolveDashboardConversationPhoneById(store);
-  const clientMessagesByPhone = buildDashboardClientMessagesByPhone(store);
   const responseMetricTagIds = new Set(dashboardSettings.followUpResponseMetricTagIds.map(normalizeDashboardText).filter(Boolean));
   const responseWindowMs = dashboardSettings.templateResponseWindowDays * 24 * 60 * 60 * 1000;
   const recoveryWindowMs = dashboardSettings.templateRecoveryWindowDays * 24 * 60 * 60 * 1000;
@@ -8737,6 +8762,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       recovered: 0,
       responseRate: 0,
       recoveryRate: 0,
+      appointmentRate: 0,
     };
   };
 
@@ -8784,7 +8810,15 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     return total;
   }, 0);
   const sent = successLogs.length || summarySent;
-  const dispatchFacts = [];
+  const storedFactsSource =
+    operationStore?.dashboardFacts?.followup?.dispatchFacts ||
+    operationStore?.dashboardFacts?.followup?.facts ||
+    [];
+  const dispatchFactsByKey = new Map();
+  (Array.isArray(storedFactsSource) ? storedFactsSource : [])
+    .map(normalizeFollowUpDashboardFact)
+    .filter((fact) => fact.phone && fact.sentAt)
+    .forEach((fact) => dispatchFactsByKey.set(getFollowUpDashboardFactKey(fact.routineId, fact.phone), fact));
 
   successLogs.forEach((item) => {
     const row = routineRows.get(item.rowKey);
@@ -8805,49 +8839,38 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       resolvedMs >= item.sentAtMs &&
       resolvedMs <= item.sentAtMs + recoveryWindowMs;
 
-    if ((hasPendingAppointment || hasResolvedAppointment) && !scheduledPhones.has(`${item.rowKey}:${item.phone}`)) {
-      scheduledPhones.add(`${item.rowKey}:${item.phone}`);
+    const factKey = getFollowUpDashboardFactKey(item.rowKey, item.phone);
+    const hasAppointment = hasPendingAppointment || hasResolvedAppointment;
+    if (hasAppointment && !scheduledPhones.has(factKey)) {
+      scheduledPhones.add(factKey);
       row.appointments += 1;
       dayEntry.appointments += 1;
     }
-    if (hasResolvedAppointment && !recoveredPhones.has(`${item.rowKey}:${item.phone}`)) {
-      recoveredPhones.add(`${item.rowKey}:${item.phone}`);
+    if (hasResolvedAppointment && !recoveredPhones.has(factKey)) {
+      recoveredPhones.add(factKey);
       row.recovered += 1;
       dayEntry.recovered += 1;
     }
-    dispatchFacts.push({
+    const previousFact = dispatchFactsByKey.get(factKey) || {};
+    dispatchFactsByKey.set(factKey, {
+      ...previousFact,
       routineId: item.rowKey,
       routineName: row.routineName,
       templateName: row.templateName,
       phone: item.phone,
       sentAt: new Date(item.sentAtMs).toISOString(),
-      responded: false,
-      responseAt: null,
-      appointment: hasPendingAppointment || hasResolvedAppointment,
+      responded: Boolean(previousFact.responded),
+      responseAt: previousFact.responseAt || null,
+      responseSource: previousFact.responseSource || null,
+      appointment: Boolean(previousFact.appointment || hasAppointment),
+      appointmentAt: hasPendingAppointment
+        ? new Date(pendingMs).toISOString()
+        : hasResolvedAppointment
+          ? new Date(resolvedMs).toISOString()
+          : previousFact.appointmentAt || null,
       recovered: hasResolvedAppointment,
+      recoveredAt: hasResolvedAppointment ? new Date(resolvedMs).toISOString() : previousFact.recoveredAt || null,
     });
-  });
-
-  successLogs.forEach((item) => {
-    const messages = clientMessagesByPhone.get(item.phone) || [];
-    const response = messages.find(
-      (message) =>
-        message.timestampMs > item.sentAtMs &&
-        message.timestampMs <= item.sentAtMs + responseWindowMs,
-    );
-    if (!response) return;
-    const responseKey = `${item.rowKey}:${item.phone}`;
-    if (respondedDispatchKeys.has(responseKey)) return;
-    respondedDispatchKeys.add(responseKey);
-    const row = routineRows.get(item.rowKey);
-    if (row) row.responses += 1;
-    const fact = dispatchFacts.find((entry) => entry.routineId === item.rowKey && entry.phone === item.phone);
-    if (fact) {
-      fact.responded = true;
-      fact.responseAt = new Date(response.timestampMs).toISOString();
-      fact.responseSource = "client_message";
-    }
-    ensureFollowUpDayStats(new Date(response.timestampMs).toISOString().slice(0, 10)).responses += 1;
   });
 
   const metricEvents = Array.isArray(operationStore?.chatbotEvents)
@@ -8873,25 +8896,56 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       .sort((left, right) => right.sentAtMs - left.sentAtMs)[0];
     if (!matchedSend) return;
 
-    const responseKey = `${matchedSend.rowKey}:${phone}`;
+    const responseKey = getFollowUpDashboardFactKey(matchedSend.rowKey, phone);
     if (respondedDispatchKeys.has(responseKey)) return;
     respondedDispatchKeys.add(responseKey);
     const row = routineRows.get(matchedSend.rowKey);
     if (row) row.responses += 1;
-    const fact = dispatchFacts.find((entry) => entry.routineId === matchedSend.rowKey && entry.phone === phone);
-    if (fact) {
-      fact.responded = true;
-      fact.responseAt = new Date(eventAtMs).toISOString();
-      fact.responseSource = "chatbot_metric_tag";
-    }
+    const fact = dispatchFactsByKey.get(responseKey) || {};
+    dispatchFactsByKey.set(responseKey, {
+      ...fact,
+      routineId: matchedSend.rowKey,
+      routineName: row?.routineName || fact.routineName || "Sem rotina",
+      templateName: row?.templateName || fact.templateName || "Sem template",
+      phone,
+      sentAt: new Date(matchedSend.sentAtMs).toISOString(),
+      responded: true,
+      responseAt: new Date(eventAtMs).toISOString(),
+      responseSource: "chatbot_metric_tag",
+    });
     ensureFollowUpDayStats(new Date(eventAtMs).toISOString().slice(0, 10)).responses += 1;
   });
+
+  for (const fact of dispatchFactsByKey.values()) {
+    const normalizedFact = normalizeFollowUpDashboardFact(fact);
+    const sentAtMs = Date.parse(String(normalizedFact.sentAt || ""));
+    if (!Number.isFinite(sentAtMs) || !isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) continue;
+    const row = routineRows.get(normalizedFact.routineId);
+    if (!row) continue;
+    const factKey = getFollowUpDashboardFactKey(normalizedFact.routineId, normalizedFact.phone);
+    if (normalizedFact.appointment && !scheduledPhones.has(factKey)) {
+      scheduledPhones.add(factKey);
+      row.appointments += 1;
+      ensureFollowUpDayStats((normalizedFact.appointmentAt || normalizedFact.sentAt).slice(0, 10)).appointments += 1;
+    }
+    if (normalizedFact.recovered && !recoveredPhones.has(factKey)) {
+      recoveredPhones.add(factKey);
+      row.recovered += 1;
+      ensureFollowUpDayStats((normalizedFact.recoveredAt || normalizedFact.sentAt).slice(0, 10)).recovered += 1;
+    }
+    if (normalizedFact.responded && !respondedDispatchKeys.has(factKey)) {
+      respondedDispatchKeys.add(factKey);
+      row.responses += 1;
+      ensureFollowUpDayStats((normalizedFact.responseAt || normalizedFact.sentAt).slice(0, 10)).responses += 1;
+    }
+  }
 
   const templateRows = Array.from(routineRows.values())
     .map((item) => ({
       ...item,
       responseRate: item.sent > 0 ? item.responses / item.sent : 0,
       recoveryRate: item.sent > 0 ? item.recovered / item.sent : 0,
+      appointmentRate: item.sent > 0 ? item.appointments / item.sent : 0,
     }))
     .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
 
@@ -8926,7 +8980,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     },
     byTemplate: templateRows,
     byDay,
-    dispatchFacts: dispatchFacts.slice(0, 500),
+    dispatchFacts: Array.from(dispatchFactsByKey.values()).map(normalizeFollowUpDashboardFact).slice(0, 500),
     settings: {
       followUpRoutineNameKeywords: dashboardSettings.followUpRoutineNameKeywords,
       followUpResponseMetricTagIds: dashboardSettings.followUpResponseMetricTagIds,
@@ -9204,6 +9258,7 @@ const persistDashboardMetricSnapshot = (operationStore = {}, dashboardKey = "", 
     period: metrics.period || null,
     cards: metrics.cards || {},
     totals: metrics.totals || {},
+    dispatchFacts: Array.isArray(metrics.dispatchFacts) ? metrics.dispatchFacts : undefined,
     sources: metrics.sources || metrics.settings || {},
   };
   const previous = currentFacts[key] || null;

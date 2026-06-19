@@ -143,17 +143,17 @@ const dashboards = {
       { title: 'Melhor template', value: '—', subtitle: 'Maior recuperação', icon: Award },
     ],
     main: {
-      title: 'Performance por régua de follow-up',
-      description: 'Agendamentos e clientes recuperados por D+20, D+30, D+40 e D+50.',
-      type: 'horizontalBars',
-      labels: ['D+20', 'D+30', 'D+40', 'D+50'],
+      title: 'Funil do follow-up',
+      description: 'Do disparo configurado até o cliente recuperado.',
+      type: 'followupFunnel',
+      labels: ['Disparos enviados', 'Respostas recebidas', 'Agendamentos gerados', 'Clientes recuperados'],
     },
     sideCharts: [
       {
-        title: 'Taxa de resposta por template',
-        type: 'ranking',
-        labels: ['Template D+20', 'Template D+30', 'Template D+40', 'Template D+50'],
-        helper: 'Mensagens com maior resposta e recuperação.',
+        title: 'Resultado por rotina',
+        type: 'multiHorizontalBars',
+        labels: ['Rotina 1', 'Rotina 2', 'Rotina 3', 'Rotina 4'],
+        helper: 'Enviados, respostas por tag, agendas e cortes por rotina configurada.',
       },
       {
         title: 'Recuperação ao longo do tempo',
@@ -487,6 +487,98 @@ function EmptyBars({ labels = [], values = [], horizontal = false, valueFormatte
           <span className="max-w-full truncate text-[10px] text-muted-foreground" title={label}>{label}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+const followUpMetricStyles = [
+  { key: 'sent', label: 'Enviados', color: '#c50015' },
+  { key: 'responses', label: 'Respostas', color: '#2563eb' },
+  { key: 'appointments', label: 'Agendas', color: '#d97706' },
+  { key: 'recovered', label: 'Recuperados', color: '#059669' },
+];
+
+function FollowUpFunnelChart({ values = {} }) {
+  const sent = Number(values.sent || 0);
+  const responses = Number(values.responses || 0);
+  const appointments = Number(values.appointments || 0);
+  const recovered = Number(values.recovered || values.recoveredCustomers || 0);
+  const stages = [
+    { label: 'Disparos enviados', value: sent, helper: 'Rotinas configuradas', color: '#c50015', rate: 100 },
+    { label: 'Respostas recebidas', value: responses, helper: 'Passaram pela tag de métrica', color: '#2563eb', rate: safeRate(responses, sent) },
+    { label: 'Agendamentos gerados', value: appointments, helper: 'Agendamento agendado', color: '#d97706', rate: safeRate(appointments, sent) },
+    { label: 'Clientes recuperados', value: recovered, helper: 'Agendamento realizado', color: '#059669', rate: safeRate(recovered, sent) },
+  ];
+  const maxValue = Math.max(1, ...stages.map((stage) => stage.value));
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-4">
+      {stages.map((stage, index) => {
+        const width = stage.value > 0 ? Math.max(8, (stage.value / maxValue) * 100) : 0;
+        return (
+          <div key={stage.label} className="rounded-xl border border-border bg-background p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted-foreground">{stage.label}</p>
+                <p className="mt-2 text-3xl font-bold tracking-[-0.03em] text-foreground tabular-nums">{formatInteger(stage.value)}</p>
+              </div>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ backgroundColor: stage.color }}>
+                {index + 1}
+              </span>
+            </div>
+            <div className="mt-4 h-2 rounded-full bg-muted">
+              <div className="h-2 rounded-full" style={{ width: `${width}%`, backgroundColor: stage.color }} />
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">{stage.helper}</span>
+              <span className="font-bold text-foreground tabular-nums">{index === 0 ? '100%' : formatPercent(stage.rate)}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MultiHorizontalBars({ labels = [], series = [], valueFormatter = formatInteger }) {
+  const activeSeries = Array.isArray(series) && series.length ? series : followUpMetricStyles.map((metric) => ({ ...metric, values: [] }));
+  const maxValue = Math.max(1, ...activeSeries.flatMap((item) => (Array.isArray(item.values) ? item.values : [])).map((value) => Number(value) || 0));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
+        {activeSeries.map((item) => (
+          <span key={item.key || item.label} className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+
+      <div className="space-y-4">
+        {labels.map((label, rowIndex) => (
+          <div key={label} className="grid gap-2 rounded-xl border border-border/70 bg-background p-3 lg:grid-cols-[minmax(150px,220px)_1fr] lg:items-center">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground" title={label}>{label}</p>
+            </div>
+            <div className="space-y-2">
+              {activeSeries.map((item) => {
+                const value = Number(item.values?.[rowIndex] || 0);
+                const width = value > 0 ? Math.max(5, (value / maxValue) * 100) : 0;
+                return (
+                  <div key={`${label}-${item.key || item.label}`} className="grid grid-cols-[76px_minmax(0,1fr)_42px] items-center gap-2 text-[11px]">
+                    <span className="truncate font-medium text-muted-foreground">{item.label}</span>
+                    <div className="h-2.5 rounded-full bg-muted">
+                      <div className="h-2.5 rounded-full" style={{ width: `${width}%`, backgroundColor: item.color }} />
+                    </div>
+                    <span className="text-right font-bold text-foreground tabular-nums">{valueFormatter(value)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -989,6 +1081,7 @@ function ChartCard({
   labels = [],
   values = [],
   secondValues = [],
+  series = [],
   helper,
   className,
   valueFormatter = formatInteger,
@@ -1009,6 +1102,8 @@ function ChartCard({
       {type === 'stacked' ? <EmptyBars labels={labels} values={values} valueFormatter={valueFormatter} /> : null}
       {type === 'horizontalBars' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
       {type === 'ranking' ? <EmptyBars labels={labels} values={values} horizontal valueFormatter={valueFormatter} /> : null}
+      {type === 'multiHorizontalBars' ? <MultiHorizontalBars labels={labels} series={series} valueFormatter={valueFormatter} /> : null}
+      {type === 'followupFunnel' ? <FollowUpFunnelChart values={values} /> : null}
       {type === 'donut' ? <EmptyDonut labels={labels} values={values} /> : null}
       {type === 'donutLarge' ? <EmptyDonut labels={labels} values={values} large /> : null}
       {type === 'gauge' ? <EmptyGauge value={values[0]} /> : null}
@@ -1469,12 +1564,19 @@ export default function Dashboard() {
 
     if (activeDashboard !== 'followup') return currentMain;
     const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
-    if (!byTemplate.length) return currentMain;
+    const metrics = followUpMetrics?.cards || {};
     return {
       ...currentMain,
-      labels: byTemplate.map((item) => item.routineName || item.templateName || 'Sem rotina'),
-      values: byTemplate.map((item) => item.appointments || 0),
-      description: 'Agendamentos atribuídos por rotina configurada no período selecionado.',
+      labels: currentMain.labels,
+      values: {
+        sent: metrics.sent || 0,
+        responses: metrics.responses || 0,
+        appointments: metrics.appointments || 0,
+        recovered: metrics.recoveredCustomers || 0,
+      },
+      description: byTemplate.length
+        ? 'Disparos das rotinas configuradas, respostas por tag de métrica, agendas e cortes atribuídos.'
+        : 'Configure rotinas de follow-up na Dashboard para acompanhar o funil.',
     };
   }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpMetrics]);
 
@@ -1515,12 +1617,15 @@ export default function Dashboard() {
       const byTemplate = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate.slice(0, 8) : [];
       const byDay = Array.isArray(followUpMetrics?.byDay) ? followUpMetrics.byDay : [];
       return current.sideCharts.map((chart) => {
-        if (chart.title === 'Taxa de resposta por template') {
+        if (chart.title === 'Resultado por rotina') {
           return {
             ...chart,
-            labels: byTemplate.length ? byTemplate.map((item) => item.templateName || item.routineName || 'Sem template') : chart.labels,
-            values: byTemplate.length ? byTemplate.map((item) => Math.round((Number(item.responseRate) || 0) * 100)) : [],
-            valueFormatter: formatPercent,
+            labels: byTemplate.length ? byTemplate.map((item) => item.routineName || item.templateName || 'Sem rotina') : chart.labels,
+            series: followUpMetricStyles.map((metric) => ({
+              ...metric,
+              values: byTemplate.length ? byTemplate.map((item) => Number(item[metric.key] || 0)) : [],
+            })),
+            className: 'xl:col-span-2',
           };
         }
         if (chart.title === 'Recuperação ao longo do tempo') {
