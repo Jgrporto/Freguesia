@@ -118,7 +118,7 @@ const dashboards = {
       { title: 'Custo por clique (CPC)', value: 'R$ 0,00', subtitle: 'Investimento / conversas por mensagem', icon: Target },
       { title: 'Conversas iniciadas', value: '0', subtitle: 'Conversas com início no período', icon: MessageCircle },
       { title: 'Custo por conversa', value: 'R$ 0,00', subtitle: 'Custo médio por conversa', icon: MessageCircle },
-      { title: 'Agendamentos', value: '0', subtitle: 'Agendamentos realizados', icon: CalendarDays },
+      { title: 'Agendamentos', value: '0', subtitle: 'Agendamentos agendados', icon: CalendarDays },
       { title: 'Comparecimentos', value: '0', subtitle: 'Clientes que compareceram', icon: UserRound },
       { title: 'CAC por agendamento', value: '—', subtitle: 'Sem agendamentos no período', icon: TrendingUp },
       { title: 'CAC por comparecimento', value: '—', subtitle: 'Sem comparecimentos no período', icon: UserRound },
@@ -1281,18 +1281,18 @@ export default function Dashboard() {
           return { ...card, value: formatCurrency(metrics.costPerConversation), subtitle: 'Custo médio por conversa' };
         }
         if (card.title === 'Agendamentos') {
-          return { ...card, value: formatInteger(metrics.scheduledAppointments), subtitle: 'Agendamentos realizados' };
+          return { ...card, value: formatInteger(metrics.scheduledAppointments), subtitle: 'Agendamentos agendados' };
         }
         if (card.title === 'Comparecimentos') {
           return { ...card, value: formatInteger(metrics.attendances), subtitle: 'Clientes que compareceram' };
         }
         if (card.title === 'CAC por agendamento') {
           const hasValue = Number(metrics.scheduledAppointments || 0) > 0;
-          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAppointment) : '—', subtitle: hasValue ? 'Investimento / agendamentos' : 'Sem agendamentos no período' };
+          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAppointment) : '—', subtitle: hasValue ? 'Campanha / agendamentos agendados' : 'Sem agendamentos no período' };
         }
         if (card.title === 'CAC por comparecimento') {
           const hasValue = Number(metrics.attendances || 0) > 0;
-          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAttendance) : '—', subtitle: hasValue ? 'Investimento / comparecimentos' : 'Sem comparecimentos no período' };
+          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAttendance) : '—', subtitle: hasValue ? 'Campanha / agendamentos realizados' : 'Sem comparecimentos no período' };
         }
         return card;
       });
