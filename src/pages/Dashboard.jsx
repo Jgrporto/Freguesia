@@ -571,30 +571,27 @@ function MiniFunnelStep({ stage, index, total }) {
 
 function AtendimentoConversionFunnel({ values }) {
   const conversations = Number(values?.conversations ?? 0);
-  const responded = Number(values?.responded ?? values?.answeredConversations ?? conversations);
   const appointments = Number(values?.appointments ?? 0);
   const conversions = Number(values?.conversions ?? 0);
 
   const stages = [
     { label: 'Conversas', value: conversations, base: conversations, icon: MessageSquare },
-    { label: 'Respondidas', value: responded, base: conversations, icon: MessageCircle, loss: Math.max(conversations - responded, 0) },
-    { label: 'Agendamentos', value: appointments, base: conversations, icon: CalendarDays, loss: Math.max(responded - appointments, 0) },
+    { label: 'Agendamentos', value: appointments, base: conversations, icon: CalendarDays, loss: Math.max(conversations - appointments, 0) },
     { label: 'Agendamentos realizados', value: conversions, base: conversations, icon: CalendarDays, loss: Math.max(appointments - conversions, 0) },
   ];
   const finalRate = safeRate(conversions, conversations);
   const biggestLoss = [
-    { label: 'Conversas e Respondidas', loss: Math.max(conversations - responded, 0) },
-    { label: 'Respondidas e Agendamentos', loss: Math.max(responded - appointments, 0) },
-    { label: 'Agendamentos e Realizados', loss: Math.max(appointments - conversions, 0) },
+    { label: 'Conversas e Agendamentos', loss: Math.max(conversations - appointments, 0) },
+    { label: 'Agendamentos e Agendamentos realizados', loss: Math.max(appointments - conversions, 0) },
   ].sort((a, b) => b.loss - a.loss)[0];
 
   return (
     <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
       <div className="mb-5">
         <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Funil de conversão</h3>
-        <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do cliente desde a conversa até ele sentar na cadeira.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do cliente desde a conversa até o agendamento realizado.</p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-4">
+      <div className="grid gap-4 lg:grid-cols-3">
         {stages.map((stage, index) => <MiniFunnelStep key={stage.label} stage={stage} index={index} total={stages.length} />)}
       </div>
       <div className="mt-5 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground">
@@ -1118,21 +1115,34 @@ const npsCustomerTypeOptions = [
   buildFilterOption('promotor', 'Promotor'),
 ];
 
-function CompactFilterSelect({ label, value, icon: Icon, children, onChange, className }) {
+function CompactFilterSelect({ label, value, displayValue, icon: Icon, children, onChange, className }) {
+  const visibleValue = displayValue || value;
+
   return (
-    <label className={cn('flex min-w-[190px] items-center gap-3 rounded-xl border border-border/80 bg-background px-3 py-2.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)]', className)}>
-      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1">
+    <label
+      className={cn(
+        'group relative flex min-w-[190px] cursor-pointer items-center gap-3 overflow-hidden rounded-xl border border-border/80 bg-background px-3 py-2.5 shadow-[0_2px_10px_rgba(15,23,42,0.03)] transition-colors focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 hover:border-primary/30',
+        className,
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+      <span className="min-w-0 flex-1 pr-6">
         <span className="block text-[11px] font-semibold text-muted-foreground">{label}</span>
-        {children ? (
-          <select value={value} onChange={onChange} className="mt-0.5 w-full border-0 bg-transparent p-0 text-sm font-bold text-foreground outline-none">
-            {children}
-          </select>
-        ) : (
-          <span className="mt-0.5 block truncate text-sm font-bold text-foreground">{value}</span>
-        )}
+        <span className="mt-0.5 block truncate text-sm font-bold text-foreground">{visibleValue}</span>
       </span>
-      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+
+      {children ? (
+        <select
+          aria-label={label}
+          value={value}
+          onChange={onChange}
+          className="absolute inset-0 z-10 h-full w-full cursor-pointer appearance-none border-0 bg-transparent opacity-0 outline-none"
+        >
+          {children}
+        </select>
+      ) : null}
+
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-colors group-hover:text-primary" />
     </label>
   );
 }
@@ -1611,7 +1621,6 @@ export default function Dashboard() {
     return {
       ...currentMain.values,
       conversations: attendanceMetrics?.funnel?.conversations ?? 0,
-      responded: attendanceMetrics?.attendance?.answeredConversations ?? 0,
       appointments: attendanceMetrics?.funnel?.appointments ?? 0,
       conversions: attendanceMetrics?.funnel?.conversions ?? 0,
     };
