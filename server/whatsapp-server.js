@@ -408,7 +408,7 @@ const META_MARKETING_ACCESS_TOKEN =
   process.env.FACEBOOK_MARKETING_ACCESS_TOKEN ||
   process.env.META_ACCESS_TOKEN ||
   process.env.FACEBOOK_ACCESS_TOKEN ||
-  ACCESS_TOKEN;
+  "";
 const META_AD_ACCOUNT_ID = String(
   process.env.META_AD_ACCOUNT_ID ||
     process.env.FACEBOOK_AD_ACCOUNT_ID ||
