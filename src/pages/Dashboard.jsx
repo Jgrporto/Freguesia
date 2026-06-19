@@ -131,7 +131,6 @@ const dashboards = {
       { title: 'Respostas recebidas', value: '0', subtitle: 'Retornos dos clientes', icon: MessageCircle },
       { title: 'Agendamentos gerados', value: '0', subtitle: 'Após disparos', icon: CalendarDays },
       { title: 'Clientes recuperados', value: '0', subtitle: 'Voltaram a cortar', icon: HeartHandshake },
-      { title: 'CRC', value: 'R$ 0,00', subtitle: 'Custo por recuperado', icon: PiggyBank },
       { title: 'Melhor template', value: '—', subtitle: 'Maior recuperação', icon: Award },
     ],
     main: {
