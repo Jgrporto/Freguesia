@@ -176,7 +176,7 @@ export default function ConversationList({
   const isAdminUser =
     String(currentUser?.role || '').trim().toLowerCase() === 'admin' ||
     String(currentUser?.role_name || '').trim().toLowerCase() === 'administrador';
-  const visibleTabs = isAdminUser ? TABS : TABS.filter((tab) => tab.value !== 'resolved');
+  const visibleTabs = TABS;
   const nonAdminUsers = useMemo(
     () =>
       (Array.isArray(teamUsers) ? teamUsers : []).filter((user) => {
@@ -207,12 +207,6 @@ export default function ConversationList({
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, []);
-
-  useEffect(() => {
-    if (!isAdminUser && primaryFilter === 'resolved') {
-      onPrimaryFilterChange('all');
-    }
-  }, [isAdminUser, onPrimaryFilterChange, primaryFilter]);
 
   const filtered = useMemo(() => {
     const normalizedSearch = deferredSearchTerm.trim().toLowerCase();

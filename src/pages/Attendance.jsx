@@ -360,12 +360,7 @@ export default function Attendance() {
 
       const visibleConversations = isAdminUser(effectiveUser)
         ? decoratedConversations
-        : decoratedConversations.filter(
-            (conversation) =>
-              !conversation.is_resolution_active &&
-              !conversation.is_daily_resolved &&
-              isConversationAssignedToUser(conversation, effectiveUser),
-          );
+        : decoratedConversations.filter((conversation) => isConversationAssignedToUser(conversation, effectiveUser));
 
       return visibleConversations
         .sort((left, right) => {
