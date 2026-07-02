@@ -1736,9 +1736,9 @@ export default function Dashboard() {
           return {
             ...chart,
             labels: byAgent.map((item) => item.name || 'Sem atendente'),
-            values: byAgent.length ? byAgent.map((item) => Math.round((Number(item.conversionRate) || 0) * 1000) / 10) : [],
-            helper: 'Percentual de conversas que viraram agendamento por atendente.',
-            valueFormatter: formatPercent,
+            values: byAgent.length ? byAgent.map((item) => Number(item.appointments) || 0) : [],
+            helper: 'Finalizações do tipo Agendado por atendente.',
+            valueFormatter: formatInteger,
           };
         }
         return chart;

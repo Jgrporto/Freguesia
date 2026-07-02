@@ -1668,6 +1668,7 @@ const finishChatbotConversation = (store, conversationId, nodeData) => {
     preferences.push(nextPreference);
   }
   store.conversationPreferences = preferences;
+  recordConversationResolutionEvent(store, nextPreference);
 
   if (store.conversations && typeof store.conversations === 'object') {
     if (Array.isArray(store.conversations)) {
@@ -3761,6 +3762,29 @@ const publishConversationPreferenceEvent = (preference = {}, action = 'updated')
     conversation_id: conversationId,
     preference,
   });
+};
+
+const recordConversationResolutionEvent = (store = {}, preference = {}) => {
+  if (
+    String(preference?.resolution_status || '').trim() !== 'resolved' ||
+    String(preference?.resolution_type || '').trim() !== 'scheduled'
+  ) return;
+  const conversationId = String(preference?.conversation_id || preference?.id || '').trim();
+  const resolvedAt = String(preference?.resolved_at || preference?.updated_date || preference?.created_date || '').trim();
+  if (!conversationId || !resolvedAt) return;
+  const eventId = `scheduled:${conversationId}:${resolvedAt}`;
+  const events = Array.isArray(store.conversationResolutionEvents) ? store.conversationResolutionEvents : [];
+  if (events.some((event) => String(event?.id || '') === eventId)) return;
+  events.push({
+    id: eventId,
+    conversation_id: conversationId,
+    resolution_type: 'scheduled',
+    resolved_at: resolvedAt,
+    resolved_by_id: String(preference?.resolved_by_id || '').trim(),
+    resolved_by_name: String(preference?.resolved_by_name || '').trim(),
+    created_date: resolvedAt,
+  });
+  store.conversationResolutionEvents = events.slice(-10000);
 };
 
 const getCustomersResponseJson = (store = {}) => {
@@ -9216,6 +9240,7 @@ const server = http.createServer(async (req, res) => {
                   updated_date: timestamp,
                 };
           store[collectionName] = [createdItem, ...items];
+          if (entityName === 'ConversationPreference') recordConversationResolutionEvent(store, createdItem);
           return store;
         });
 
@@ -9282,6 +9307,7 @@ const server = http.createServer(async (req, res) => {
           passwordChanged = entityName === 'User' && Boolean(String(payload?.password || '').trim());
           items[index] = updatedItem;
           current[collectionName] = items;
+          if (entityName === 'ConversationPreference') recordConversationResolutionEvent(current, updatedItem);
           if (passwordChanged) {
             current.auth = pruneAuthState(current.auth);
             current.auth.sessions = current.auth.sessions.filter((session) => session.user_id !== String(updatedItem?.id || ''));

@@ -7866,15 +7866,32 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       }
     }
 
-    const preference = preferenceByConversationId.get(conversationId);
-    const scheduledResolutionMs = isScheduledResolutionPreference(preference)
-      ? Date.parse(String(preference?.resolved_at || preference?.updated_date || preference?.created_date || ''))
-      : null;
-    if (!isWithinDashboardRange(scheduledResolutionMs, normalizedStartMs, normalizedEndMs)) continue;
-    if (conversionPhones.has(normalizedPhone)) continue;
-    conversionPhones.add(normalizedPhone);
-    if (agentStats) agentStats.appointments += 1;
   }
+
+  const persistedResolutionEvents = Array.isArray(operationStore.conversationResolutionEvents)
+    ? operationStore.conversationResolutionEvents
+    : [];
+  const currentScheduledPreferences = Array.from(preferenceByConversationId.values()).filter(isScheduledResolutionPreference);
+  [...persistedResolutionEvents, ...currentScheduledPreferences].forEach((resolution) => {
+    const type = normalizeDashboardText(resolution?.resolution_type || resolution?.type || '');
+    if (!['scheduled', 'agendado', 'agendada', 'appointment', 'appointment_scheduled', 'agendamento'].includes(type)) return;
+    const resolvedAtMs = Date.parse(String(resolution?.resolved_at || resolution?.updated_date || resolution?.created_date || ''));
+    if (!isWithinDashboardRange(resolvedAtMs, normalizedStartMs, normalizedEndMs)) return;
+    const conversationId = String(resolution?.conversation_id || resolution?.conversationId || resolution?.id || '').trim();
+    const conversation = conversationsById[conversationId] || {};
+    const phone = resolveDashboardConversationPhone(conversation, conversationId);
+    const customer = findDashboardCustomerByPhone(customerIndex, phone);
+    const normalizedPhone = getDashboardCustomerPhone(customer) || phone || conversationId;
+    if (!normalizedPhone || conversionPhones.has(normalizedPhone)) return;
+    const resolutionAgentRef = {
+      id: resolution?.resolved_by_id || '',
+      name: resolution?.resolved_by_name || 'Sem atendente',
+    };
+    if (!matchesSelectedAttendant(resolutionAgentRef)) return;
+    conversionPhones.add(normalizedPhone);
+    const eventAgentStats = ensureAgentConversionStats(resolutionAgentRef);
+    if (eventAgentStats) eventAgentStats.appointments += 1;
+  });
 
   const appointments = appointmentPhones.size;
   const conversions = conversionPhones.size;
@@ -8559,7 +8576,9 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       localCustomers: Number(local.localCustomers || 0),
     };
   });
-  const persistedAppointments = persistedAdCustomers.items.filter((item) => item.firstScheduledAt || item.appointmentAt);
+  const persistedAppointments = persistedAdCustomers.items.filter(
+    (item) => item.firstScheduledAt || item.appointmentAt || item.firstAttendedAt || item.resolvedAt,
+  );
   const persistedAttendances = persistedAdCustomers.items.filter((item) => item.firstAttendedAt || item.resolvedAt);
   const scheduledCount = new Set(persistedAppointments.map((item) => item.phone).filter(Boolean)).size;
   const attendedCount = new Set(persistedAttendances.map((item) => item.phone).filter(Boolean)).size;
