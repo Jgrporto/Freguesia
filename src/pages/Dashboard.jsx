@@ -590,19 +590,14 @@ function MiniFunnelStep({ stage, index, total }) {
 
 function AtendimentoConversionFunnel({ values }) {
   const conversations = Number(values?.conversations ?? 0);
-  const appointments = Number(values?.appointments ?? 0);
   const conversions = Number(values?.conversions ?? 0);
 
   const stages = [
     { label: 'Conversas', value: conversations, base: conversations, icon: MessageSquare },
-    { label: 'Agendamentos', value: appointments, base: conversations, icon: CalendarDays, loss: Math.max(conversations - appointments, 0) },
-    { label: 'Agendamentos realizados', value: conversions, base: conversations, icon: CalendarDays, loss: Math.max(appointments - conversions, 0) },
+    { label: 'Agendamentos realizados', value: conversions, base: conversations, icon: CalendarDays, loss: Math.max(conversations - conversions, 0) },
   ];
   const finalRate = safeRate(conversions, conversations);
-  const biggestLoss = [
-    { label: 'Conversas e Agendamentos', loss: Math.max(conversations - appointments, 0) },
-    { label: 'Agendamentos e Agendamentos realizados', loss: Math.max(appointments - conversions, 0) },
-  ].sort((a, b) => b.loss - a.loss)[0];
+  const conversionLoss = Math.max(conversations - conversions, 0);
 
   return (
     <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
@@ -610,12 +605,12 @@ function AtendimentoConversionFunnel({ values }) {
         <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Funil de conversão</h3>
         <p className="mt-1 text-sm text-muted-foreground">Acompanhe a jornada do cliente desde a conversa até o agendamento realizado.</p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2">
         {stages.map((stage, index) => <MiniFunnelStep key={stage.label} stage={stage} index={index} total={stages.length} />)}
       </div>
       <div className="mt-5 rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground">
         <span className="font-black text-primary">Insight:</span> {formatPercent(finalRate)} das conversas viraram agendamentos realizados.
-        {biggestLoss?.loss > 0 ? ` O maior ponto de perda está entre ${biggestLoss.label}.` : ' Ainda não há perdas relevantes no período.'}
+        {conversionLoss > 0 ? ` ${formatInteger(conversionLoss)} conversas não resultaram em agendamento realizado.` : ' Ainda não há perdas relevantes no período.'}
       </div>
     </section>
   );
