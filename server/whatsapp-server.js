@@ -7822,7 +7822,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     firstResponseCount > 0 ? Math.round(totalFirstResponseSeconds / firstResponseCount) : 0;
 
   const appointmentPhones = new Set();
-  const conversionPhones = new Set();
+  const conversionEventIds = new Set();
   const agentConversions = new Map();
   const ensureAgentConversionStats = (agentRef = {}) => {
     if (!isDashboardAttendantUser(operationStore, agentRef, dashboardSettings)) return null;
@@ -7866,18 +7866,50 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       }
     }
 
-    const preference = preferenceByConversationId.get(conversationId);
-    const scheduledResolutionMs = isScheduledResolutionPreference(preference)
-      ? Date.parse(String(preference?.resolved_at || preference?.updated_date || preference?.created_date || ''))
-      : null;
-    if (!isWithinDashboardRange(scheduledResolutionMs, normalizedStartMs, normalizedEndMs)) continue;
-    if (conversionPhones.has(normalizedPhone)) continue;
-    conversionPhones.add(normalizedPhone);
-    if (agentStats) agentStats.appointments += 1;
   }
 
+  const persistedResolutionFacts = Array.isArray(operationStore.attendanceResolutionFacts)
+    ? operationStore.attendanceResolutionFacts
+    : [];
+  const legacyCurrentFacts = Array.from(preferenceByConversationId.values())
+    .filter(isScheduledResolutionPreference)
+    .map((preference) => ({
+      id: '',
+      conversationId: preference?.conversation_id || preference?.conversationId || preference?.id || '',
+      phone: preference?.phone || '',
+      resolutionType: preference?.resolution_type || preference?.type || '',
+      resolvedAt: preference?.resolved_at || preference?.updated_date || preference?.created_date || '',
+      resolvedById: preference?.resolved_by_id || '',
+      resolvedByName: preference?.resolved_by_name || '',
+      source: 'legacy_current_preference',
+    }));
+
+  [...persistedResolutionFacts, ...legacyCurrentFacts]
+    .sort((left, right) => String(left?.resolvedAt || '').localeCompare(String(right?.resolvedAt || '')))
+    .forEach((fact) => {
+      const type = normalizeDashboardText(fact?.resolutionType || fact?.resolution_type || fact?.type || '');
+      if (!['scheduled', 'agendado', 'agendada', 'appointment', 'appointment_scheduled', 'agendamento'].includes(type)) return;
+      const resolvedAtMs = Date.parse(String(fact?.resolvedAt || fact?.resolved_at || ''));
+      if (!isWithinDashboardRange(resolvedAtMs, normalizedStartMs, normalizedEndMs)) return;
+
+      const conversationId = String(fact?.conversationId || fact?.conversation_id || '').trim();
+      const eventId = String(fact?.id || `scheduled:${conversationId}:${new Date(resolvedAtMs).toISOString()}`).trim();
+      if (!eventId || conversionEventIds.has(eventId)) return;
+
+      const resolutionAgentRef = {
+        id: fact?.resolvedById || fact?.resolved_by_id || '',
+        name: fact?.resolvedByName || fact?.resolved_by_name || 'Sem atendente',
+      };
+      if (!matchesSelectedAttendant(resolutionAgentRef)) return;
+      if (!isDashboardAttendantUser(operationStore, resolutionAgentRef, dashboardSettings)) return;
+
+      conversionEventIds.add(eventId);
+      const eventAgentStats = ensureAgentConversionStats(resolutionAgentRef);
+      if (eventAgentStats) eventAgentStats.appointments += 1;
+    });
+
   const appointments = appointmentPhones.size;
-  const conversions = conversionPhones.size;
+  const conversions = conversionEventIds.size;
   const appointmentRate = receivedConversations > 0 ? appointments / receivedConversations : 0;
   const appointmentToConversionRate = appointments > 0 ? conversions / appointments : 0;
   const finalConversionRate = receivedConversations > 0 ? conversions / receivedConversations : 0;

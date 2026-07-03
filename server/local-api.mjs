@@ -1668,6 +1668,7 @@ const finishChatbotConversation = (store, conversationId, nodeData) => {
     preferences.push(nextPreference);
   }
   store.conversationPreferences = preferences;
+  recordAttendanceResolutionFact(store, nextPreference);
 
   if (store.conversations && typeof store.conversations === 'object') {
     if (Array.isArray(store.conversations)) {
@@ -2984,6 +2985,7 @@ const normalizeStore = (store) => {
     dashboardSettings: normalizeDashboardSettings(base.dashboardSettings),
     conversations: Array.isArray(base.conversations) ? base.conversations : [],
     conversationPreferences: Array.isArray(base.conversationPreferences) ? base.conversationPreferences : [],
+    attendanceResolutionFacts: Array.isArray(base.attendanceResolutionFacts) ? base.attendanceResolutionFacts : [],
     messages: Array.isArray(base.messages) ? base.messages : [],
     quickReplies: Array.isArray(base.quickReplies) ? base.quickReplies : [],
     quickReplyCategories: Array.isArray(base.quickReplyCategories) ? base.quickReplyCategories : [],
@@ -3180,6 +3182,7 @@ const seedStore = () => {
     customerSyncSettings: CUSTOMER_SYNC_SETTINGS_DEFAULT,
     conversations,
     conversationPreferences: [],
+    attendanceResolutionFacts: [],
     messages,
     quickReplies,
     quickReplyCategories: [],
@@ -3761,6 +3764,61 @@ const publishConversationPreferenceEvent = (preference = {}, action = 'updated')
     conversation_id: conversationId,
     preference,
   });
+};
+
+const SCHEDULED_RESOLUTION_TYPES = new Set([
+  'scheduled',
+  'agendado',
+  'agendada',
+  'appointment',
+  'appointment_scheduled',
+  'agendamento',
+]);
+
+const normalizeResolutionType = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const recordAttendanceResolutionFact = (store = {}, preference = {}) => {
+  if (String(preference?.resolution_status || '').trim().toLowerCase() !== 'resolved') return false;
+  const resolutionType = normalizeResolutionType(preference?.resolution_type || preference?.type);
+  if (!SCHEDULED_RESOLUTION_TYPES.has(resolutionType)) return false;
+
+  const conversationId = String(preference?.conversation_id || preference?.conversationId || preference?.id || '').trim();
+  const resolvedAt = String(preference?.resolved_at || preference?.resolvedAt || preference?.updated_date || '').trim();
+  const resolvedAtMs = Date.parse(resolvedAt);
+  if (!conversationId || !Number.isFinite(resolvedAtMs)) return false;
+
+  const normalizedResolvedAt = new Date(resolvedAtMs).toISOString();
+  const id = `scheduled:${conversationId}:${normalizedResolvedAt}`;
+  const facts = Array.isArray(store.attendanceResolutionFacts) ? store.attendanceResolutionFacts : [];
+  if (facts.some((fact) => String(fact?.id || '') === id)) return false;
+
+  const conversation = (Array.isArray(store.conversations) ? store.conversations : []).find(
+    (item) => String(item?.id || '') === conversationId,
+  );
+  facts.push({
+    id,
+    conversationId,
+    phone: String(
+      preference?.phone ||
+        conversation?.contact_phone ||
+        conversation?.phone ||
+        conversation?.customer_phone ||
+        '',
+    ).trim(),
+    resolutionType: 'scheduled',
+    resolvedAt: normalizedResolvedAt,
+    resolvedById: String(preference?.resolved_by_id || preference?.resolvedById || '').trim(),
+    resolvedByName: String(preference?.resolved_by_name || preference?.resolvedByName || '').trim(),
+    source: 'conversation_preference',
+    recordedAt: nowIso(),
+  });
+  store.attendanceResolutionFacts = facts.slice(-50000);
+  return true;
 };
 
 const getCustomersResponseJson = (store = {}) => {
@@ -9216,6 +9274,7 @@ const server = http.createServer(async (req, res) => {
                   updated_date: timestamp,
                 };
           store[collectionName] = [createdItem, ...items];
+          if (entityName === 'ConversationPreference') recordAttendanceResolutionFact(store, createdItem);
           return store;
         });
 
@@ -9282,6 +9341,7 @@ const server = http.createServer(async (req, res) => {
           passwordChanged = entityName === 'User' && Boolean(String(payload?.password || '').trim());
           items[index] = updatedItem;
           current[collectionName] = items;
+          if (entityName === 'ConversationPreference') recordAttendanceResolutionFact(current, updatedItem);
           if (passwordChanged) {
             current.auth = pruneAuthState(current.auth);
             current.auth.sessions = current.auth.sessions.filter((session) => session.user_id !== String(updatedItem?.id || ''));
