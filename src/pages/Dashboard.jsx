@@ -1331,7 +1331,6 @@ function FollowUpRulePerformanceCard({ items = [] }) {
 function AttendanceAgentRankingCard({
   rows = [],
   totalConversations = 0,
-  selectedAttendantLabel = 'Todos',
 }) {
   const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
     ...row,
@@ -1339,47 +1338,15 @@ function AttendanceAgentRankingCard({
     periodConversationBase: Number(row?.periodConversationBase || totalConversations || 0),
     periodConversionRate: Number(row?.periodConversionRate || 0),
   }));
-  const topRow = normalizedRows[0] || null;
   const maxRate = Math.max(1, ...normalizedRows.map((row) => row.periodConversionRate * 100));
-  const hasFilter = selectedAttendantLabel && selectedAttendantLabel !== 'Todos';
-  const insight = topRow
-    ? `${topRow.name} liderou com ${formatInteger(topRow.appointments)} agendamentos, representando ${formatPercent(topRow.periodConversionRate * 100)} das ${formatInteger(totalConversations)} conversas do período.`
-    : `Nenhum atendente com finalização Agendado no período. Base atual: ${formatInteger(totalConversations)} conversas recebidas.`;
 
   return (
     <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
-      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Conversão por atendente</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Agendamentos por responsável sobre o total de conversas recebidas no período.
-          </p>
-        </div>
-        <div className="rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground lg:max-w-[360px]">
-          <span className="font-black text-primary">Insight:</span> {insight}
-        </div>
-      </div>
-
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
-          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">Base do período</div>
-          <div className="mt-2 text-2xl font-black text-foreground">{formatInteger(totalConversations)}</div>
-          <div className="mt-1 text-xs text-muted-foreground">Conversas com 1+ mensagem do cliente</div>
-        </div>
-        <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
-          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">Filtro visual</div>
-          <div className="mt-2 text-2xl font-black text-foreground">{hasFilter ? selectedAttendantLabel : 'Todos'}</div>
-          <div className="mt-1 text-xs text-muted-foreground">O denominador continua global no período</div>
-        </div>
-        <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
-          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">Melhor taxa</div>
-          <div className="mt-2 text-2xl font-black text-foreground">
-            {topRow ? formatPercent(topRow.periodConversionRate * 100) : '0,0%'}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {topRow ? `${topRow.name} lidera o período` : 'Sem conversão registrada'}
-          </div>
-        </div>
+      <div className="mb-5">
+        <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Conversão por atendente</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Agendamentos por responsável sobre o total de conversas recebidas no período.
+        </p>
       </div>
 
       <div className="space-y-3">
@@ -1984,7 +1951,6 @@ export default function Dashboard() {
           <AttendanceAgentRankingCard
             rows={attendanceRankingRows}
             totalConversations={attendanceMetrics?.attendance?.receivedConversations ?? 0}
-            selectedAttendantLabel={dashboardFilterOptions.attendants.find((item) => item.value === (attendanceFilters.attendant || ALL_FILTER_VALUE))?.label || 'Todos'}
           />
         </>
       ) : activeDashboard === 'aquisicao' ? (
