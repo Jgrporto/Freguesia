@@ -7442,6 +7442,8 @@ const normalizeDashboardPersistedAdCustomers = (value = []) =>
       conversationId: String(item?.conversationId || "").trim(),
       stageId: String(item?.stageId || "conversation").trim(),
       stageLabel: String(item?.stageLabel || "Conversa").trim(),
+      statusId: String(item?.statusId || "").trim(),
+      statusLabel: String(item?.statusLabel || "").trim(),
       firstAdSeenAt: String(item?.firstAdSeenAt || "").trim(),
       lastAdSeenAt: String(item?.lastAdSeenAt || "").trim(),
       lastMessageAt: String(item?.lastMessageAt || "").trim(),
@@ -8640,6 +8642,8 @@ const buildAcquisitionDashboardMetrics = async (
     });
     const normalizedPhone = (customer && getDashboardCustomerPhone(customer)) || phone;
     if (normalizedPhone) {
+      const statusId = customer ? "customer" : "lead";
+      const statusLabel = customer ? "CLIENTE" : "LEAD";
       adCustomerRecords.push({
         id: normalizedPhone,
         phone: normalizedPhone,
@@ -8647,6 +8651,8 @@ const buildAcquisitionDashboardMetrics = async (
         conversationId,
         stageId: stage.id,
         stageLabel: stage.label,
+        statusId,
+        statusLabel,
         firstAdSeenAt: new Date(firstAdSeenAtMs).toISOString(),
         lastAdSeenAt: new Date(Math.max(adSignal.lastSignalAtMs || 0, lastMessageAtMs || 0, firstAdSeenAtMs)).toISOString(),
         lastMessageAt: lastMessageAtMs > 0 ? new Date(lastMessageAtMs).toISOString() : "",

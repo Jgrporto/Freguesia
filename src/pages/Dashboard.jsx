@@ -811,7 +811,7 @@ function AcquisitionConversationDialog({ customer, open, onClose }) {
 
 function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
   const [search, setSearch] = useState('');
-  const [stageFilter, setStageFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
@@ -819,14 +819,14 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
     const normalizedSearch = search.trim().toLowerCase();
 
     return (Array.isArray(items) ? items : []).filter((item) => {
-      const matchesStage = stageFilter === 'all' || String(item.stageId || '') === stageFilter;
-      const haystack = [item.name, item.phone, item.stageLabel, item.campaignName, item.adsetName, item.adName, item.headline]
+      const matchesStatus = statusFilter === 'all' || String(item.statusId || '') === statusFilter;
+      const haystack = [item.name, item.phone, item.statusLabel, item.campaignName, item.adsetName, item.adName, item.headline]
         .join(' ')
         .toLowerCase();
       const matchesSearch = !normalizedSearch || haystack.includes(normalizedSearch);
-      return matchesStage && matchesSearch;
+      return matchesStatus && matchesSearch;
     });
-  }, [items, search, stageFilter]);
+  }, [items, search, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -834,7 +834,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, stageFilter]);
+  }, [search, statusFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -849,9 +849,9 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
               <Megaphone className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-bold uppercase tracking-[0.08em] text-foreground">Clientes dos anúncios</h3>
+              <h3 className="truncate text-sm font-bold uppercase tracking-[0.08em] text-foreground">Vindos dos anúncios</h3>
               <p className="mt-0.5 max-w-xl text-xs text-muted-foreground">
-                Lista dos contatos atribuídos a anúncios dentro do recorte atual da dashboard.
+                Lista de todos que iniciaram conversa com a operação vindo dos anúncios no recorte atual.
               </p>
             </div>
           </div>
@@ -859,17 +859,15 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-36">
-            Etapa
+            Status
             <select
-              value={stageFilter}
-              onChange={(event) => setStageFilter(event.target.value)}
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none transition-colors focus:border-primary/50"
             >
-              <option value="all">Todas</option>
-              <option value="conversation">Conversa</option>
-              <option value="appointment">Agendamento</option>
-              <option value="appbarber_customer">Cliente AppBarber</option>
-              <option value="new_customer">Cliente novo</option>
+              <option value="all">Todos</option>
+              <option value="customer">CLIENTE</option>
+              <option value="lead">LEAD</option>
             </select>
           </label>
           <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-44">
@@ -899,7 +897,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
               <th className="px-4 py-3 font-bold">Cliente</th>
               <th className="px-4 py-3 font-bold">Telefone</th>
               <th className="px-4 py-3 font-bold">Anúncio/Campanha</th>
-              <th className="px-4 py-3 font-bold">Etapa</th>
+              <th className="px-4 py-3 font-bold">Status</th>
               <th className="px-4 py-3 font-bold">Primeira conversa</th>
               <th className="px-4 py-3 text-center font-bold">Ação</th>
             </tr>
@@ -934,7 +932,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <span className="inline-flex max-w-full items-center rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary">
-                        <span className="truncate">{item.stageLabel || 'Conversa'}</span>
+                        <span className="truncate">{item.statusLabel || 'LEAD'}</span>
                       </span>
                     </td>
                     <td className="px-4 py-3 align-middle text-muted-foreground">
@@ -959,7 +957,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
             ) : (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">
-                  Nenhum cliente de anúncio encontrado para os filtros.
+                  Nenhum contato vindo de anúncio encontrado para os filtros.
                 </td>
               </tr>
             )}
@@ -999,7 +997,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
             type="button"
             onClick={() => {
               setSearch('');
-              setStageFilter('all');
+              setStatusFilter('all');
             }}
             className="ml-1 hidden h-8 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-foreground transition-colors hover:bg-muted sm:inline-flex"
           >
