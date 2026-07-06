@@ -8552,6 +8552,16 @@ const buildAcquisitionDashboardMetrics = async (
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
   const selectedFilters = resolveAcquisitionDashboardFilters(filters);
   const persistedAcquisitionRows = normalizeDashboardPersistedAdCustomers(operationStore.dashboardAdCustomers);
+  const preferenceByConversationId = new Map(
+    (Array.isArray(operationStore.conversationPreferences) ? operationStore.conversationPreferences : [])
+      .map((preference) => [String(preference?.conversation_id || preference?.conversationId || preference?.id || "").trim(), preference])
+      .filter(([conversationId]) => conversationId),
+  );
+  const isScheduledResolutionPreference = (preference = null) => {
+    if (!preference || String(preference?.resolution_status || "").trim() !== "resolved") return false;
+    const type = normalizeDashboardText(preference?.resolution_type || preference?.type || "");
+    return ["scheduled", "agendado", "agendada", "appointment", "appointment_scheduled", "agendamento"].includes(type);
+  };
   let meta = null;
   try {
     meta = await fetchMetaAcquisitionInsights({ startMs: normalizedStartMs, endMs: normalizedEndMs });
@@ -8599,8 +8609,6 @@ const buildAcquisitionDashboardMetrics = async (
   const newCustomerPhones = new Set();
   const keywordStats = new Map();
   const adCustomerRecords = [];
-  const adAttributionWindowMs = dashboardSettings.adAttributionWindowDays * 24 * 60 * 60 * 1000;
-  const appointmentWindowMs = dashboardSettings.appointmentAttributionWindowDays * 24 * 60 * 60 * 1000;
   const newCustomerWindowMs = dashboardSettings.newCustomerWindowDays * 24 * 60 * 60 * 1000;
 
   for (const [conversationId, conversation] of Object.entries(store?.conversations || {})) {
@@ -8643,37 +8651,57 @@ const buildAcquisitionDashboardMetrics = async (
     let isNewCustomer = false;
     let appointmentAt = "";
     let resolvedAt = "";
+    const conversationPreference = preferenceByConversationId.get(String(conversationId || "").trim()) || null;
+    let scheduledResolutionAtMs = null;
     if (customer) {
       const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
-      const attributionStartMs = firstAdSeenAtMs;
-      const attributionEndMs = attributionStartMs + Math.min(adAttributionWindowMs, appointmentWindowMs);
-      const insideAttributionWindow = [pendingMs, resolvedMs].some(
-        (appointmentMs) =>
-          Number.isFinite(appointmentMs) &&
-          appointmentMs >= attributionStartMs &&
-          appointmentMs <= attributionEndMs &&
-          appointmentMs >= normalizedStartMs &&
-          appointmentMs <= normalizedEndMs,
-      );
-      if (insideAttributionWindow) {
+      const legacyCurrentFact = isScheduledResolutionPreference(conversationPreference)
+        ? {
+            id: "",
+            conversationId,
+            phone,
+            resolutionType: conversationPreference?.resolution_type || conversationPreference?.type || "",
+            resolvedAt:
+              conversationPreference?.resolved_at ||
+              conversationPreference?.updated_date ||
+              conversationPreference?.created_date ||
+              "",
+            source: "legacy_current_preference",
+          }
+        : null;
+      const persistedResolutionFacts = Array.isArray(operationStore.attendanceResolutionFacts)
+        ? operationStore.attendanceResolutionFacts
+        : [];
+      const scheduledFactsForConversation = [...persistedResolutionFacts, ...(legacyCurrentFact ? [legacyCurrentFact] : [])]
+        .filter((fact) => {
+          const type = normalizeDashboardText(fact?.resolutionType || fact?.resolution_type || fact?.type || "");
+          if (!["scheduled", "agendado", "agendada", "appointment", "appointment_scheduled", "agendamento"].includes(type)) return false;
+          const factConversationId = String(fact?.conversationId || fact?.conversation_id || "").trim();
+          if (factConversationId && factConversationId === String(conversationId || "").trim()) return true;
+          const factPhone = normalizePhone(fact?.phone || "");
+          return Boolean(factPhone) && Boolean(appBarberPhone || phone) && factPhone === normalizePhone(appBarberPhone || phone);
+        })
+        .map((fact) => Date.parse(String(fact?.resolvedAt || fact?.resolved_at || "")))
+        .filter((timestampMs) => isWithinDashboardRange(timestampMs, normalizedStartMs, normalizedEndMs))
+        .sort((left, right) => left - right);
+      scheduledResolutionAtMs = scheduledFactsForConversation[0] || null;
+      if (Number.isFinite(scheduledResolutionAtMs)) {
         hasAppointment = true;
-        if (Number.isFinite(pendingMs) && pendingMs >= attributionStartMs && pendingMs <= attributionEndMs) {
-          appointmentAt = new Date(pendingMs).toISOString();
-        }
-        if (Number.isFinite(resolvedMs) && resolvedMs >= attributionStartMs && resolvedMs <= attributionEndMs) {
-          resolvedAt = new Date(resolvedMs).toISOString();
-          hasAttendance = true;
-        }
+        appointmentAt = new Date(scheduledResolutionAtMs).toISOString();
         if (localStats) {
           localStats.localAppointments += 1;
           localByAdId.set(adId, localStats);
         }
       }
+      if (hasAppointment && Number.isFinite(resolvedMs) && isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)) {
+        resolvedAt = new Date(resolvedMs).toISOString();
+        hasAttendance = true;
+      }
       const registrationMs = getDashboardCustomerRegistrationMs(customer);
       if (
         !Number.isFinite(registrationMs) ||
-        (registrationMs >= attributionStartMs - 24 * 60 * 60 * 1000 &&
-          registrationMs <= attributionStartMs + newCustomerWindowMs)
+        (registrationMs >= firstAdSeenAtMs - 24 * 60 * 60 * 1000 &&
+          registrationMs <= firstAdSeenAtMs + newCustomerWindowMs)
       ) {
         newCustomerPhones.add(appBarberPhone || phone);
         isNewCustomer = true;
@@ -8775,7 +8803,9 @@ const buildAcquisitionDashboardMetrics = async (
     };
   });
   const mergedAppointments = mergedCustomers.filter((item) => item.firstScheduledAt || item.appointmentAt);
-  const mergedAttendances = mergedCustomers.filter((item) => item.firstAttendedAt || item.resolvedAt);
+  const mergedAttendances = mergedCustomers.filter(
+    (item) => (item.firstScheduledAt || item.appointmentAt) && (item.firstAttendedAt || item.resolvedAt),
+  );
   const scheduledCount = new Set(mergedAppointments.map((item) => item.phone).filter(Boolean)).size;
   const attendedCount = new Set(mergedAttendances.map((item) => item.phone).filter(Boolean)).size;
   const officialClicks = filteredMetaRows.reduce((total, row) => total + getOfficialMetaAdClicks(row), 0);
