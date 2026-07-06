@@ -1006,6 +1006,8 @@ const CHECKOUT_TOKEN_TTL_HOURS = Number.parseInt(process.env.CHECKOUT_TOKEN_TTL_
 const CHECKOUT_PUBLIC_URL = process.env.CHECKOUT_PUBLIC_URL || process.env.VITE_CHECKOUT_PUBLIC_URL || "";
 const ROUTINES_STORE_PATH = process.env.ROUTINES_STORE_PATH || "server/data/routines.json";
 const ROUTINE_LOG_STORE_PATH = process.env.ROUTINE_LOG_STORE_PATH || "server/data/routine-logs.json";
+const META_ACQUISITION_HISTORY_PATH =
+  process.env.META_ACQUISITION_HISTORY_PATH || "server/data/meta-acquisition-history.json";
 const SCHEDULED_MESSAGES_STORE_PATH =
   process.env.SCHEDULED_MESSAGES_STORE_PATH || "server/data/scheduled-messages.json";
 const LABEL_CAMPAIGN_STATE_PATH =
@@ -1023,6 +1025,25 @@ const LABEL_CAMPAIGN_SCHEDULER_INTERVAL_MS = Number.parseInt(
   process.env.LABEL_CAMPAIGN_SCHEDULER_INTERVAL_MS || "60000",
   10,
 );
+const META_ACQUISITION_SYNC_INTERVAL_MS = Number.parseInt(
+  process.env.META_ACQUISITION_SYNC_INTERVAL_MS || `${24 * 60 * 60 * 1000}`,
+  10,
+);
+const META_ACQUISITION_RECENT_RESYNC_DAYS = Number.parseInt(
+  process.env.META_ACQUISITION_RECENT_RESYNC_DAYS || "7",
+  10,
+);
+const META_ACQUISITION_BACKFILL_WINDOW_DAYS = Number.parseInt(
+  process.env.META_ACQUISITION_BACKFILL_WINDOW_DAYS || "90",
+  10,
+);
+const META_ACQUISITION_MAX_PAGES = Number.parseInt(
+  process.env.META_ACQUISITION_MAX_PAGES || "100",
+  10,
+);
+const META_ACQUISITION_HISTORY_START_DATE = String(
+  process.env.META_ACQUISITION_HISTORY_START_DATE || "2010-01-01",
+).trim();
 const DEFAULT_ROUTINE_TIMEZONE = "America/Sao_Paulo";
 const ROUTINE_DEFAULT_SEND_INTERVAL_SECONDS = Number.parseInt(
   process.env.ROUTINE_DEFAULT_SEND_INTERVAL_SECONDS || "12",
@@ -1298,6 +1319,7 @@ const coexPath = path.resolve(process.cwd(), COEXISTENCE_PATH);
 const checkoutTokenPath = path.resolve(process.cwd(), CHECKOUT_TOKEN_STORE_PATH);
 const checkoutRenewLogPath = path.resolve(process.cwd(), CHECKOUT_RENEW_LOG_PATH);
 const messageDeliveryLogPath = path.resolve(process.cwd(), MESSAGE_DELIVERY_LOG_PATH);
+const metaAcquisitionHistoryStorePath = path.resolve(process.cwd(), META_ACQUISITION_HISTORY_PATH);
 const safeReadJsonFile = async (filePath, fallback) => {
   const readFromJsonFile = async () => {
     try {
@@ -1331,6 +1353,55 @@ const atomicWriteJson = async (filePath, data) => {
   };
 
   await writeJsonBackedStore(filePath, data, writeToJsonFile);
+};
+
+const META_ACQUISITION_HISTORY_VERSION = "2026-07-06-meta-acquisition-history-v1";
+
+const emptyMetaAcquisitionHistoryStore = () => ({
+  version: META_ACQUISITION_HISTORY_VERSION,
+  rows: [],
+  sync: {
+    lastFullBackfillAt: null,
+    lastIncrementalSyncAt: null,
+    lastRequestedRange: null,
+    lastSuccessAt: null,
+    lastError: null,
+    backfillStartedAt: null,
+    backfillCompletedAt: null,
+    backfillCursor: null,
+    syncedDays: {},
+  },
+});
+
+const readMetaAcquisitionHistoryStore = async () => {
+  const data = await safeReadJsonFile(metaAcquisitionHistoryStorePath, emptyMetaAcquisitionHistoryStore());
+  const sync = data?.sync && typeof data.sync === "object" ? data.sync : {};
+  return {
+    ...emptyMetaAcquisitionHistoryStore(),
+    ...(data && typeof data === "object" ? data : {}),
+    rows: Array.isArray(data?.rows) ? data.rows : [],
+    sync: {
+      ...emptyMetaAcquisitionHistoryStore().sync,
+      ...sync,
+      syncedDays: sync?.syncedDays && typeof sync.syncedDays === "object" ? sync.syncedDays : {},
+    },
+  };
+};
+
+const writeMetaAcquisitionHistoryStore = async (store) => {
+  const next = store && typeof store === "object" ? store : emptyMetaAcquisitionHistoryStore();
+  const sync = next.sync && typeof next.sync === "object" ? next.sync : {};
+  await atomicWriteJson(metaAcquisitionHistoryStorePath, {
+    ...emptyMetaAcquisitionHistoryStore(),
+    ...next,
+    version: META_ACQUISITION_HISTORY_VERSION,
+    rows: Array.isArray(next.rows) ? next.rows : [],
+    sync: {
+      ...emptyMetaAcquisitionHistoryStore().sync,
+      ...sync,
+      syncedDays: sync?.syncedDays && typeof sync.syncedDays === "object" ? sync.syncedDays : {},
+    },
+  });
 };
 
 const emptyCheckoutTokenStore = () => ({
@@ -8142,6 +8213,17 @@ const getMetaCostPerActionValue = (row = {}, actionType = "") => {
   return Number(action?.value || 0) || 0;
 };
 
+const getMetaAcquisitionConfig = () => {
+  const accessToken = String(META_MARKETING_ACCESS_TOKEN || "").trim();
+  const adAccountId = normalizeMetaAdAccountId(META_AD_ACCOUNT_ID);
+  return {
+    accessToken,
+    adAccountId,
+    configured: Boolean(accessToken && adAccountId),
+    enabled: META_AD_ENRICHMENT_ENABLED,
+  };
+};
+
 const normalizeMetaAdInsightRow = (row = {}) => {
   const spend = Number(row?.spend || 0) || 0;
   const clicks = Number(row?.clicks || 0) || 0;
@@ -8168,11 +8250,36 @@ const normalizeMetaAdInsightRow = (row = {}) => {
     linkClicks,
     messagingConversationStarted7d,
     messagingFirstReply,
-    costPerLinkClick: getMetaCostPerActionValue(row, "link_click"),
-    costPerMessagingConversationStarted7d: getMetaCostPerActionValue(row, "onsite_conversion.messaging_conversation_started_7d"),
-    raw: row,
   };
 };
+
+const buildMetaAcquisitionHistoryRowKey = (row = {}) =>
+  [
+    String(row?.dateStart || row?.date_start || "").trim(),
+    String(row?.adId || row?.ad_id || row?.adName || row?.ad_name || row?.campaignId || row?.campaign_id || "sem-anuncio").trim(),
+  ].join(":");
+
+const normalizeMetaAcquisitionHistoryRow = (row = {}) => {
+  const normalized = {
+    ...normalizeMetaAdInsightRow(row),
+    syncedAt: String(row?.syncedAt || row?.synced_at || row?.updatedAt || nowIso()).trim(),
+  };
+  if (!normalized.dateStart || !normalized.dateStop) return null;
+  return {
+    ...normalized,
+    historyKey: buildMetaAcquisitionHistoryRowKey(normalized),
+  };
+};
+
+const normalizeMetaAcquisitionHistoryRows = (value = []) =>
+  (Array.isArray(value) ? value : [])
+    .map(normalizeMetaAcquisitionHistoryRow)
+    .filter(Boolean)
+    .sort(
+      (left, right) =>
+        String(right.dateStart || "").localeCompare(String(left.dateStart || "")) ||
+        String(left.adName || left.adId || "").localeCompare(String(right.adName || right.adId || "")),
+    );
 
 const buildMetaAdInsightsSummary = (rows = []) =>
   rows.reduce(
@@ -8195,13 +8302,135 @@ const buildMetaAdInsightsSummary = (rows = []) =>
     },
   );
 
-const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
-  const accessToken = String(META_MARKETING_ACCESS_TOKEN || "").trim();
-  const adAccountId = normalizeMetaAdAccountId(META_AD_ACCOUNT_ID);
-  if (!META_AD_ENRICHMENT_ENABLED || !accessToken || !adAccountId) {
+const aggregateMetaAcquisitionRowsByAd = (rows = []) => {
+  const byId = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = String(row?.adId || row?.adName || row?.campaignId || row?.campaignName || "").trim();
+    if (!key) return;
+    const current = byId.get(key) || {
+      dateStart: String(row?.dateStart || "").trim(),
+      dateStop: String(row?.dateStop || "").trim(),
+      accountId: String(row?.accountId || "").trim(),
+      accountName: String(row?.accountName || "").trim(),
+      campaignId: String(row?.campaignId || "").trim(),
+      campaignName: String(row?.campaignName || "").trim(),
+      adsetId: String(row?.adsetId || "").trim(),
+      adsetName: String(row?.adsetName || "").trim(),
+      adId: String(row?.adId || "").trim(),
+      adName: String(row?.adName || "").trim(),
+      spend: 0,
+      impressions: 0,
+      reach: 0,
+      clicks: 0,
+      inlineLinkClicks: 0,
+      linkClicks: 0,
+      messagingConversationStarted7d: 0,
+      messagingFirstReply: 0,
+      syncedAt: String(row?.syncedAt || "").trim(),
+    };
+    current.dateStart =
+      current.dateStart && String(row?.dateStart || "").trim() && current.dateStart < String(row?.dateStart || "").trim()
+        ? current.dateStart
+        : String(row?.dateStart || current.dateStart || "").trim();
+    current.dateStop =
+      current.dateStop && String(row?.dateStop || "").trim() && current.dateStop > String(row?.dateStop || "").trim()
+        ? current.dateStop
+        : String(row?.dateStop || current.dateStop || "").trim();
+    current.spend += Number(row?.spend || 0) || 0;
+    current.impressions += Number(row?.impressions || 0) || 0;
+    current.reach += Number(row?.reach || 0) || 0;
+    current.clicks += Number(row?.clicks || 0) || 0;
+    current.inlineLinkClicks += Number(row?.inlineLinkClicks || 0) || 0;
+    current.linkClicks += Number(row?.linkClicks || 0) || 0;
+    current.messagingConversationStarted7d += Number(row?.messagingConversationStarted7d || 0) || 0;
+    current.messagingFirstReply += Number(row?.messagingFirstReply || 0) || 0;
+    current.syncedAt =
+      Date.parse(String(row?.syncedAt || "")) > Date.parse(String(current.syncedAt || ""))
+        ? String(row?.syncedAt || "").trim()
+        : current.syncedAt;
+    byId.set(key, current);
+  });
+  return Array.from(byId.values()).sort(
+    (left, right) =>
+      (Number(right.spend || 0) || 0) - (Number(left.spend || 0) || 0) ||
+      String(left.adName || left.adId || "").localeCompare(String(right.adName || right.adId || "")),
+  );
+};
+
+const buildMetaAcquisitionHistoryCoverage = (store = {}) => {
+  const syncedDays = store?.sync?.syncedDays && typeof store.sync.syncedDays === "object" ? store.sync.syncedDays : {};
+  const keys = Object.keys(syncedDays).filter(Boolean).sort();
+  return {
+    coverageStart: keys[0] || null,
+    coverageEnd: keys.length ? keys[keys.length - 1] : null,
+    syncedDays,
+  };
+};
+
+const collectMetaAcquisitionHistoryMissingDays = (store = {}, startMs = null, endMs = null) => {
+  const { syncedDays } = buildMetaAcquisitionHistoryCoverage(store);
+  return enumerateDashboardDayKeys(startMs, endMs).filter((dayKey) => !syncedDays[dayKey]);
+};
+
+const markMetaAcquisitionHistoryDaysSynced = (historyStore = {}, dayKeys = [], syncedAt = nowIso()) => {
+  const next = historyStore;
+  next.sync = next.sync && typeof next.sync === "object" ? next.sync : {};
+  next.sync.syncedDays = next.sync.syncedDays && typeof next.sync.syncedDays === "object" ? next.sync.syncedDays : {};
+  (Array.isArray(dayKeys) ? dayKeys : []).forEach((dayKey) => {
+    if (!dayKey) return;
+    next.sync.syncedDays[dayKey] = syncedAt;
+  });
+  return next;
+};
+
+const upsertMetaAcquisitionHistoryRows = (historyStore = {}, rows = [], { syncedDayKeys = [], syncMeta = {} } = {}) => {
+  const existingRows = normalizeMetaAcquisitionHistoryRows(historyStore?.rows);
+  const byKey = new Map(existingRows.map((row) => [row.historyKey, row]));
+  const syncedAt = String(syncMeta?.syncedAt || nowIso()).trim() || nowIso();
+  normalizeMetaAcquisitionHistoryRows(rows).forEach((row) => {
+    const key = row.historyKey;
+    if (!key) return;
+    const nextRow = { ...row, syncedAt };
+    const current = byKey.get(key) || null;
+    if (JSON.stringify(current || null) === JSON.stringify(nextRow)) return;
+    byKey.set(key, nextRow);
+  });
+  const nextStore = {
+    ...emptyMetaAcquisitionHistoryStore(),
+    ...(historyStore && typeof historyStore === "object" ? historyStore : {}),
+    version: META_ACQUISITION_HISTORY_VERSION,
+    rows: Array.from(byKey.values()).sort(
+      (left, right) =>
+        String(right.dateStart || "").localeCompare(String(left.dateStart || "")) ||
+        String(left.adName || left.adId || "").localeCompare(String(right.adName || right.adId || "")),
+    ),
+    sync: {
+      ...emptyMetaAcquisitionHistoryStore().sync,
+      ...(historyStore?.sync && typeof historyStore.sync === "object" ? historyStore.sync : {}),
+      ...syncMeta,
+      syncedDays:
+        historyStore?.sync?.syncedDays && typeof historyStore.sync.syncedDays === "object"
+          ? { ...historyStore.sync.syncedDays }
+          : {},
+    },
+  };
+  markMetaAcquisitionHistoryDaysSynced(nextStore, syncedDayKeys, syncedAt);
+  const mutated = JSON.stringify(historyStore || {}) !== JSON.stringify(nextStore);
+  return { mutated, store: nextStore };
+};
+
+const fetchMetaAcquisitionInsights = async ({
+  startMs,
+  endMs,
+  timeIncrement = 1,
+  useCache = true,
+  maxPages = META_ACQUISITION_MAX_PAGES,
+} = {}) => {
+  const { accessToken, adAccountId, configured, enabled } = getMetaAcquisitionConfig();
+  if (!enabled || !configured) {
     return {
-      configured: Boolean(accessToken && adAccountId),
-      enabled: META_AD_ENRICHMENT_ENABLED,
+      configured,
+      enabled,
       adAccountId,
       spend: 0,
       clicks: 0,
@@ -8218,10 +8447,10 @@ const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
   const since = toDashboardDateKey(normalizedStartMs);
   const until = toDashboardDateKey(normalizedEndMs);
-  const cacheKey = `${adAccountId}:${since}:${until}:${META_GRAPH_VERSION}`;
+  const cacheKey = `${adAccountId}:${since}:${until}:${META_GRAPH_VERSION}:ti=${timeIncrement}`;
   const ttl = Number.isFinite(META_INSIGHTS_CACHE_TTL_MS) && META_INSIGHTS_CACHE_TTL_MS > 0 ? META_INSIGHTS_CACHE_TTL_MS : 900000;
   const cached = metaAcquisitionInsightsCache.get(cacheKey);
-  if (cached && Date.now() - cached.cachedAt < ttl) {
+  if (useCache && cached && Date.now() - cached.cachedAt < ttl) {
     return cached.value;
   }
 
@@ -8250,11 +8479,12 @@ const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
     ].join(","),
   );
   nextUrl.searchParams.set("level", "ad");
+  nextUrl.searchParams.set("time_increment", String(Math.max(1, Number(timeIncrement) || 1)));
   nextUrl.searchParams.set("time_range", JSON.stringify({ since, until }));
   nextUrl.searchParams.set("limit", "200");
   nextUrl.searchParams.set("access_token", accessToken);
 
-  for (let page = 0; nextUrl && page < 25; page += 1) {
+  for (let page = 0; nextUrl && page < Math.max(1, Number(maxPages) || 1); page += 1) {
     const response = await fetch(nextUrl.toString(), { method: "GET" });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -8273,7 +8503,9 @@ const fetchMetaAcquisitionInsights = async ({ startMs, endMs } = {}) => {
     ...summary,
     rows,
   };
-  metaAcquisitionInsightsCache.set(cacheKey, { cachedAt: Date.now(), value });
+  if (useCache) {
+    metaAcquisitionInsightsCache.set(cacheKey, { cachedAt: Date.now(), value });
+  }
 
   return value;
 };
@@ -8542,6 +8774,256 @@ const matchesAcquisitionPeriodRange = (row = {}, startMs = null, endMs = null) =
   return true;
 };
 
+const buildMetaAcquisitionHistorySyncWindows = (startMs, endMs, windowDays = META_ACQUISITION_BACKFILL_WINDOW_DAYS) => {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return [];
+  const safeWindowDays = Math.max(1, Number(windowDays) || 90);
+  const windows = [];
+  let cursor = startMs;
+  while (cursor <= endMs) {
+    const nextEnd = Math.min(endMs, cursor + safeWindowDays * 24 * 60 * 60 * 1000 - 1);
+    windows.push({ startMs: cursor, endMs: nextEnd });
+    cursor = nextEnd + 1;
+  }
+  return windows;
+};
+
+const syncMetaAcquisitionHistory = async ({
+  startMs,
+  endMs,
+  historyStore = null,
+  reason = "manual",
+  force = false,
+  useCache = false,
+  write = true,
+  syncType = "incremental",
+} = {}) => {
+  const range = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  const requestedDayKeys = enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs);
+  let nextHistoryStore = historyStore || (await readMetaAcquisitionHistoryStore());
+  const metaConfig = getMetaAcquisitionConfig();
+  if (!metaConfig.enabled || !metaConfig.configured) {
+    nextHistoryStore = {
+      ...nextHistoryStore,
+      sync: {
+        ...emptyMetaAcquisitionHistoryStore().sync,
+        ...(nextHistoryStore.sync || {}),
+        lastRequestedRange: {
+          start: new Date(normalizedStartMs).toISOString(),
+          end: new Date(normalizedEndMs).toISOString(),
+          reason,
+          syncType,
+        },
+        lastError: metaConfig.enabled ? "Meta acquisition insights not configured" : "Meta acquisition enrichment disabled",
+      },
+    };
+    if (write) await writeMetaAcquisitionHistoryStore(nextHistoryStore);
+    return {
+      historyStore: nextHistoryStore,
+      mutated: true,
+      fetchedRows: [],
+      missingDaysBefore: requestedDayKeys,
+      configured: metaConfig.configured,
+      enabled: metaConfig.enabled,
+      adAccountId: metaConfig.adAccountId,
+      skipped: true,
+    };
+  }
+  const missingDaysBefore = force ? requestedDayKeys : collectMetaAcquisitionHistoryMissingDays(nextHistoryStore, normalizedStartMs, normalizedEndMs);
+  const includesToday = requestedDayKeys.includes(toDashboardDateKey(Date.now()));
+  if (!force && !missingDaysBefore.length && !includesToday) {
+    return {
+      historyStore: nextHistoryStore,
+      mutated: false,
+      fetchedRows: [],
+      missingDaysBefore: [],
+      configured: metaConfig.configured,
+      enabled: metaConfig.enabled,
+      adAccountId: metaConfig.adAccountId,
+      skipped: true,
+    };
+  }
+  const syncedAt = nowIso();
+  try {
+    const meta = await fetchMetaAcquisitionInsights({
+      startMs: normalizedStartMs,
+      endMs: normalizedEndMs,
+      timeIncrement: 1,
+      useCache,
+    });
+    const upserted = upsertMetaAcquisitionHistoryRows(nextHistoryStore, meta.rows, {
+      syncedDayKeys: requestedDayKeys,
+      syncMeta: {
+        lastRequestedRange: {
+          start: new Date(normalizedStartMs).toISOString(),
+          end: new Date(normalizedEndMs).toISOString(),
+          reason,
+          syncType,
+        },
+        lastSuccessAt: syncedAt,
+        lastError: null,
+        ...(syncType === "full_backfill"
+          ? { lastFullBackfillAt: syncedAt }
+          : { lastIncrementalSyncAt: syncedAt }),
+        syncedAt,
+      },
+    });
+    nextHistoryStore = upserted.store;
+    if (write && upserted.mutated) {
+      await writeMetaAcquisitionHistoryStore(nextHistoryStore);
+    }
+    return {
+      historyStore: nextHistoryStore,
+      mutated: upserted.mutated,
+      fetchedRows: Array.isArray(meta.rows) ? meta.rows : [],
+      missingDaysBefore,
+      configured: meta.configured,
+      enabled: meta.enabled,
+      adAccountId: meta.adAccountId,
+      skipped: false,
+    };
+  } catch (error) {
+    nextHistoryStore = {
+      ...nextHistoryStore,
+      sync: {
+        ...emptyMetaAcquisitionHistoryStore().sync,
+        ...(nextHistoryStore.sync || {}),
+        lastRequestedRange: {
+          start: new Date(normalizedStartMs).toISOString(),
+          end: new Date(normalizedEndMs).toISOString(),
+          reason,
+          syncType,
+        },
+        lastError: error?.message || "Meta acquisition insights error",
+      },
+    };
+    if (write) {
+      await writeMetaAcquisitionHistoryStore(nextHistoryStore);
+    }
+    throw error;
+  }
+};
+
+const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs } = {}) => {
+  const range = getDefaultAttendanceDashboardRange();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  let historyStore = await readMetaAcquisitionHistoryStore();
+  const missingDaysBefore = collectMetaAcquisitionHistoryMissingDays(historyStore, normalizedStartMs, normalizedEndMs);
+  const requestedDayKeys = enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs);
+  const todayKey = toDashboardDateKey(Date.now());
+  const shouldRefreshRecentWindow =
+    requestedDayKeys.includes(todayKey) ||
+    normalizedEndMs >= Date.now() - Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS) * 24 * 60 * 60 * 1000;
+  if (missingDaysBefore.length > 0) {
+    const syncResult = await syncMetaAcquisitionHistory({
+      startMs: normalizedStartMs,
+      endMs: normalizedEndMs,
+      historyStore,
+      reason: "dashboard_gap_fill",
+      force: true,
+      useCache: true,
+      syncType: "incremental",
+    });
+    historyStore = syncResult.historyStore;
+  } else if (shouldRefreshRecentWindow) {
+    const recentStartMs = Math.max(
+      normalizedStartMs,
+      Date.now() - Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS) * 24 * 60 * 60 * 1000,
+    );
+    const syncResult = await syncMetaAcquisitionHistory({
+      startMs: recentStartMs,
+      endMs: normalizedEndMs,
+      historyStore,
+      reason: "dashboard_recent_refresh",
+      force: true,
+      useCache: true,
+      syncType: "incremental",
+    });
+    historyStore = syncResult.historyStore;
+  }
+  const missingDaysAfter = collectMetaAcquisitionHistoryMissingDays(historyStore, normalizedStartMs, normalizedEndMs);
+  return {
+    historyStore,
+    missingDaysBefore,
+    missingDaysAfter,
+  };
+};
+
+const runMetaAcquisitionHistoryBackfill = async ({ onProgress } = {}) => {
+  const metaConfig = getMetaAcquisitionConfig();
+  if (!metaConfig.enabled || !metaConfig.configured) return { skipped: true, reason: "meta_not_configured" };
+  let historyStore = await readMetaAcquisitionHistoryStore();
+  const now = Date.now();
+  const startMs =
+    parseDashboardDateBoundary(historyStore?.sync?.backfillCursor || META_ACQUISITION_HISTORY_START_DATE, "start") ||
+    parseDashboardDateBoundary(META_ACQUISITION_HISTORY_START_DATE, "start") ||
+    now;
+  if (startMs > now) {
+    return { skipped: true, reason: "backfill_complete" };
+  }
+  historyStore = {
+    ...historyStore,
+    sync: {
+      ...emptyMetaAcquisitionHistoryStore().sync,
+      ...(historyStore.sync || {}),
+      backfillStartedAt: historyStore?.sync?.backfillStartedAt || nowIso(),
+      backfillCompletedAt: null,
+      lastError: null,
+    },
+  };
+  await writeMetaAcquisitionHistoryStore(historyStore);
+  const windows = buildMetaAcquisitionHistorySyncWindows(startMs, now, META_ACQUISITION_BACKFILL_WINDOW_DAYS);
+  for (const window of windows) {
+    const result = await syncMetaAcquisitionHistory({
+      startMs: window.startMs,
+      endMs: window.endMs,
+      historyStore,
+      reason: "worker_full_backfill",
+      force: true,
+      useCache: false,
+      syncType: "full_backfill",
+    });
+    historyStore = {
+      ...result.historyStore,
+      sync: {
+        ...emptyMetaAcquisitionHistoryStore().sync,
+        ...(result.historyStore.sync || {}),
+        backfillCursor: toDashboardDateKey(window.endMs + 24 * 60 * 60 * 1000),
+      },
+    };
+    await writeMetaAcquisitionHistoryStore(historyStore);
+    onProgress?.(window);
+  }
+  historyStore = {
+    ...historyStore,
+    sync: {
+      ...emptyMetaAcquisitionHistoryStore().sync,
+      ...(historyStore.sync || {}),
+      backfillCursor: null,
+      backfillCompletedAt: nowIso(),
+      lastFullBackfillAt: nowIso(),
+      lastError: null,
+    },
+  };
+  await writeMetaAcquisitionHistoryStore(historyStore);
+  return { skipped: false, historyStore };
+};
+
+const runMetaAcquisitionHistoryIncrementalSync = async () => {
+  const endMs = Date.now();
+  const startMs = endMs - Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS) * 24 * 60 * 60 * 1000;
+  return syncMetaAcquisitionHistory({
+    startMs,
+    endMs,
+    reason: "worker_incremental_refresh",
+    force: true,
+    useCache: false,
+    syncType: "incremental",
+  });
+};
+
 const buildAcquisitionDashboardMetrics = async (
   store,
   { startMs, endMs, filters = {}, operationStore = {}, mutationState = null } = {},
@@ -8562,26 +9044,41 @@ const buildAcquisitionDashboardMetrics = async (
     const type = normalizeDashboardText(preference?.resolution_type || preference?.type || "");
     return ["scheduled", "agendado", "agendada", "appointment", "appointment_scheduled", "agendamento"].includes(type);
   };
-  let meta = null;
+  let metaError = null;
+  const metaConfig = getMetaAcquisitionConfig();
+  let metaHistoryState = null;
   try {
-    meta = await fetchMetaAcquisitionInsights({ startMs: normalizedStartMs, endMs: normalizedEndMs });
+    metaHistoryState = await ensureMetaAcquisitionHistoryForDashboard({
+      startMs: normalizedStartMs,
+      endMs: normalizedEndMs,
+    });
   } catch (error) {
-    meta = {
-      configured: Boolean(String(META_MARKETING_ACCESS_TOKEN || "").trim() && normalizeMetaAdAccountId(META_AD_ACCOUNT_ID)),
-      enabled: META_AD_ENRICHMENT_ENABLED,
-      adAccountId: normalizeMetaAdAccountId(META_AD_ACCOUNT_ID),
-      spend: 0,
-      clicks: 0,
-      inlineLinkClicks: 0,
-      linkClicks: 0,
-      messagingConversationStarted7d: 0,
-      messagingFirstReply: 0,
-      rows: [],
-      error: error?.message || "Meta acquisition insights error",
+    metaError = error?.message || "Meta acquisition history sync error";
+    metaHistoryState = {
+      historyStore: await readMetaAcquisitionHistoryStore(),
+      missingDaysBefore: enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs),
+      missingDaysAfter: enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs),
     };
   }
+  let meta = null;
+  const normalizedMetaHistoryRows = normalizeMetaAcquisitionHistoryRows(metaHistoryState.historyStore?.rows);
+  const periodMetaRows = normalizedMetaHistoryRows.filter((row) => {
+    const rowStartMs = parseDashboardDateBoundary(row?.dateStart, "start");
+    const rowEndMs = parseDashboardDateBoundary(row?.dateStop || row?.dateStart, "end");
+    if (!Number.isFinite(rowStartMs) || !Number.isFinite(rowEndMs)) return false;
+    if (rowEndMs < normalizedStartMs || rowStartMs > normalizedEndMs) return false;
+    return true;
+  });
+  const aggregatedPeriodMetaRows = aggregateMetaAcquisitionRowsByAd(periodMetaRows);
+  meta = {
+    configured: metaConfig.configured,
+    enabled: metaConfig.enabled,
+    adAccountId: metaConfig.adAccountId,
+    ...buildMetaAdInsightsSummary(aggregatedPeriodMetaRows),
+    rows: aggregatedPeriodMetaRows,
+    error: metaError || metaHistoryState.historyStore?.sync?.lastError || null,
+  };
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
-  const periodMetaRows = Array.isArray(meta.rows) ? meta.rows : [];
   const filteredPersistedRows = persistedAcquisitionRows.filter(
     (row) =>
       matchesAcquisitionPeriodRange(row, normalizedStartMs, normalizedEndMs) &&
@@ -8589,7 +9086,7 @@ const buildAcquisitionDashboardMetrics = async (
   );
   const filterOptions = buildAcquisitionFilterOptions({
     metaRows: [
-      ...periodMetaRows,
+      ...aggregatedPeriodMetaRows,
       ...filteredPersistedRows.map((row) => ({
         campaignId: row.campaignId,
         campaignName: row.campaignName,
@@ -8601,8 +9098,8 @@ const buildAcquisitionDashboardMetrics = async (
     ],
     selectedFilters,
   });
-  const filteredMetaRows = periodMetaRows.filter((row) => matchesAcquisitionEntityFilters(row, selectedFilters));
-  const metaAdById = new Map(periodMetaRows.filter((row) => row.adId).map((row) => [row.adId, row]));
+  const filteredMetaRows = aggregatedPeriodMetaRows.filter((row) => matchesAcquisitionEntityFilters(row, selectedFilters));
+  const metaAdById = new Map(aggregatedPeriodMetaRows.filter((row) => row.adId).map((row) => [row.adId, row]));
   const localByAdId = new Map();
   const whatsappConversationIds = new Set();
   const appBarberCustomerPhones = new Set();
@@ -8811,6 +9308,7 @@ const buildAcquisitionDashboardMetrics = async (
   const officialClicks = filteredMetaRows.reduce((total, row) => total + getOfficialMetaAdClicks(row), 0);
   const filteredMetaSummary = buildMetaAdInsightsSummary(filteredMetaRows);
   const hasViewFilters = Boolean(selectedFilters.campaignId || selectedFilters.adsetId || selectedFilters.adId);
+  const metaHistoryCoverage = buildMetaAcquisitionHistoryCoverage(metaHistoryState.historyStore);
 
   return {
     period: {
@@ -8831,6 +9329,9 @@ const buildAcquisitionDashboardMetrics = async (
       messagingConversationStarted7d: filteredMetaSummary.messagingConversationStarted7d || 0,
       messagingFirstReply: filteredMetaSummary.messagingFirstReply || 0,
       officialClicks,
+      historyCoverageStart: metaHistoryCoverage.coverageStart,
+      historyCoverageEnd: metaHistoryCoverage.coverageEnd,
+      historyLastSyncAt: metaHistoryState.historyStore?.sync?.lastSuccessAt || null,
     },
     local: {
       adConversations: conversationsStarted,
@@ -8882,6 +9383,11 @@ const buildAcquisitionDashboardMetrics = async (
         meta: "insight_date_range",
         local: "first_ad_signal_at",
       },
+      metaReadMode: "persisted_with_gap_fill",
+      metaHistoryCoverageStart: metaHistoryCoverage.coverageStart,
+      metaHistoryCoverageEnd: metaHistoryCoverage.coverageEnd,
+      metaHistoryLastSyncAt: metaHistoryState.historyStore?.sync?.lastSuccessAt || null,
+      metaHistoryMissingDates: metaHistoryState.missingDaysAfter,
       clickSource: "link_click_with_clicks_fallback",
       attributionWindows: {
         adAttributionWindowDays: dashboardSettings.adAttributionWindowDays,
@@ -8899,6 +9405,9 @@ const buildAcquisitionDashboardMetrics = async (
       adKeywords: dashboardSettings.adKeywords,
       metaInsightsCacheTtlMs: META_INSIGHTS_CACHE_TTL_MS,
       metaAdLookbackDays: META_AD_LOOKBACK_DAYS,
+      metaAcquisitionHistoryStartDate: META_ACQUISITION_HISTORY_START_DATE,
+      metaAcquisitionRecentResyncDays: META_ACQUISITION_RECENT_RESYNC_DAYS,
+      metaAcquisitionBackfillWindowDays: META_ACQUISITION_BACKFILL_WINDOW_DAYS,
       localSource: "first_ad_signal_with_meta_referral_or_keyword_fallback",
       appointmentSource: "appbarber_by_phone",
     },
@@ -56279,6 +56788,8 @@ let labelCampaignTimer = null;
 let labelCampaignBusy = false;
 let campaignsTimer = null;
 let campaignsBusy = false;
+let metaAcquisitionHistoryTimer = null;
+let metaAcquisitionHistoryBusy = false;
 
 const startRoutineScheduler = () => {
   if (routineSchedulerTimer) return;
@@ -56414,6 +56925,45 @@ const startCampaignsScheduler = () => {
   }, 5000);
 };
 
+const startMetaAcquisitionHistoryScheduler = () => {
+  if (metaAcquisitionHistoryTimer) return;
+  const intervalMs =
+    Number.isFinite(META_ACQUISITION_SYNC_INTERVAL_MS) && META_ACQUISITION_SYNC_INTERVAL_MS > 0
+      ? META_ACQUISITION_SYNC_INTERVAL_MS
+      : 24 * 60 * 60 * 1000;
+  const runTick = async () => {
+    if (metaAcquisitionHistoryBusy) return;
+    metaAcquisitionHistoryBusy = true;
+    try {
+      const historyStore = await readMetaAcquisitionHistoryStore();
+      if (!historyStore?.sync?.backfillCompletedAt) {
+        await runMetaAcquisitionHistoryBackfill({
+          onProgress: (window) => {
+            console.log(
+              `[meta-acquisition] backfill ${toDashboardDateKey(window.startMs)} -> ${toDashboardDateKey(window.endMs)}`,
+            );
+          },
+        });
+      }
+      await runMetaAcquisitionHistoryIncrementalSync();
+      console.log("[meta-acquisition] historical sync completed");
+    } catch (error) {
+      console.error("[meta-acquisition] scheduler tick failed:", error?.message || error);
+    } finally {
+      metaAcquisitionHistoryBusy = false;
+    }
+  };
+  metaAcquisitionHistoryTimer = setInterval(() => {
+    void runTick();
+  }, intervalMs);
+  if (typeof metaAcquisitionHistoryTimer.unref === "function") {
+    metaAcquisitionHistoryTimer.unref();
+  }
+  setTimeout(() => {
+    void runTick();
+  }, 7000);
+};
+
 const startBackgroundSchedulers = () => {
   void ensureLabelsReady().catch((error) => {
     console.error("[labels] initialization failed:", error?.message || error);
@@ -56422,6 +56972,7 @@ const startBackgroundSchedulers = () => {
   startScheduledMessagesScheduler();
   startCampaignsScheduler();
   startRoutineScheduler();
+  startMetaAcquisitionHistoryScheduler();
 };
 
 if (WHATSAPP_SCHEDULERS_ENABLED) {
