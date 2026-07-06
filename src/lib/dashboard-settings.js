@@ -4,6 +4,10 @@ export const DEFAULT_DASHBOARD_SETTINGS = {
   adKeywords: ['anuncio', 'anúncio', 'facebook', 'instagram', 'utm_', 'fbclid', 'ctwa'],
   adAttributionWindowDays: 45,
   appointmentAttributionWindowDays: 60,
+  metaAcquisitionHistoryStartDate: '2010-01-01',
+  metaAcquisitionSyncIntervalHours: 24,
+  metaAcquisitionRecentResyncDays: 7,
+  metaAcquisitionBackfillWindowDays: 90,
   attendantRoleKeywords: ['atendente'],
   followUpRoutineNameKeywords: ['follow', 'recuper', 'retorno', 'corte'],
   followUpResponseMetricTagIds: ['follow_up_response'],
@@ -33,6 +37,12 @@ const normalizePositiveInteger = (value, fallback, min = 1, max = 365) => {
   return Math.min(max, parsed);
 };
 
+const normalizeDateString = (value, fallback) => {
+  const candidate = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return fallback;
+  return Number.isFinite(Date.parse(`${candidate}T00:00:00.000Z`)) ? candidate : fallback;
+};
+
 export const readDashboardSettings = (value = {}) => {
   const source = value && typeof value === 'object' ? value : {};
   return {
@@ -45,6 +55,28 @@ export const readDashboardSettings = (value = {}) => {
     appointmentAttributionWindowDays: normalizePositiveInteger(
       source.appointmentAttributionWindowDays,
       DEFAULT_DASHBOARD_SETTINGS.appointmentAttributionWindowDays,
+    ),
+    metaAcquisitionHistoryStartDate: normalizeDateString(
+      source.metaAcquisitionHistoryStartDate,
+      DEFAULT_DASHBOARD_SETTINGS.metaAcquisitionHistoryStartDate,
+    ),
+    metaAcquisitionSyncIntervalHours: normalizePositiveInteger(
+      source.metaAcquisitionSyncIntervalHours,
+      DEFAULT_DASHBOARD_SETTINGS.metaAcquisitionSyncIntervalHours,
+      1,
+      720,
+    ),
+    metaAcquisitionRecentResyncDays: normalizePositiveInteger(
+      source.metaAcquisitionRecentResyncDays,
+      DEFAULT_DASHBOARD_SETTINGS.metaAcquisitionRecentResyncDays,
+      1,
+      90,
+    ),
+    metaAcquisitionBackfillWindowDays: normalizePositiveInteger(
+      source.metaAcquisitionBackfillWindowDays,
+      DEFAULT_DASHBOARD_SETTINGS.metaAcquisitionBackfillWindowDays,
+      1,
+      180,
     ),
     attendantRoleKeywords: normalizeList(source.attendantRoleKeywords, DEFAULT_DASHBOARD_SETTINGS.attendantRoleKeywords),
     followUpRoutineNameKeywords: normalizeList(

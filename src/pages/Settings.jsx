@@ -846,6 +846,13 @@ export default function Settings() {
     }));
   };
 
+  const handleDashboardFieldChange = (field, value) => {
+    setDashboardSettings((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
   const handleSaveDashboardSettings = async () => {
     setIsSavingDashboardSettings(true);
     try {
@@ -1644,6 +1651,65 @@ export default function Settings() {
                 />
                 <p className="text-xs text-muted-foreground">
                   Define por quantos dias apos o cadastro o cliente entra como novo. Depois desse limite ele passa a ser tratado como antigo nas metricas comparativas.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Historico Meta a partir de</label>
+                <Input
+                  type="date"
+                  value={dashboardSettings.metaAcquisitionHistoryStartDate || ''}
+                  onChange={(event) => handleDashboardFieldChange('metaAcquisitionHistoryStartDate', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Define a data inicial do backfill historico da Meta. O worker tenta preencher a base a partir daqui, respeitando o limite de disponibilidade da propria Meta.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Sincronizacao Meta (horas)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.metaAcquisitionSyncIntervalHours}
+                  onChange={(event) => handleDashboardNumberChange('metaAcquisitionSyncIntervalHours', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Define de quantas em quantas horas o worker revisita a Meta para atualizar investimento, cliques e demais insights historicos.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Janela recente de re-sync</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.metaAcquisitionRecentResyncDays}
+                  onChange={(event) => handleDashboardNumberChange('metaAcquisitionRecentResyncDays', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Quantos dias recentes serao reprocessados a cada sincronizacao para absorver ajustes tardios da Meta.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Lote do backfill (dias)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={dashboardSettings.metaAcquisitionBackfillWindowDays}
+                  onChange={(event) => handleDashboardNumberChange('metaAcquisitionBackfillWindowDays', event.target.value)}
+                  disabled={!canEditSettingsSection(currentSettingsAccess, 'dashboard')}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Controla o tamanho de cada lote do backfill historico. Janelas menores aliviam a API da Meta; janelas maiores aceleram a carga inicial.
                 </p>
               </div>
             </div>

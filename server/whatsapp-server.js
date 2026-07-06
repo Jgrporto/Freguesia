@@ -1044,6 +1044,11 @@ const META_ACQUISITION_MAX_PAGES = Number.parseInt(
 const META_ACQUISITION_HISTORY_START_DATE = String(
   process.env.META_ACQUISITION_HISTORY_START_DATE || "2010-01-01",
 ).trim();
+const META_ACQUISITION_SYNC_INTERVAL_HOURS_DEFAULT = Math.min(
+  720,
+  Math.max(1, Math.round(META_ACQUISITION_SYNC_INTERVAL_MS / (60 * 60 * 1000)) || 24),
+);
+const META_ACQUISITION_SCHEDULER_POLL_INTERVAL_MS = 15 * 60 * 1000;
 const DEFAULT_ROUTINE_TIMEZONE = "America/Sao_Paulo";
 const ROUTINE_DEFAULT_SEND_INTERVAL_SECONDS = Number.parseInt(
   process.env.ROUTINE_DEFAULT_SEND_INTERVAL_SECONDS || "12",
@@ -1355,7 +1360,7 @@ const atomicWriteJson = async (filePath, data) => {
   await writeJsonBackedStore(filePath, data, writeToJsonFile);
 };
 
-const META_ACQUISITION_HISTORY_VERSION = "2026-07-06-meta-acquisition-history-v1";
+const META_ACQUISITION_HISTORY_VERSION = "2026-07-06-meta-acquisition-history-v2";
 
 const emptyMetaAcquisitionHistoryStore = () => ({
   version: META_ACQUISITION_HISTORY_VERSION,
@@ -8089,6 +8094,10 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   adKeywords: ["anuncio", "anúncio", "facebook", "instagram", "utm_", "fbclid", "ctwa"],
   adAttributionWindowDays: 45,
   appointmentAttributionWindowDays: 60,
+  metaAcquisitionHistoryStartDate: META_ACQUISITION_HISTORY_START_DATE || "2010-01-01",
+  metaAcquisitionSyncIntervalHours: META_ACQUISITION_SYNC_INTERVAL_HOURS_DEFAULT,
+  metaAcquisitionRecentResyncDays: Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS || 7),
+  metaAcquisitionBackfillWindowDays: Math.max(1, META_ACQUISITION_BACKFILL_WINDOW_DAYS || 90),
   attendantRoleKeywords: ["atendente"],
   followUpRoutineNameKeywords: ["follow", "recuper", "retorno", "corte"],
   followUpResponseMetricTagIds: ["follow_up_response"],
@@ -8124,6 +8133,12 @@ const normalizeDashboardPositiveInteger = (value, fallback, min = 1, max = 365) 
   return Math.min(max, parsed);
 };
 
+const normalizeDashboardDateString = (value, fallback) => {
+  const candidate = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return fallback;
+  return Number.isFinite(Date.parse(`${candidate}T00:00:00.000Z`)) ? candidate : fallback;
+};
+
 const normalizeDashboardSettings = (value = {}) => {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
@@ -8140,6 +8155,28 @@ const normalizeDashboardSettings = (value = {}) => {
       DASHBOARD_SETTINGS_DEFAULT.appointmentAttributionWindowDays,
       1,
       365,
+    ),
+    metaAcquisitionHistoryStartDate: normalizeDashboardDateString(
+      source.metaAcquisitionHistoryStartDate,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionHistoryStartDate,
+    ),
+    metaAcquisitionSyncIntervalHours: normalizeDashboardPositiveInteger(
+      source.metaAcquisitionSyncIntervalHours,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionSyncIntervalHours,
+      1,
+      720,
+    ),
+    metaAcquisitionRecentResyncDays: normalizeDashboardPositiveInteger(
+      source.metaAcquisitionRecentResyncDays,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionRecentResyncDays,
+      1,
+      90,
+    ),
+    metaAcquisitionBackfillWindowDays: normalizeDashboardPositiveInteger(
+      source.metaAcquisitionBackfillWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionBackfillWindowDays,
+      1,
+      180,
     ),
     attendantRoleKeywords: normalizeDashboardStringList(
       source.attendantRoleKeywords,
@@ -8186,6 +8223,36 @@ const normalizeDashboardSettings = (value = {}) => {
       DASHBOARD_SETTINGS_DEFAULT.newCustomerWindowDays,
       1,
       365,
+    ),
+  };
+};
+
+const getMetaAcquisitionRuntimeSettings = (settings = {}) => {
+  const dashboardSettings = normalizeDashboardSettings(settings);
+  const syncIntervalHours = normalizeDashboardPositiveInteger(
+    dashboardSettings.metaAcquisitionSyncIntervalHours,
+    DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionSyncIntervalHours,
+    1,
+    720,
+  );
+  return {
+    historyStartDate: normalizeDashboardDateString(
+      dashboardSettings.metaAcquisitionHistoryStartDate,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionHistoryStartDate,
+    ),
+    syncIntervalHours,
+    syncIntervalMs: syncIntervalHours * 60 * 60 * 1000,
+    recentResyncDays: normalizeDashboardPositiveInteger(
+      dashboardSettings.metaAcquisitionRecentResyncDays,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionRecentResyncDays,
+      1,
+      90,
+    ),
+    backfillWindowDays: normalizeDashboardPositiveInteger(
+      dashboardSettings.metaAcquisitionBackfillWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionBackfillWindowDays,
+      1,
+      180,
     ),
   };
 };
@@ -8255,21 +8322,31 @@ const getMetaAcquisitionConfig = () => {
 const normalizeMetaAdInsightRow = (row = {}) => {
   const spend = Number(row?.spend || 0) || 0;
   const clicks = Number(row?.clicks || 0) || 0;
-  const inlineLinkClicks = Number(row?.inline_link_clicks || 0) || 0;
-  const linkClicks = getMetaActionValue(row, "link_click");
-  const messagingConversationStarted7d = getMetaActionValue(row, "onsite_conversion.messaging_conversation_started_7d");
-  const messagingFirstReply = getMetaActionValue(row, "onsite_conversion.messaging_first_reply");
+  const inlineLinkClicks = Number((row?.inlineLinkClicks ?? row?.inline_link_clicks ?? 0)) || 0;
+  const linkClicks = Number((row?.linkClicks ?? row?.link_clicks ?? getMetaActionValue(row, "link_click"))) || 0;
+  const messagingConversationStarted7d =
+    Number(
+      row?.messagingConversationStarted7d ??
+        row?.messaging_conversation_started_7d ??
+        getMetaActionValue(row, "onsite_conversion.messaging_conversation_started_7d"),
+    ) || 0;
+  const messagingFirstReply =
+    Number(
+      row?.messagingFirstReply ??
+        row?.messaging_first_reply ??
+        getMetaActionValue(row, "onsite_conversion.messaging_first_reply"),
+    ) || 0;
   return {
-    dateStart: String(row?.date_start || "").trim(),
-    dateStop: String(row?.date_stop || "").trim(),
-    accountId: String(row?.account_id || "").trim(),
-    accountName: String(row?.account_name || "").trim(),
-    campaignId: String(row?.campaign_id || "").trim(),
-    campaignName: String(row?.campaign_name || "").trim(),
-    adsetId: String(row?.adset_id || "").trim(),
-    adsetName: String(row?.adset_name || "").trim(),
-    adId: String(row?.ad_id || "").trim(),
-    adName: String(row?.ad_name || "").trim(),
+    dateStart: String(row?.dateStart ?? row?.date_start ?? "").trim(),
+    dateStop: String(row?.dateStop ?? row?.date_stop ?? "").trim(),
+    accountId: String(row?.accountId ?? row?.account_id ?? "").trim(),
+    accountName: String(row?.accountName ?? row?.account_name ?? "").trim(),
+    campaignId: String(row?.campaignId ?? row?.campaign_id ?? "").trim(),
+    campaignName: String(row?.campaignName ?? row?.campaign_name ?? "").trim(),
+    adsetId: String(row?.adsetId ?? row?.adset_id ?? "").trim(),
+    adsetName: String(row?.adsetName ?? row?.adset_name ?? "").trim(),
+    adId: String(row?.adId ?? row?.ad_id ?? "").trim(),
+    adName: String(row?.adName ?? row?.ad_name ?? "").trim(),
     spend,
     impressions: Number(row?.impressions || 0) || 0,
     reach: Number(row?.reach || 0) || 0,
@@ -8393,6 +8470,12 @@ const buildMetaAcquisitionHistoryCoverage = (store = {}) => {
     coverageEnd: keys.length ? keys[keys.length - 1] : null,
     syncedDays,
   };
+};
+
+const hasMetaAcquisitionHistoryCoverageWithoutRows = (store = {}) => {
+  const rows = normalizeMetaAcquisitionHistoryRows(store?.rows);
+  const syncedDays = store?.sync?.syncedDays && typeof store.sync.syncedDays === "object" ? store.sync.syncedDays : {};
+  return rows.length === 0 && Object.keys(syncedDays).length > 0;
 };
 
 const collectMetaAcquisitionHistoryMissingDays = (store = {}, startMs = null, endMs = null) => {
@@ -8951,8 +9034,9 @@ const syncMetaAcquisitionHistory = async ({
   }
 };
 
-const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs } = {}) => {
+const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs, settings = {} } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
+  const metaRuntimeSettings = getMetaAcquisitionRuntimeSettings(settings);
   const normalizedRange = clampMetaAcquisitionRangeToAvailability(
     Number.isFinite(startMs) ? startMs : range.startMs,
     Number.isFinite(endMs) ? endMs : range.endMs,
@@ -8967,18 +9051,19 @@ const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs } = {})
       missingDaysAfter: [],
     };
   }
+  const needsHistoryRepair = hasMetaAcquisitionHistoryCoverageWithoutRows(historyStore);
   const missingDaysBefore = collectMetaAcquisitionHistoryMissingDays(historyStore, normalizedStartMs, normalizedEndMs);
   const requestedDayKeys = enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs);
   const todayKey = toDashboardDateKey(Date.now());
   const shouldRefreshRecentWindow =
     requestedDayKeys.includes(todayKey) ||
-    normalizedEndMs >= Date.now() - Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS) * 24 * 60 * 60 * 1000;
-  if (missingDaysBefore.length > 0) {
+    normalizedEndMs >= Date.now() - Math.max(1, metaRuntimeSettings.recentResyncDays) * 24 * 60 * 60 * 1000;
+  if (needsHistoryRepair || missingDaysBefore.length > 0) {
     const syncResult = await syncMetaAcquisitionHistory({
       startMs: normalizedStartMs,
       endMs: normalizedEndMs,
       historyStore,
-      reason: "dashboard_gap_fill",
+      reason: needsHistoryRepair ? "dashboard_history_repair" : "dashboard_gap_fill",
       force: true,
       useCache: true,
       syncType: "incremental",
@@ -8987,7 +9072,7 @@ const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs } = {})
   } else if (shouldRefreshRecentWindow) {
     const recentStartMs = Math.max(
       normalizedStartMs,
-      Date.now() - Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS) * 24 * 60 * 60 * 1000,
+      Date.now() - Math.max(1, metaRuntimeSettings.recentResyncDays) * 24 * 60 * 60 * 1000,
     );
     const syncResult = await syncMetaAcquisitionHistory({
       startMs: recentStartMs,
@@ -9008,14 +9093,15 @@ const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs } = {})
   };
 };
 
-const runMetaAcquisitionHistoryBackfill = async ({ onProgress } = {}) => {
+const runMetaAcquisitionHistoryBackfill = async ({ onProgress, settings = {} } = {}) => {
   const metaConfig = getMetaAcquisitionConfig();
   if (!metaConfig.enabled || !metaConfig.configured) return { skipped: true, reason: "meta_not_configured" };
+  const metaRuntimeSettings = getMetaAcquisitionRuntimeSettings(settings);
   let historyStore = await readMetaAcquisitionHistoryStore();
   const now = Date.now();
   const configuredStartMs =
-    parseDashboardDateBoundary(historyStore?.sync?.backfillCursor || META_ACQUISITION_HISTORY_START_DATE, "start") ||
-    parseDashboardDateBoundary(META_ACQUISITION_HISTORY_START_DATE, "start") ||
+    parseDashboardDateBoundary(historyStore?.sync?.backfillCursor || metaRuntimeSettings.historyStartDate, "start") ||
+    parseDashboardDateBoundary(metaRuntimeSettings.historyStartDate, "start") ||
     now;
   const startMs = Math.max(configuredStartMs, getMetaAcquisitionEarliestAllowedStartMs());
   if (startMs > now) {
@@ -9032,7 +9118,7 @@ const runMetaAcquisitionHistoryBackfill = async ({ onProgress } = {}) => {
     },
   };
   await writeMetaAcquisitionHistoryStore(historyStore);
-  const windows = buildMetaAcquisitionHistorySyncWindows(startMs, now, META_ACQUISITION_BACKFILL_WINDOW_DAYS);
+  const windows = buildMetaAcquisitionHistorySyncWindows(startMs, now, metaRuntimeSettings.backfillWindowDays);
   for (const window of windows) {
     const result = await syncMetaAcquisitionHistory({
       startMs: window.startMs,
@@ -9069,9 +9155,10 @@ const runMetaAcquisitionHistoryBackfill = async ({ onProgress } = {}) => {
   return { skipped: false, historyStore };
 };
 
-const runMetaAcquisitionHistoryIncrementalSync = async () => {
+const runMetaAcquisitionHistoryIncrementalSync = async ({ settings = {} } = {}) => {
+  const metaRuntimeSettings = getMetaAcquisitionRuntimeSettings(settings);
   const endMs = Date.now();
-  const startMs = endMs - Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS) * 24 * 60 * 60 * 1000;
+  const startMs = endMs - Math.max(1, metaRuntimeSettings.recentResyncDays) * 24 * 60 * 60 * 1000;
   return syncMetaAcquisitionHistory({
     startMs,
     endMs,
@@ -9080,6 +9167,20 @@ const runMetaAcquisitionHistoryIncrementalSync = async () => {
     useCache: false,
     syncType: "incremental",
   });
+};
+
+const shouldRunMetaAcquisitionHistoryBackfill = (historyStore = {}, settings = {}) => {
+  if (!historyStore?.sync?.backfillCompletedAt) return true;
+  if (hasMetaAcquisitionHistoryCoverageWithoutRows(historyStore)) return true;
+  const metaRuntimeSettings = getMetaAcquisitionRuntimeSettings(settings);
+  const configuredStartMs = clampMetaAcquisitionRangeToAvailability(
+    parseDashboardDateBoundary(metaRuntimeSettings.historyStartDate, "start"),
+    Date.now(),
+  ).startMs;
+  const coverage = buildMetaAcquisitionHistoryCoverage(historyStore);
+  const coverageStartMs = parseDashboardDateBoundary(coverage.coverageStart, "start");
+  if (!Number.isFinite(coverageStartMs)) return true;
+  return configuredStartMs < coverageStartMs;
 };
 
 const buildAcquisitionDashboardMetrics = async (
@@ -9109,6 +9210,7 @@ const buildAcquisitionDashboardMetrics = async (
     metaHistoryState = await ensureMetaAcquisitionHistoryForDashboard({
       startMs: normalizedStartMs,
       endMs: normalizedEndMs,
+      settings: dashboardSettings,
     });
   } catch (error) {
     metaError = error?.message || "Meta acquisition history sync error";
@@ -9463,9 +9565,10 @@ const buildAcquisitionDashboardMetrics = async (
       adKeywords: dashboardSettings.adKeywords,
       metaInsightsCacheTtlMs: META_INSIGHTS_CACHE_TTL_MS,
       metaAdLookbackDays: META_AD_LOOKBACK_DAYS,
-      metaAcquisitionHistoryStartDate: META_ACQUISITION_HISTORY_START_DATE,
-      metaAcquisitionRecentResyncDays: META_ACQUISITION_RECENT_RESYNC_DAYS,
-      metaAcquisitionBackfillWindowDays: META_ACQUISITION_BACKFILL_WINDOW_DAYS,
+      metaAcquisitionHistoryStartDate: dashboardSettings.metaAcquisitionHistoryStartDate,
+      metaAcquisitionSyncIntervalHours: dashboardSettings.metaAcquisitionSyncIntervalHours,
+      metaAcquisitionRecentResyncDays: dashboardSettings.metaAcquisitionRecentResyncDays,
+      metaAcquisitionBackfillWindowDays: dashboardSettings.metaAcquisitionBackfillWindowDays,
       localSource: "first_ad_signal_with_meta_referral_or_keyword_fallback",
       appointmentSource: "appbarber_by_phone",
     },
@@ -56985,17 +57088,17 @@ const startCampaignsScheduler = () => {
 
 const startMetaAcquisitionHistoryScheduler = () => {
   if (metaAcquisitionHistoryTimer) return;
-  const intervalMs =
-    Number.isFinite(META_ACQUISITION_SYNC_INTERVAL_MS) && META_ACQUISITION_SYNC_INTERVAL_MS > 0
-      ? META_ACQUISITION_SYNC_INTERVAL_MS
-      : 24 * 60 * 60 * 1000;
   const runTick = async () => {
     if (metaAcquisitionHistoryBusy) return;
     metaAcquisitionHistoryBusy = true;
     try {
+      const operationStore = await readOperationStore();
+      const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
+      const metaRuntimeSettings = getMetaAcquisitionRuntimeSettings(dashboardSettings);
       const historyStore = await readMetaAcquisitionHistoryStore();
-      if (!historyStore?.sync?.backfillCompletedAt) {
+      if (shouldRunMetaAcquisitionHistoryBackfill(historyStore, dashboardSettings)) {
         await runMetaAcquisitionHistoryBackfill({
+          settings: dashboardSettings,
           onProgress: (window) => {
             console.log(
               `[meta-acquisition] backfill ${toDashboardDateKey(window.startMs)} -> ${toDashboardDateKey(window.endMs)}`,
@@ -57003,8 +57106,13 @@ const startMetaAcquisitionHistoryScheduler = () => {
           },
         });
       }
-      await runMetaAcquisitionHistoryIncrementalSync();
-      console.log("[meta-acquisition] historical sync completed");
+      const lastIncrementalSyncAt = Date.parse(historyStore?.sync?.lastIncrementalSyncAt || "");
+      const shouldRunIncremental =
+        !Number.isFinite(lastIncrementalSyncAt) || Date.now() - lastIncrementalSyncAt >= metaRuntimeSettings.syncIntervalMs;
+      if (shouldRunIncremental) {
+        await runMetaAcquisitionHistoryIncrementalSync({ settings: dashboardSettings });
+        console.log("[meta-acquisition] historical sync completed");
+      }
     } catch (error) {
       console.error("[meta-acquisition] scheduler tick failed:", error?.message || error);
     } finally {
@@ -57013,7 +57121,7 @@ const startMetaAcquisitionHistoryScheduler = () => {
   };
   metaAcquisitionHistoryTimer = setInterval(() => {
     void runTick();
-  }, intervalMs);
+  }, META_ACQUISITION_SCHEDULER_POLL_INTERVAL_MS);
   if (typeof metaAcquisitionHistoryTimer.unref === "function") {
     metaAcquisitionHistoryTimer.unref();
   }

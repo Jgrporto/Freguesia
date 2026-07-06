@@ -109,6 +109,16 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   adKeywords: ['anuncio', 'anúncio', 'facebook', 'instagram', 'utm_', 'fbclid', 'ctwa'],
   adAttributionWindowDays: 45,
   appointmentAttributionWindowDays: 60,
+  metaAcquisitionHistoryStartDate: String(process.env.META_ACQUISITION_HISTORY_START_DATE || '2010-01-01').trim() || '2010-01-01',
+  metaAcquisitionSyncIntervalHours: Math.min(
+    720,
+    Math.max(
+      1,
+      Math.round(Number.parseInt(process.env.META_ACQUISITION_SYNC_INTERVAL_MS || `${24 * 60 * 60 * 1000}`, 10) / (60 * 60 * 1000)) || 24,
+    ),
+  ),
+  metaAcquisitionRecentResyncDays: Math.max(1, Number.parseInt(process.env.META_ACQUISITION_RECENT_RESYNC_DAYS || '7', 10) || 7),
+  metaAcquisitionBackfillWindowDays: Math.max(1, Number.parseInt(process.env.META_ACQUISITION_BACKFILL_WINDOW_DAYS || '90', 10) || 90),
   attendantRoleKeywords: ['atendente'],
   followUpRoutineNameKeywords: ['follow', 'recuper', 'retorno', 'corte'],
   followUpResponseMetricTagIds: ['follow_up_response'],
@@ -2479,6 +2489,12 @@ const normalizeDashboardPositiveInteger = (value, fallback, min = 1, max = 365) 
   return Math.min(max, parsed);
 };
 
+const normalizeDashboardDateString = (value, fallback) => {
+  const candidate = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return fallback;
+  return Number.isFinite(Date.parse(`${candidate}T00:00:00.000Z`)) ? candidate : fallback;
+};
+
 const normalizeDashboardSettings = (value = {}) => {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -2495,6 +2511,28 @@ const normalizeDashboardSettings = (value = {}) => {
       DASHBOARD_SETTINGS_DEFAULT.appointmentAttributionWindowDays,
       1,
       365,
+    ),
+    metaAcquisitionHistoryStartDate: normalizeDashboardDateString(
+      source.metaAcquisitionHistoryStartDate,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionHistoryStartDate,
+    ),
+    metaAcquisitionSyncIntervalHours: normalizeDashboardPositiveInteger(
+      source.metaAcquisitionSyncIntervalHours,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionSyncIntervalHours,
+      1,
+      720,
+    ),
+    metaAcquisitionRecentResyncDays: normalizeDashboardPositiveInteger(
+      source.metaAcquisitionRecentResyncDays,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionRecentResyncDays,
+      1,
+      90,
+    ),
+    metaAcquisitionBackfillWindowDays: normalizeDashboardPositiveInteger(
+      source.metaAcquisitionBackfillWindowDays,
+      DASHBOARD_SETTINGS_DEFAULT.metaAcquisitionBackfillWindowDays,
+      1,
+      180,
     ),
     attendantRoleKeywords: normalizeDashboardStringList(
       source.attendantRoleKeywords,
