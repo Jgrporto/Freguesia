@@ -7394,8 +7394,9 @@ const getDashboardConversationDisplayName = (conversation = {}, customer = null)
     conversation?.contact_name || conversation?.customer?.name || conversation?.name || "",
   );
 
-const getDashboardAppointmentStage = ({ hasAppointment = false, hasCustomer = false } = {}) => {
+const getDashboardAppointmentStage = ({ hasAppointment = false, hasCustomer = false, isNewCustomer = false } = {}) => {
   if (hasAppointment) return { id: "appointment", label: "Agendamento" };
+  if (isNewCustomer) return { id: "new_customer", label: "Cliente novo" };
   if (hasCustomer) return { id: "appbarber_customer", label: "Cliente AppBarber" };
   return { id: "conversation", label: "Conversa" };
 };
@@ -7448,6 +7449,8 @@ const normalizeDashboardPersistedAdCustomers = (value = []) =>
       resolvedAt: String(item?.resolvedAt || "").trim(),
       firstScheduledAt: String(item?.firstScheduledAt || item?.appointmentAt || "").trim(),
       firstAttendedAt: String(item?.firstAttendedAt || item?.resolvedAt || "").trim(),
+      campaignId: String(item?.campaignId || "").trim(),
+      adsetId: String(item?.adsetId || "").trim(),
       adId: String(item?.adId || item?.sourceId || "").trim(),
       sourceId: String(item?.sourceId || item?.adId || "").trim(),
       ctwaClid: String(item?.ctwaClid || "").trim(),
@@ -8428,11 +8431,99 @@ const resolveMetaAdForAcquisitionSignal = ({ referral = {}, keywords = [], metaA
   );
 };
 
-const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operationStore = {}, mutationState = null } = {}) => {
+const normalizeAcquisitionFilterValue = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw || normalizeDashboardText(raw) === "all") return "";
+  return raw;
+};
+
+const resolveAcquisitionDashboardFilters = (source = {}) => ({
+  campaignId: normalizeAcquisitionFilterValue(source?.campaignId || source?.campaign || ""),
+  adsetId: normalizeAcquisitionFilterValue(source?.adsetId || ""),
+  adId: normalizeAcquisitionFilterValue(source?.adId || ""),
+});
+
+const matchesAcquisitionFilterValue = (selectedValue = "", candidates = []) => {
+  const normalizedSelected = normalizeDashboardText(selectedValue);
+  if (!normalizedSelected) return true;
+  return (Array.isArray(candidates) ? candidates : []).some(
+    (candidate) => normalizeDashboardText(candidate) === normalizedSelected,
+  );
+};
+
+const matchesAcquisitionEntityFilters = (entity = {}, filters = {}) =>
+  matchesAcquisitionFilterValue(filters?.campaignId, [entity?.campaignId, entity?.campaignName]) &&
+  matchesAcquisitionFilterValue(filters?.adsetId, [entity?.adsetId, entity?.adsetName]) &&
+  matchesAcquisitionFilterValue(filters?.adId, [entity?.adId, entity?.adName, entity?.sourceId]);
+
+const getOfficialMetaAdClicks = (row = {}) => {
+  const linkClicks = Number(row?.linkClicks || 0) || 0;
+  if (linkClicks > 0) return linkClicks;
+  return Number(row?.clicks || 0) || 0;
+};
+
+const uniqDashboardItemsBy = (items = [], getKey = (item) => item) => {
+  const seen = new Set();
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const key = normalizeDashboardText(getKey(item));
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildAcquisitionFilterOptions = ({ metaRows = [], selectedFilters = {} } = {}) => {
+  const sourceRows = Array.isArray(metaRows) ? metaRows : [];
+  const campaigns = uniqDashboardItemsBy(
+    sourceRows
+      .filter((row) => row?.campaignId || row?.campaignName)
+      .map((row) => ({
+        value: String(row?.campaignId || row?.campaignName || "").trim(),
+        label: String(row?.campaignName || row?.campaignId || "").trim(),
+      }))
+      .filter((item) => item.value && item.label),
+    (item) => item.value,
+  );
+  const adsets = uniqDashboardItemsBy(
+    sourceRows
+      .filter((row) =>
+        matchesAcquisitionFilterValue(selectedFilters?.campaignId, [row?.campaignId, row?.campaignName]) &&
+        (row?.adsetId || row?.adsetName),
+      )
+      .map((row) => ({
+        value: String(row?.adsetId || row?.adsetName || "").trim(),
+        label: String(row?.adsetName || row?.adsetId || "").trim(),
+      }))
+      .filter((item) => item.value && item.label),
+    (item) => item.value,
+  );
+  const ads = uniqDashboardItemsBy(
+    sourceRows
+      .filter((row) =>
+        matchesAcquisitionFilterValue(selectedFilters?.campaignId, [row?.campaignId, row?.campaignName]) &&
+        matchesAcquisitionFilterValue(selectedFilters?.adsetId, [row?.adsetId, row?.adsetName]) &&
+        (row?.adId || row?.adName),
+      )
+      .map((row) => ({
+        value: String(row?.adId || row?.adName || "").trim(),
+        label: String(row?.adName || row?.adId || "").trim(),
+      }))
+      .filter((item) => item.value && item.label),
+    (item) => item.value,
+  );
+
+  return { campaigns, adsets, ads };
+};
+
+const buildAcquisitionDashboardMetrics = async (
+  store,
+  { startMs, endMs, filters = {}, operationStore = {}, mutationState = null } = {},
+) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
   const dashboardSettings = normalizeDashboardSettings(operationStore.dashboardSettings);
+  const selectedFilters = resolveAcquisitionDashboardFilters(filters);
   let meta = null;
   try {
     meta = await fetchMetaAcquisitionInsights({ startMs: normalizedStartMs, endMs: normalizedEndMs });
@@ -8452,15 +8543,19 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     };
   }
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
-  const metaRows = Array.isArray(meta.rows) ? meta.rows : [];
-  const metaAdById = new Map(metaRows.filter((row) => row.adId).map((row) => [row.adId, row]));
+  const periodMetaRows = Array.isArray(meta.rows) ? meta.rows : [];
+  const filterOptions = buildAcquisitionFilterOptions({ metaRows: periodMetaRows, selectedFilters });
+  const filteredMetaRows = periodMetaRows.filter((row) => matchesAcquisitionEntityFilters(row, selectedFilters));
+  const metaAdById = new Map(periodMetaRows.filter((row) => row.adId).map((row) => [row.adId, row]));
   const localByAdId = new Map();
   const whatsappConversationIds = new Set();
   const appBarberCustomerPhones = new Set();
   const newCustomerPhones = new Set();
   const keywordStats = new Map();
   const adCustomerRecords = [];
+  const adAttributionWindowMs = dashboardSettings.adAttributionWindowDays * 24 * 60 * 60 * 1000;
   const appointmentWindowMs = dashboardSettings.appointmentAttributionWindowDays * 24 * 60 * 60 * 1000;
+  const newCustomerWindowMs = dashboardSettings.newCustomerWindowDays * 24 * 60 * 60 * 1000;
 
   for (const [conversationId, conversation] of Object.entries(store?.conversations || {})) {
     const messages = getSortedMessages(conversationId, store?.messages?.[conversationId] || []);
@@ -8468,30 +8563,29 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       const ts = resolveDashboardMessageTimestampMs(message);
       return Number.isFinite(ts) && ts > latest ? ts : latest;
     }, 0);
-    const hasMessageInPeriod = messages.some((message) => {
-      const ts = resolveDashboardMessageTimestampMs(message);
-      return Number.isFinite(ts) && ts >= normalizedStartMs && ts <= normalizedEndMs;
-    });
-    const adSeenAt = toTimeMs(conversation?.ad_first_seen_at || conversation?.ad_last_seen_at);
-    const adSeenInPeriod = Number.isFinite(adSeenAt) && adSeenAt >= normalizedStartMs && adSeenAt <= normalizedEndMs;
-    if (!hasMessageInPeriod && !adSeenInPeriod) continue;
     const adSignal = resolveAdSignalDetails(conversation, messages, dashboardSettings);
     if (!adSignal.hasSignal) continue;
+    const firstAdSeenAtMs = Number.isFinite(adSignal.firstSignalAtMs) ? adSignal.firstSignalAtMs : null;
+    if (!Number.isFinite(firstAdSeenAtMs) || firstAdSeenAtMs < normalizedStartMs || firstAdSeenAtMs > normalizedEndMs) {
+      continue;
+    }
 
     const phone = resolveDashboardConversationPhone(conversation, conversationId);
     if (!phone) continue;
-    whatsappConversationIds.add(conversationId);
-    const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
-    const appBarberPhone = customer ? getDashboardCustomerPhone(customer) || phone : "";
-    if (customer && appBarberPhone) appBarberCustomerPhones.add(appBarberPhone);
     const referral = adSignal.referral || {};
-    const adId = referral.adId || referral.sourceId || "";
+    const referralAdId = referral.adId || referral.sourceId || "";
     const metaAd = resolveMetaAdForAcquisitionSignal({
       referral,
       keywords: adSignal.keywords,
       metaAdById,
-      metaRows,
+      metaRows: periodMetaRows,
     });
+    if (!matchesAcquisitionEntityFilters(metaAd || referral || {}, selectedFilters)) continue;
+    const adId = referralAdId || metaAd?.adId || "";
+    whatsappConversationIds.add(conversationId);
+    const customer = phone ? findDashboardCustomerByPhone(customerIndex, phone) : null;
+    const appBarberPhone = customer ? getDashboardCustomerPhone(customer) || phone : "";
+    if (customer && appBarberPhone) appBarberCustomerPhones.add(appBarberPhone);
     const localStats = adId ? localByAdId.get(adId) || { localConversations: 0, localAppointments: 0, localCustomers: 0 } : null;
     if (localStats) {
       localStats.localConversations += 1;
@@ -8499,37 +8593,51 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       localByAdId.set(adId, localStats);
     }
     let hasAppointment = false;
+    let hasAttendance = false;
+    let isNewCustomer = false;
     let appointmentAt = "";
     let resolvedAt = "";
     if (customer) {
       const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
-      const attributionStartMs = adSignal.firstSignalAtMs || normalizedStartMs;
+      const attributionStartMs = firstAdSeenAtMs;
+      const attributionEndMs = attributionStartMs + Math.min(adAttributionWindowMs, appointmentWindowMs);
       const insideAttributionWindow = [pendingMs, resolvedMs].some(
         (appointmentMs) =>
           Number.isFinite(appointmentMs) &&
           appointmentMs >= attributionStartMs &&
-          appointmentMs <= attributionStartMs + appointmentWindowMs &&
+          appointmentMs <= attributionEndMs &&
           appointmentMs >= normalizedStartMs &&
           appointmentMs <= normalizedEndMs,
       );
       if (insideAttributionWindow) {
         hasAppointment = true;
-        appointmentAt = Number.isFinite(pendingMs) ? new Date(pendingMs).toISOString() : "";
-        resolvedAt = Number.isFinite(resolvedMs) ? new Date(resolvedMs).toISOString() : "";
+        if (Number.isFinite(pendingMs) && pendingMs >= attributionStartMs && pendingMs <= attributionEndMs) {
+          appointmentAt = new Date(pendingMs).toISOString();
+        }
+        if (Number.isFinite(resolvedMs) && resolvedMs >= attributionStartMs && resolvedMs <= attributionEndMs) {
+          resolvedAt = new Date(resolvedMs).toISOString();
+          hasAttendance = true;
+        }
         if (localStats) {
           localStats.localAppointments += 1;
           localByAdId.set(adId, localStats);
         }
       }
       const registrationMs = getDashboardCustomerRegistrationMs(customer);
-      const firstAdMs = adSignal.firstSignalAtMs || normalizedStartMs;
-      // Some AppBarber imports do not expose the original registration date. In that case,
-      // treat the first ad referral as the safest available acquisition timestamp.
-      if (!Number.isFinite(registrationMs) || registrationMs >= firstAdMs - 24 * 60 * 60 * 1000) {
+      if (
+        !Number.isFinite(registrationMs) ||
+        (registrationMs >= attributionStartMs - 24 * 60 * 60 * 1000 &&
+          registrationMs <= attributionStartMs + newCustomerWindowMs)
+      ) {
         newCustomerPhones.add(appBarberPhone || phone);
+        isNewCustomer = true;
       }
     }
-    const stage = getDashboardAppointmentStage({ hasAppointment, hasCustomer: Boolean(customer) });
+    const stage = getDashboardAppointmentStage({
+      hasAppointment,
+      hasCustomer: Boolean(customer),
+      isNewCustomer,
+    });
     const normalizedPhone = (customer && getDashboardCustomerPhone(customer)) || phone;
     if (normalizedPhone) {
       adCustomerRecords.push({
@@ -8539,13 +8647,15 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
         conversationId,
         stageId: stage.id,
         stageLabel: stage.label,
-        firstAdSeenAt: adSignal.firstSignalAtMs ? new Date(adSignal.firstSignalAtMs).toISOString() : "",
-        lastAdSeenAt: new Date(Math.max(adSignal.lastSignalAtMs || 0, adSeenAt || 0, lastMessageAtMs || 0, normalizedStartMs)).toISOString(),
+        firstAdSeenAt: new Date(firstAdSeenAtMs).toISOString(),
+        lastAdSeenAt: new Date(Math.max(adSignal.lastSignalAtMs || 0, lastMessageAtMs || 0, firstAdSeenAtMs)).toISOString(),
         lastMessageAt: lastMessageAtMs > 0 ? new Date(lastMessageAtMs).toISOString() : "",
         appointmentAt,
         resolvedAt,
         firstScheduledAt: appointmentAt,
         firstAttendedAt: resolvedAt,
+        campaignId: metaAd?.campaignId || "",
+        adsetId: metaAd?.adsetId || "",
         adId: adId || metaAd?.adId || "",
         sourceId: referral.sourceId || "",
         ctwaClid: referral.ctwaClid || "",
@@ -8563,33 +8673,40 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       const current = keywordStats.get(keyword) || { keyword, conversations: 0, customers: 0, appointments: 0 };
       current.conversations += 1;
       if (phone) current.customers += 1;
-      if (hasAppointment) current.appointments += 1;
+      if (hasAppointment || hasAttendance) current.appointments += 1;
       keywordStats.set(keyword, current);
     });
   }
 
+  const currentCustomers = normalizeDashboardPersistedAdCustomers(adCustomerRecords).sort(
+    (left, right) =>
+      Date.parse(right.lastAdSeenAt || right.firstAdSeenAt || "") - Date.parse(left.lastAdSeenAt || left.firstAdSeenAt || ""),
+  );
   const conversationsStarted = whatsappConversationIds.size;
   const adCustomers = appBarberCustomerPhones.size;
   const newCustomers = newCustomerPhones.size;
-  const spend = meta.spend || 0;
+  const spend = filteredMetaRows.reduce((total, row) => total + (Number(row?.spend || 0) || 0), 0);
   const persistedAdCustomers = upsertDashboardAdCustomerRecords(operationStore, adCustomerRecords);
   if (mutationState && persistedAdCustomers.mutated) {
     mutationState.mutated = true;
   }
-  const ads = (Array.isArray(meta.rows) ? meta.rows : []).map((row) => {
+  const ads = filteredMetaRows.map((row) => {
     const local = localByAdId.get(row.adId) || {};
     return {
       ...row,
+      officialClicks: getOfficialMetaAdClicks(row),
       localConversations: Number(local.localConversations || 0),
       localAppointments: Number(local.localAppointments || 0),
       localCustomers: Number(local.localCustomers || 0),
     };
   });
-  const persistedAppointments = persistedAdCustomers.items.filter((item) => item.firstScheduledAt || item.appointmentAt);
-  const persistedAttendances = persistedAdCustomers.items.filter((item) => item.firstAttendedAt || item.resolvedAt);
-  const scheduledCount = new Set(persistedAppointments.map((item) => item.phone).filter(Boolean)).size;
-  const attendedCount = new Set(persistedAttendances.map((item) => item.phone).filter(Boolean)).size;
-  const clicks = Number(meta.messagingConversationStarted7d || 0) || 0;
+  const currentAppointments = currentCustomers.filter((item) => item.firstScheduledAt || item.appointmentAt);
+  const currentAttendances = currentCustomers.filter((item) => item.firstAttendedAt || item.resolvedAt);
+  const scheduledCount = new Set(currentAppointments.map((item) => item.phone).filter(Boolean)).size;
+  const attendedCount = new Set(currentAttendances.map((item) => item.phone).filter(Boolean)).size;
+  const officialClicks = filteredMetaRows.reduce((total, row) => total + getOfficialMetaAdClicks(row), 0);
+  const filteredMetaSummary = buildMetaAdInsightsSummary(filteredMetaRows);
+  const hasViewFilters = Boolean(selectedFilters.campaignId || selectedFilters.adsetId || selectedFilters.adId);
 
   return {
     period: {
@@ -8604,11 +8721,12 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       adAccountId: meta.adAccountId || normalizeMetaAdAccountId(META_AD_ACCOUNT_ID),
       error: meta.error || null,
       spend,
-      clicks: meta.clicks || 0,
-      inlineLinkClicks: meta.inlineLinkClicks || 0,
-      linkClicks: meta.linkClicks || 0,
-      messagingConversationStarted7d: meta.messagingConversationStarted7d || 0,
-      messagingFirstReply: meta.messagingFirstReply || 0,
+      clicks: filteredMetaSummary.clicks || 0,
+      inlineLinkClicks: filteredMetaSummary.inlineLinkClicks || 0,
+      linkClicks: filteredMetaSummary.linkClicks || 0,
+      messagingConversationStarted7d: filteredMetaSummary.messagingConversationStarted7d || 0,
+      messagingFirstReply: filteredMetaSummary.messagingFirstReply || 0,
+      officialClicks,
     },
     local: {
       adConversations: whatsappConversationIds.size,
@@ -8619,8 +8737,8 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
     },
     cards: {
       investment: spend,
-      clicks,
-      costPerClick: clicks > 0 ? spend / clicks : 0,
+      clicks: officialClicks,
+      costPerClick: officialClicks > 0 ? spend / officialClicks : 0,
       conversationsStarted,
       costPerConversation: conversationsStarted > 0 ? spend / conversationsStarted : 0,
       scheduledAppointments: scheduledCount,
@@ -8636,23 +8754,48 @@ const buildAcquisitionDashboardMetrics = async (store, { startMs, endMs, operati
       newCustomers,
     },
     funnel: {
-      clicks,
+      clicks: officialClicks,
       conversations: conversationsStarted,
       appointments: scheduledCount,
       attendances: attendedCount,
     },
-    adCustomers: persistedAdCustomers.items,
-    customers: persistedAdCustomers.items,
+    adCustomers: currentCustomers,
+    customers: currentCustomers,
     ads,
     byKeyword: Array.from(keywordStats.values()).sort(
       (left, right) => right.conversations - left.conversations || right.appointments - left.appointments,
     ),
+    filters: {
+      selected: selectedFilters,
+      campaigns: filterOptions.campaigns,
+      adsets: filterOptions.adsets,
+      ads: filterOptions.ads,
+      hasViewFilters,
+    },
+    metadata: {
+      filterScope: "period_campaign_adset_ad",
+      periodBase: {
+        meta: "insight_date_range",
+        local: "first_ad_signal_at",
+      },
+      clickSource: "link_click_with_clicks_fallback",
+      attributionWindows: {
+        adAttributionWindowDays: dashboardSettings.adAttributionWindowDays,
+        appointmentAttributionWindowDays: dashboardSettings.appointmentAttributionWindowDays,
+        newCustomerWindowDays: dashboardSettings.newCustomerWindowDays,
+      },
+      limitations: {
+        allPeriodMayBeSlower: true,
+      },
+    },
     settings: {
+      adAttributionWindowDays: dashboardSettings.adAttributionWindowDays,
       appointmentAttributionWindowDays: dashboardSettings.appointmentAttributionWindowDays,
+      newCustomerWindowDays: dashboardSettings.newCustomerWindowDays,
       adKeywords: dashboardSettings.adKeywords,
       metaInsightsCacheTtlMs: META_INSIGHTS_CACHE_TTL_MS,
       metaAdLookbackDays: META_AD_LOOKBACK_DAYS,
-      localSource: "dashboard_ad_keywords_or_whatsapp_ad_referral",
+      localSource: "first_ad_signal_with_meta_referral_or_keyword_fallback",
       appointmentSource: "appbarber_by_phone",
     },
   };
@@ -35074,11 +35217,23 @@ const server = http.createServer(async (req, res) => {
     try {
       const startMs = parseDashboardDateBoundary(url.searchParams.get("start"), "start");
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
+      const filters = resolveAcquisitionDashboardFilters({
+        campaignId: url.searchParams.get("campaignId") || url.searchParams.get("campaign"),
+        adsetId: url.searchParams.get("adsetId"),
+        adId: url.searchParams.get("adId"),
+      });
+      const hasViewFilters = Boolean(filters.campaignId || filters.adsetId || filters.adId);
       const store = await readStore({ mutable: false });
       const operationStore = await readOperationStore();
       const mutationState = { mutated: false };
-      const metrics = await buildAcquisitionDashboardMetrics(store, { startMs, endMs, operationStore, mutationState });
-      if (persistDashboardMetricSnapshot(operationStore, "acquisition", metrics)) {
+      const metrics = await buildAcquisitionDashboardMetrics(store, {
+        startMs,
+        endMs,
+        filters,
+        operationStore,
+        mutationState,
+      });
+      if (!hasViewFilters && persistDashboardMetricSnapshot(operationStore, "acquisition", metrics)) {
         mutationState.mutated = true;
       }
       if (mutationState.mutated) {

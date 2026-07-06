@@ -104,10 +104,11 @@ const dashboards = {
     subtitle: 'Mostra se o investimento em tráfego está trazendo clientes reais ou apenas conversas.',
     cards: [
       { title: 'Investimento', value: 'R$ 0,00', subtitle: 'Total investido em anúncios', icon: PiggyBank },
-      { title: 'Cliques no anúncio', value: '0', subtitle: 'Conversas por mensagem', icon: Target },
-      { title: 'Custo por clique (CPC)', value: 'R$ 0,00', subtitle: 'Investimento / conversas por mensagem', icon: Target },
+      { title: 'Cliques no anúncio', value: '0', subtitle: 'Cliques Meta no período', icon: Target },
+      { title: 'Custo por clique (CPC)', value: 'R$ 0,00', subtitle: 'Investimento / cliques Meta', icon: Target },
       { title: 'Conversas iniciadas', value: '0', subtitle: 'Conversas com início no período', icon: MessageCircle },
       { title: 'Custo por conversa', value: 'R$ 0,00', subtitle: 'Custo médio por conversa', icon: MessageCircle },
+      { title: 'Clientes dos anúncios', value: '0', subtitle: 'Clientes reais identificados no AppBarber', icon: Users },
       { title: 'Agendamentos', value: '0', subtitle: 'Agendamentos agendados', icon: CalendarDays },
       { title: 'Comparecimentos', value: '0', subtitle: 'Clientes que compareceram', icon: UserRound },
       { title: 'CAC por agendamento', value: '—', subtitle: 'Sem agendamentos no período', icon: TrendingUp },
@@ -811,26 +812,21 @@ function AcquisitionConversationDialog({ customer, open, onClose }) {
 function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
-  const [periodDays, setPeriodDays] = useState('30');
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
   const filteredItems = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    const daysLimit = Number(periodDays);
-    const cutoffMs = Number.isFinite(daysLimit) && daysLimit > 0 ? Date.now() - daysLimit * 24 * 60 * 60 * 1000 : 0;
 
     return (Array.isArray(items) ? items : []).filter((item) => {
-      const referenceMs = Date.parse(item.lastAdSeenAt || item.lastMessageAt || item.updatedAt || '');
-      const matchesPeriod = periodDays === 'all' || !cutoffMs || (Number.isFinite(referenceMs) && referenceMs >= cutoffMs);
       const matchesStage = stageFilter === 'all' || String(item.stageId || '') === stageFilter;
       const haystack = [item.name, item.phone, item.stageLabel, item.campaignName, item.adsetName, item.adName, item.headline]
         .join(' ')
         .toLowerCase();
       const matchesSearch = !normalizedSearch || haystack.includes(normalizedSearch);
-      return matchesPeriod && matchesStage && matchesSearch;
+      return matchesStage && matchesSearch;
     });
-  }, [items, periodDays, search, stageFilter]);
+  }, [items, search, stageFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -838,7 +834,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [periodDays, search, stageFilter]);
+  }, [search, stageFilter]);
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -855,26 +851,13 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
             <div className="min-w-0">
               <h3 className="truncate text-sm font-bold uppercase tracking-[0.08em] text-foreground">Clientes dos anúncios</h3>
               <p className="mt-0.5 max-w-xl text-xs text-muted-foreground">
-                Lista dos contatos identificados por anúncio e etapa atual.
+                Lista dos contatos atribuídos a anúncios dentro do recorte atual da dashboard.
               </p>
             </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-          <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-32">
-            Período
-            <select
-              value={periodDays}
-              onChange={(event) => setPeriodDays(event.target.value)}
-              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none transition-colors focus:border-primary/50"
-            >
-              <option value="30">30 dias</option>
-              <option value="7">7 dias</option>
-              <option value="90">90 dias</option>
-              <option value="all">Todos</option>
-            </select>
-          </label>
           <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-36">
             Etapa
             <select
@@ -1017,7 +1000,6 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
             onClick={() => {
               setSearch('');
               setStageFilter('all');
-              setPeriodDays('all');
             }}
             className="ml-1 hidden h-8 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-foreground transition-colors hover:bg-muted sm:inline-flex"
           >
@@ -1191,7 +1173,9 @@ function DashboardFilters({ activeDashboard, startDate, endDate, onDateRangeChan
       { key: 'attendant', label: 'Atendente', icon: UserRound, options: filterOptions.attendants || [buildFilterOption(ALL_FILTER_VALUE, 'Todos')] },
     ],
     aquisicao: [
-      { key: 'campaign', label: 'Campanha', icon: Megaphone, options: filterOptions.campaigns || [buildFilterOption(ALL_FILTER_VALUE, 'Todas')] },
+      { key: 'campaignId', label: 'Campanha', icon: Megaphone, options: filterOptions.campaigns || [buildFilterOption(ALL_FILTER_VALUE, 'Todas')] },
+      { key: 'adsetId', label: 'Conjunto', icon: Filter, options: filterOptions.adsets || [buildFilterOption(ALL_FILTER_VALUE, 'Todos')] },
+      { key: 'adId', label: 'Anúncio', icon: Target, options: filterOptions.ads || [buildFilterOption(ALL_FILTER_VALUE, 'Todos')] },
     ],
     followup: [
       { key: 'rule', label: 'Régua', icon: Filter, options: filterOptions.rules || [buildFilterOption(ALL_FILTER_VALUE, 'Todas')] },
@@ -1396,7 +1380,7 @@ export default function Dashboard() {
   const [{ start, end }, setDateRange] = useState(() => getDateRangeForLastDays(30));
   const [dashboardFilters, setDashboardFilters] = useState({
     atendimento: { attendant: ALL_FILTER_VALUE },
-    aquisicao: { campaign: ALL_FILTER_VALUE },
+    aquisicao: { campaignId: ALL_FILTER_VALUE, adsetId: ALL_FILTER_VALUE, adId: ALL_FILTER_VALUE },
     followup: { rule: ALL_FILTER_VALUE, template: ALL_FILTER_VALUE },
     base: {},
     experiencia: { customerType: ALL_FILTER_VALUE },
@@ -1423,13 +1407,41 @@ export default function Dashboard() {
   const followUpViewCards = followUpMetrics?.cards || summarizeFollowUpRows(followUpViewRows);
 
   const handleDashboardFilterChange = (dashboardId, key, value) => {
-    setDashboardFilters((currentFilters) => ({
-      ...currentFilters,
-      [dashboardId]: {
-        ...(currentFilters[dashboardId] || {}),
-        [key]: value || ALL_FILTER_VALUE,
-      },
-    }));
+    const nextValue = value || ALL_FILTER_VALUE;
+    setDashboardFilters((currentFilters) => {
+      const currentDashboardFilters = currentFilters[dashboardId] || {};
+      if (dashboardId === 'aquisicao') {
+        if (key === 'campaignId') {
+          return {
+            ...currentFilters,
+            [dashboardId]: {
+              ...currentDashboardFilters,
+              campaignId: nextValue,
+              adsetId: ALL_FILTER_VALUE,
+              adId: ALL_FILTER_VALUE,
+            },
+          };
+        }
+        if (key === 'adsetId') {
+          return {
+            ...currentFilters,
+            [dashboardId]: {
+              ...currentDashboardFilters,
+              adsetId: nextValue,
+              adId: ALL_FILTER_VALUE,
+            },
+          };
+        }
+      }
+
+      return {
+        ...currentFilters,
+        [dashboardId]: {
+          ...currentDashboardFilters,
+          [key]: nextValue,
+        },
+      };
+    });
   };
 
   useEffect(() => {
@@ -1464,8 +1476,14 @@ export default function Dashboard() {
     const searchParams = new URLSearchParams();
     if (start) searchParams.set('start', start);
     if (end) searchParams.set('end', end);
-    if (acquisitionFilters.campaign && acquisitionFilters.campaign !== ALL_FILTER_VALUE) {
-      searchParams.set('campaign', acquisitionFilters.campaign);
+    if (acquisitionFilters.campaignId && acquisitionFilters.campaignId !== ALL_FILTER_VALUE) {
+      searchParams.set('campaignId', acquisitionFilters.campaignId);
+    }
+    if (acquisitionFilters.adsetId && acquisitionFilters.adsetId !== ALL_FILTER_VALUE) {
+      searchParams.set('adsetId', acquisitionFilters.adsetId);
+    }
+    if (acquisitionFilters.adId && acquisitionFilters.adId !== ALL_FILTER_VALUE) {
+      searchParams.set('adId', acquisitionFilters.adId);
     }
 
     fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/acquisition?${searchParams.toString()}`), {
@@ -1483,7 +1501,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, [activeDashboard, acquisitionFilters.campaign, start, end]);
+  }, [activeDashboard, acquisitionFilters.adId, acquisitionFilters.adsetId, acquisitionFilters.campaignId, start, end]);
 
   useEffect(() => {
     if (activeDashboard !== 'followup') return;
@@ -1574,33 +1592,36 @@ export default function Dashboard() {
       const metrics = acquisitionMetrics?.cards || {};
       return current.cards.map((card) => {
         if (card.title === 'Investimento') {
-          return { ...card, value: formatCurrency(metrics.investment), subtitle: 'Total investido em anúncios' };
+          return { ...card, value: formatCurrency(metrics.investment), subtitle: 'Total investido em anúncios no recorte' };
         }
         if (card.title === 'Cliques no anúncio') {
-          return { ...card, value: formatInteger(metrics.clicks), subtitle: 'Conversas por mensagem' };
+          return { ...card, value: formatInteger(metrics.clicks), subtitle: 'Cliques Meta no período' };
         }
         if (card.title === 'Custo por clique (CPC)') {
-          return { ...card, value: formatCurrency(metrics.costPerClick), subtitle: 'Investimento / conversas por mensagem' };
+          return { ...card, value: formatCurrency(metrics.costPerClick), subtitle: 'Investimento / cliques Meta' };
         }
         if (card.title === 'Conversas iniciadas') {
-          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Conversas com início no período' };
+          return { ...card, value: formatInteger(metrics.conversationsStarted), subtitle: 'Primeira origem de anúncio no período' };
         }
         if (card.title === 'Custo por conversa') {
-          return { ...card, value: formatCurrency(metrics.costPerConversation), subtitle: 'Custo médio por conversa' };
+          return { ...card, value: formatCurrency(metrics.costPerConversation), subtitle: 'Investimento / conversas iniciadas' };
+        }
+        if (card.title === 'Clientes dos anúncios') {
+          return { ...card, value: formatInteger(metrics.adCustomers), subtitle: 'Clientes únicos encontrados no AppBarber' };
         }
         if (card.title === 'Agendamentos') {
-          return { ...card, value: formatInteger(metrics.scheduledAppointments), subtitle: 'Agendamentos agendados' };
+          return { ...card, value: formatInteger(metrics.scheduledAppointments), subtitle: 'Agendamentos atribuídos à aquisição' };
         }
         if (card.title === 'Comparecimentos') {
-          return { ...card, value: formatInteger(metrics.attendances), subtitle: 'Clientes que compareceram' };
+          return { ...card, value: formatInteger(metrics.attendances), subtitle: 'Comparecimentos atribuídos à aquisição' };
         }
         if (card.title === 'CAC por agendamento') {
           const hasValue = Number(metrics.scheduledAppointments || 0) > 0;
-          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAppointment) : '—', subtitle: hasValue ? 'Campanha / agendamentos agendados' : 'Sem agendamentos no período' };
+          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAppointment) : '—', subtitle: hasValue ? 'Investimento / agendamentos atribuídos' : 'Sem agendamentos no período' };
         }
         if (card.title === 'CAC por comparecimento') {
           const hasValue = Number(metrics.attendances || 0) > 0;
-          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAttendance) : '—', subtitle: hasValue ? 'Campanha / agendamentos realizados' : 'Sem comparecimentos no período' };
+          return { ...card, value: hasValue ? formatCurrency(metrics.cacPerAttendance) : '—', subtitle: hasValue ? 'Investimento / comparecimentos atribuídos' : 'Sem comparecimentos no período' };
         }
         return card;
       });
@@ -1738,6 +1759,21 @@ export default function Dashboard() {
     };
   }, [activeDashboard, acquisitionMetrics]);
 
+  const acquisitionScopeNote = useMemo(() => {
+    if (activeDashboard !== 'aquisicao') return '';
+    const hasViewFilters = Boolean(acquisitionMetrics?.filters?.hasViewFilters);
+    const isAllPeriod = start === '2000-01-01';
+    return [
+      'Período aplica Meta pela data do insight e clientes locais pela primeira origem do anúncio.',
+      hasViewFilters
+        ? 'Campanha, conjunto e anúncio recalculam cards, funil e tabela no mesmo recorte.'
+        : 'Campanha, conjunto e anúncio refinam este mesmo período quando selecionados.',
+      isAllPeriod ? 'O modo Todos consulta o histórico completo e pode levar mais tempo.' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+  }, [activeDashboard, acquisitionMetrics, start]);
+
   const mainChartProps = useMemo(() => {
     if (activeDashboard === 'base') {
       const distribution = baseMetrics?.distribution || {};
@@ -1863,10 +1899,8 @@ export default function Dashboard() {
 
   const filteredAcquisitionCustomers = useMemo(() => {
     const rows = acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || [];
-    return (Array.isArray(rows) ? rows : []).filter((item) =>
-      matchesFilterOption(acquisitionFilters.campaign, [item.campaignName, item.campaign, item.adName, item.adId]),
-    );
-  }, [acquisitionFilters.campaign, acquisitionMetrics]);
+    return Array.isArray(rows) ? rows : [];
+  }, [acquisitionMetrics]);
 
   const filteredFollowUpRows = useMemo(() => {
     return followUpViewRows;
@@ -1883,17 +1917,17 @@ export default function Dashboard() {
       ...attendantSource.map((item) => buildFilterOption(item.id || item.name, item.name || item.id)),
     ];
 
-    const acquisitionRows = [
-      ...(Array.isArray(acquisitionMetrics?.ads) ? acquisitionMetrics.ads : []),
-      ...(Array.isArray(acquisitionMetrics?.customers) ? acquisitionMetrics.customers : []),
-      ...(Array.isArray(acquisitionMetrics?.adCustomers) ? acquisitionMetrics.adCustomers : []),
-    ];
     const campaigns = [
       buildFilterOption(ALL_FILTER_VALUE, 'Todas'),
-      ...acquisitionRows
-        .map((item) => item.campaignName || item.campaign || item.adName || item.adId || '')
-        .filter(Boolean)
-        .map((name) => buildFilterOption(name, name)),
+      ...((acquisitionMetrics?.filters?.campaigns || []).map((item) => buildFilterOption(item.value, item.label))),
+    ];
+    const adsets = [
+      buildFilterOption(ALL_FILTER_VALUE, 'Todos'),
+      ...((acquisitionMetrics?.filters?.adsets || []).map((item) => buildFilterOption(item.value, item.label))),
+    ];
+    const ads = [
+      buildFilterOption(ALL_FILTER_VALUE, 'Todos'),
+      ...((acquisitionMetrics?.filters?.ads || []).map((item) => buildFilterOption(item.value, item.label))),
     ];
 
     const followRows = Array.isArray(followUpMetrics?.byTemplate) ? followUpMetrics.byTemplate : [];
@@ -1915,6 +1949,8 @@ export default function Dashboard() {
     return {
       attendants: uniqFilterOptions(attendants),
       campaigns: uniqFilterOptions(campaigns),
+      adsets: uniqFilterOptions(adsets),
+      ads: uniqFilterOptions(ads),
       rules: uniqFilterOptions(rules),
       templates: uniqFilterOptions(templates),
     };
@@ -1955,6 +1991,9 @@ export default function Dashboard() {
         </>
       ) : activeDashboard === 'aquisicao' ? (
         <>
+          <section className="rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
+            {acquisitionScopeNote}
+          </section>
           <AcquisitionFunnel values={acquisitionFunnelValues} />
           <AcquisitionCustomersTable
             items={filteredAcquisitionCustomers}
