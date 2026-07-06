@@ -9335,8 +9335,11 @@ const buildAcquisitionDashboardMetrics = async (
           if (!["scheduled", "agendado", "agendada", "appointment", "appointment_scheduled", "agendamento"].includes(type)) return false;
           const factConversationId = String(fact?.conversationId || fact?.conversation_id || "").trim();
           if (factConversationId && factConversationId === String(conversationId || "").trim()) return true;
-          const factPhone = normalizePhone(fact?.phone || "");
-          return Boolean(factPhone) && Boolean(appBarberPhone || phone) && factPhone === normalizePhone(appBarberPhone || phone);
+          const expectedPhoneKeys = new Set([
+            ...buildDashboardPhoneKeys(appBarberPhone),
+            ...buildDashboardPhoneKeys(phone),
+          ]);
+          return buildDashboardPhoneKeys(fact?.phone || "").some((key) => expectedPhoneKeys.has(key));
         })
         .map((fact) => Date.parse(String(fact?.resolvedAt || fact?.resolved_at || "")))
         .filter((timestampMs) => isWithinDashboardRange(timestampMs, normalizedStartMs, normalizedEndMs))
@@ -9350,7 +9353,13 @@ const buildAcquisitionDashboardMetrics = async (
           localByAdId.set(adId, localStats);
         }
       }
-      if (hasAppointment && Number.isFinite(resolvedMs) && isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)) {
+      if (
+        hasAppointment &&
+        Number.isFinite(resolvedMs) &&
+        Number.isFinite(scheduledResolutionAtMs) &&
+        resolvedMs >= scheduledResolutionAtMs &&
+        isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)
+      ) {
         resolvedAt = new Date(resolvedMs).toISOString();
         hasAttendance = true;
       }
