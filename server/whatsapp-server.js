@@ -8201,6 +8201,34 @@ const normalizeMetaAdAccountId = (value = "") => {
 
 const toDashboardDateKey = (timestampMs) => new Date(timestampMs).toISOString().slice(0, 10);
 
+const getMetaAcquisitionEarliestAllowedStartMs = () => {
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  cursor.setMonth(cursor.getMonth() - 37);
+  return cursor.getTime();
+};
+
+const clampMetaAcquisitionRangeToAvailability = (startMs, endMs) => {
+  const earliestStartMs = getMetaAcquisitionEarliestAllowedStartMs();
+  const normalizedEndMs = Number.isFinite(endMs) ? endMs : Date.now();
+  const normalizedStartMs = Number.isFinite(startMs) ? startMs : earliestStartMs;
+  const clampedStartMs = Math.max(normalizedStartMs, earliestStartMs);
+  if (normalizedEndMs < clampedStartMs) {
+    return {
+      available: false,
+      startMs: clampedStartMs,
+      endMs: normalizedEndMs,
+      earliestStartMs,
+    };
+  }
+  return {
+    available: true,
+    startMs: clampedStartMs,
+    endMs: normalizedEndMs,
+    earliestStartMs,
+  };
+};
+
 const getMetaActionValue = (row = {}, actionType = "") => {
   const actions = Array.isArray(row?.actions) ? row.actions : [];
   const action = actions.find((item) => String(item?.action_type || "") === actionType);
@@ -8369,7 +8397,9 @@ const buildMetaAcquisitionHistoryCoverage = (store = {}) => {
 
 const collectMetaAcquisitionHistoryMissingDays = (store = {}, startMs = null, endMs = null) => {
   const { syncedDays } = buildMetaAcquisitionHistoryCoverage(store);
-  return enumerateDashboardDayKeys(startMs, endMs).filter((dayKey) => !syncedDays[dayKey]);
+  const range = clampMetaAcquisitionRangeToAvailability(startMs, endMs);
+  if (!range.available) return [];
+  return enumerateDashboardDayKeys(range.startMs, range.endMs).filter((dayKey) => !syncedDays[dayKey]);
 };
 
 const markMetaAcquisitionHistoryDaysSynced = (historyStore = {}, dayKeys = [], syncedAt = nowIso()) => {
@@ -8798,9 +8828,13 @@ const syncMetaAcquisitionHistory = async ({
   syncType = "incremental",
 } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
-  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
-  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
-  const requestedDayKeys = enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs);
+  const normalizedRange = clampMetaAcquisitionRangeToAvailability(
+    Number.isFinite(startMs) ? startMs : range.startMs,
+    Number.isFinite(endMs) ? endMs : range.endMs,
+  );
+  const normalizedStartMs = normalizedRange.startMs;
+  const normalizedEndMs = normalizedRange.endMs;
+  const requestedDayKeys = normalizedRange.available ? enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs) : [];
   let nextHistoryStore = historyStore || (await readMetaAcquisitionHistoryStore());
   const metaConfig = getMetaAcquisitionConfig();
   if (!metaConfig.enabled || !metaConfig.configured) {
@@ -8824,6 +8858,18 @@ const syncMetaAcquisitionHistory = async ({
       mutated: true,
       fetchedRows: [],
       missingDaysBefore: requestedDayKeys,
+      configured: metaConfig.configured,
+      enabled: metaConfig.enabled,
+      adAccountId: metaConfig.adAccountId,
+      skipped: true,
+    };
+  }
+  if (!normalizedRange.available) {
+    return {
+      historyStore: nextHistoryStore,
+      mutated: false,
+      fetchedRows: [],
+      missingDaysBefore: [],
       configured: metaConfig.configured,
       enabled: metaConfig.enabled,
       adAccountId: metaConfig.adAccountId,
@@ -8907,9 +8953,20 @@ const syncMetaAcquisitionHistory = async ({
 
 const ensureMetaAcquisitionHistoryForDashboard = async ({ startMs, endMs } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
-  const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
-  const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
+  const normalizedRange = clampMetaAcquisitionRangeToAvailability(
+    Number.isFinite(startMs) ? startMs : range.startMs,
+    Number.isFinite(endMs) ? endMs : range.endMs,
+  );
+  const normalizedStartMs = normalizedRange.startMs;
+  const normalizedEndMs = normalizedRange.endMs;
   let historyStore = await readMetaAcquisitionHistoryStore();
+  if (!normalizedRange.available) {
+    return {
+      historyStore,
+      missingDaysBefore: [],
+      missingDaysAfter: [],
+    };
+  }
   const missingDaysBefore = collectMetaAcquisitionHistoryMissingDays(historyStore, normalizedStartMs, normalizedEndMs);
   const requestedDayKeys = enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs);
   const todayKey = toDashboardDateKey(Date.now());
@@ -8956,10 +9013,11 @@ const runMetaAcquisitionHistoryBackfill = async ({ onProgress } = {}) => {
   if (!metaConfig.enabled || !metaConfig.configured) return { skipped: true, reason: "meta_not_configured" };
   let historyStore = await readMetaAcquisitionHistoryStore();
   const now = Date.now();
-  const startMs =
+  const configuredStartMs =
     parseDashboardDateBoundary(historyStore?.sync?.backfillCursor || META_ACQUISITION_HISTORY_START_DATE, "start") ||
     parseDashboardDateBoundary(META_ACQUISITION_HISTORY_START_DATE, "start") ||
     now;
+  const startMs = Math.max(configuredStartMs, getMetaAcquisitionEarliestAllowedStartMs());
   if (startMs > now) {
     return { skipped: true, reason: "backfill_complete" };
   }
