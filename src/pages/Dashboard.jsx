@@ -1262,13 +1262,24 @@ function aggregateAgentConversionRows(items = []) {
       .toLowerCase();
     if (!normalized || normalized === 'sem atendente') return;
     const key = normalized;
-    const current = rows.get(key) || { ...item, name: rawName, appointments: 0, conversations: 0 };
+    const current = rows.get(key) || {
+      ...item,
+      name: rawName,
+      appointments: 0,
+      conversations: 0,
+      periodConversationBase: Number(item?.periodConversationBase || 0),
+      periodConversionRate: 0,
+    };
     current.appointments += Number(item?.appointments || 0);
     current.conversations += Number(item?.conversations || 0);
+    current.periodConversationBase = Math.max(current.periodConversationBase, Number(item?.periodConversationBase || 0));
     rows.set(key, current);
   });
   return Array.from(rows.values())
-    .map((item) => ({ ...item, conversionRate: item.conversations > 0 ? item.appointments / item.conversations : 0 }))
+    .map((item) => ({
+      ...item,
+      periodConversionRate: item.periodConversationBase > 0 ? item.appointments / item.periodConversationBase : 0,
+    }))
     .sort((left, right) => right.appointments - left.appointments || left.name.localeCompare(right.name));
 }
 
@@ -1312,6 +1323,102 @@ function FollowUpRulePerformanceCard({ items = [] }) {
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function AttendanceAgentRankingCard({
+  rows = [],
+  totalConversations = 0,
+  selectedAttendantLabel = 'Todos',
+}) {
+  const normalizedRows = (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...row,
+    appointments: Number(row?.appointments || 0),
+    periodConversationBase: Number(row?.periodConversationBase || totalConversations || 0),
+    periodConversionRate: Number(row?.periodConversionRate || 0),
+  }));
+  const topRow = normalizedRows[0] || null;
+  const maxRate = Math.max(1, ...normalizedRows.map((row) => row.periodConversionRate * 100));
+  const hasFilter = selectedAttendantLabel && selectedAttendantLabel !== 'Todos';
+  const insight = topRow
+    ? `${topRow.name} liderou com ${formatInteger(topRow.appointments)} agendamentos, representando ${formatPercent(topRow.periodConversionRate * 100)} das ${formatInteger(totalConversations)} conversas do período.`
+    : `Nenhum atendente com finalização Agendado no período. Base atual: ${formatInteger(totalConversations)} conversas recebidas.`;
+
+  return (
+    <section className="rounded-2xl border border-border/80 bg-card p-5 shadow-[0_8px_24px_rgba(15,23,42,0.045)]">
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-base font-black tracking-[-0.02em] text-foreground">Conversão por atendente</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Agendamentos por responsável sobre o total de conversas recebidas no período.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground lg:max-w-[360px]">
+          <span className="font-black text-primary">Insight:</span> {insight}
+        </div>
+      </div>
+
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">Base do período</div>
+          <div className="mt-2 text-2xl font-black text-foreground">{formatInteger(totalConversations)}</div>
+          <div className="mt-1 text-xs text-muted-foreground">Conversas com 1+ mensagem do cliente</div>
+        </div>
+        <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">Filtro visual</div>
+          <div className="mt-2 text-2xl font-black text-foreground">{hasFilter ? selectedAttendantLabel : 'Todos'}</div>
+          <div className="mt-1 text-xs text-muted-foreground">O denominador continua global no período</div>
+        </div>
+        <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+          <div className="text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">Melhor taxa</div>
+          <div className="mt-2 text-2xl font-black text-foreground">
+            {topRow ? formatPercent(topRow.periodConversionRate * 100) : '0,0%'}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {topRow ? `${topRow.name} lidera o período` : 'Sem conversão registrada'}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {normalizedRows.length ? normalizedRows.map((row) => {
+          const ratePercent = row.periodConversionRate * 100;
+          return (
+            <div key={row.id || row.name} className="rounded-2xl border border-border/70 bg-card/70 px-4 py-3 text-xs">
+              <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(110px,180px)_minmax(0,1fr)_72px_72px] sm:items-center">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-black text-foreground" title={row.name}>{row.name}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Finalizações Agendado</div>
+                </div>
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-3 text-muted-foreground">
+                    <span>% sobre {formatInteger(totalConversations)} conversas</span>
+                    <span>{formatPercent(ratePercent)}</span>
+                  </div>
+                  <div className="h-3 rounded-full bg-primary/10">
+                    <div
+                      className="h-3 rounded-full bg-primary shadow-[0_8px_18px_rgba(197,0,21,0.14)]"
+                      style={{ width: ratePercent > 0 ? `${Math.max(8, (ratePercent / maxRate) * 100)}%` : '0%' }}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-end justify-between gap-3 sm:block sm:text-right">
+                  <div>
+                    <div className="text-lg font-black text-foreground">{formatInteger(row.appointments)}</div>
+                    <div className="text-[11px] text-muted-foreground">agend.</div>
+                  </div>
+                  <div className="text-sm font-black text-primary sm:mt-1">{formatPercent(ratePercent)}</div>
+                </div>
+              </div>
+            </div>
+          );
+        }) : (
+          <div className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            Nenhum atendente com conversão no período selecionado.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1365,9 +1472,6 @@ export default function Dashboard() {
     const searchParams = new URLSearchParams();
     if (start) searchParams.set('start', start);
     if (end) searchParams.set('end', end);
-    if (attendanceFilters.attendant && attendanceFilters.attendant !== ALL_FILTER_VALUE) {
-      searchParams.set('attendant', attendanceFilters.attendant);
-    }
 
     fetch(buildWhatsappApiUrl(`/api/whatsapp/dashboard/attendance?${searchParams.toString()}`), {
       signal: controller.signal,
@@ -1384,7 +1488,7 @@ export default function Dashboard() {
       });
 
     return () => controller.abort();
-  }, [activeDashboard, attendanceFilters.attendant, start, end]);
+  }, [activeDashboard, start, end]);
 
   useEffect(() => {
     if (activeDashboard !== 'aquisicao') return;
@@ -1617,7 +1721,7 @@ export default function Dashboard() {
         return {
           ...card,
           value: formatInteger(receivedConversations),
-          subtitle: 'Conversas com mensagem no período',
+          subtitle: 'Conversas com 1+ mensagem do cliente',
         };
       }
 
@@ -1656,17 +1760,6 @@ export default function Dashboard() {
       return card;
     });
   }, [activeDashboard, acquisitionMetrics, attendanceMetrics, baseMetrics, current.cards, experienceMetrics, followUpViewCards, followUpMetrics]);
-
-  const atendimentoFunnelValues = useMemo(() => {
-    if (activeDashboard !== 'atendimento') return currentMain.values;
-
-    return {
-      ...currentMain.values,
-      conversations: attendanceMetrics?.funnel?.conversations ?? 0,
-      appointments: attendanceMetrics?.funnel?.appointments ?? 0,
-      conversions: attendanceMetrics?.funnel?.conversions ?? 0,
-    };
-  }, [activeDashboard, attendanceMetrics, currentMain.values]);
 
   const acquisitionFunnelValues = useMemo(() => {
     if (activeDashboard !== 'aquisicao') return null;
@@ -1721,25 +1814,6 @@ export default function Dashboard() {
   }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpViewCards, followUpViewRows]);
 
   const displaySideCharts = useMemo(() => {
-    if (activeDashboard === 'atendimento') {
-      const selectedAttendant = attendanceFilters.attendant || ALL_FILTER_VALUE;
-      const byAgent = aggregateAgentConversionRows(attendanceMetrics?.byAgent || []).filter((item) =>
-        matchesFilterOption(selectedAttendant, [item.id, item.name, item.email, item.username]),
-      );
-      return current.sideCharts.map((chart) => {
-        if (chart.title === 'Conversão por atendente') {
-          return {
-            ...chart,
-            labels: byAgent.map((item) => item.name || 'Sem atendente'),
-            values: byAgent.length ? byAgent.map((item) => Math.round((Number(item.conversionRate) || 0) * 1000) / 10) : [],
-            helper: 'Percentual de conversas que viraram agendamento por atendente.',
-            valueFormatter: formatPercent,
-          };
-        }
-        return chart;
-      });
-    }
-
     if (activeDashboard === 'followup') {
       const byTemplate = followUpViewRows.slice(0, 8);
       return current.sideCharts.map((chart) => {
@@ -1811,7 +1885,14 @@ export default function Dashboard() {
     }
 
     return current.sideCharts;
-  }, [activeDashboard, acquisitionMetrics, attendanceFilters.attendant, attendanceMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpViewRows]);
+  }, [activeDashboard, acquisitionMetrics, baseMetrics, current.sideCharts, experienceMetrics, followUpViewRows]);
+
+  const attendanceRankingRows = useMemo(() => {
+    const selectedAttendant = attendanceFilters.attendant || ALL_FILTER_VALUE;
+    return aggregateAgentConversionRows(attendanceMetrics?.byAgent || []).filter((item) =>
+      matchesFilterOption(selectedAttendant, [item.id, item.name, item.email, item.username]),
+    );
+  }, [attendanceFilters.attendant, attendanceMetrics]);
 
   const filteredAcquisitionCustomers = useMemo(() => {
     const rows = acquisitionMetrics?.customers || acquisitionMetrics?.adCustomers || [];
@@ -1900,10 +1981,11 @@ export default function Dashboard() {
 
       {activeDashboard === 'atendimento' ? (
         <>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
-            <AtendimentoConversionFunnel values={atendimentoFunnelValues} />
-            {displaySideCharts[0] ? <ChartCard {...displaySideCharts[0]} className="min-h-[360px]" /> : null}
-          </div>
+          <AttendanceAgentRankingCard
+            rows={attendanceRankingRows}
+            totalConversations={attendanceMetrics?.attendance?.receivedConversations ?? 0}
+            selectedAttendantLabel={dashboardFilterOptions.attendants.find((item) => item.value === (attendanceFilters.attendant || ALL_FILTER_VALUE))?.label || 'Todos'}
+          />
         </>
       ) : activeDashboard === 'aquisicao' ? (
         <>

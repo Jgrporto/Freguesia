@@ -7762,10 +7762,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
         firstClientMessageInPeriodIndex,
         firstClientMessage.__ts,
       );
-      const firstResponseAgentRef = nextAgentMessage
-        ? resolveDashboardMessageAgentRef(nextAgentMessage, assignedAgentRef)
-        : assignedAgentRef;
-      if (nextAgentMessage && matchesSelectedAttendant(firstResponseAgentRef)) {
+      if (nextAgentMessage) {
         const firstResponseSeconds = Math.max(
           0,
           Math.round((nextAgentMessage.__ts - firstClientMessage.__ts) / 1000),
@@ -7786,10 +7783,6 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
       if (message.__ts < normalizedStartMs || message.__ts > normalizedEndMs) continue;
 
       const nextAgentMessage = findNextAgentMessage(messages, index, message.__ts);
-      const responseAgentRef = nextAgentMessage
-        ? resolveDashboardMessageAgentRef(nextAgentMessage, assignedAgentRef)
-        : assignedAgentRef;
-      if (!matchesSelectedAttendant(responseAgentRef)) continue;
 
       clientMessages += 1;
       conversationIdsWithClientMessages.add(conversationId);
@@ -7838,7 +7831,7 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
     return current;
   };
 
-  attendantUsers.filter(matchesSelectedAttendant).forEach((agentRef) => {
+  attendantUsers.forEach((agentRef) => {
     ensureAgentConversionStats(agentRef);
   });
 
@@ -7900,7 +7893,6 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
         id: fact?.resolvedById || fact?.resolved_by_id || '',
         name: fact?.resolvedByName || fact?.resolved_by_name || 'Sem atendente',
       };
-      if (!matchesSelectedAttendant(resolutionAgentRef)) return;
       if (!isDashboardAttendantUser(operationStore, resolutionAgentRef, dashboardSettings)) return;
 
       conversionEventIds.add(eventId);
@@ -7916,8 +7908,10 @@ const buildAttendanceDashboardMetrics = (store, { startMs, endMs, operationStore
   const byAgent = Array.from(agentConversions.values())
     .map((item) => ({
       ...item,
-      conversionRate: item.conversations > 0 ? item.appointments / item.conversations : 0,
+      periodConversationBase: receivedConversations,
+      periodConversionRate: receivedConversations > 0 ? item.appointments / receivedConversations : 0,
     }))
+    .filter((item) => matchesSelectedAttendant(item))
     .sort((left, right) => right.appointments - left.appointments || left.name.localeCompare(right.name));
 
   enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach((dayKey) => {
