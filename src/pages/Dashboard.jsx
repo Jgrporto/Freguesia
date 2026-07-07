@@ -126,15 +126,15 @@ const dashboards = {
     title: 'Follow-up e Recuperação',
     subtitle: 'Avalia quais disparos e automações estão trazendo clientes de volta.',
     cards: [
-      { title: 'Disparos enviados', value: '0', subtitle: 'D+20 a D+50', icon: Send },
-      { title: 'Respostas recebidas', value: '0', subtitle: 'Retornos dos clientes', icon: MessageCircle },
-      { title: 'Agendamentos gerados', value: '0', subtitle: 'Após disparos', icon: CalendarDays },
-      { title: 'Clientes recuperados', value: '0', subtitle: 'Voltaram a cortar', icon: HeartHandshake },
+      { title: 'Disparos enviados', value: '0', subtitle: 'Envios das rotinas configuradas', icon: Send },
+      { title: 'Respostas recebidas', value: '0', subtitle: 'Primeira mensagem do cliente', icon: MessageCircle },
+      { title: 'Agendamentos gerados', value: '0', subtitle: 'Finalizações com Agendado', icon: CalendarDays },
+      { title: 'Clientes recuperados', value: '0', subtitle: 'Agendado + realizado no AppBarber', icon: HeartHandshake },
       { title: 'Melhor template', value: '—', subtitle: 'Maior recuperação', icon: Award },
     ],
     main: {
       title: 'Funil do follow-up',
-      description: 'Do disparo configurado até o cliente recuperado.',
+      description: 'Do disparo configurado até o agendamento realizado no AppBarber.',
       type: 'funnel',
       labels: ['Disparos enviados', 'Respostas recebidas', 'Agendamentos gerados', 'Clientes recuperados'],
     },
@@ -1629,16 +1629,16 @@ export default function Dashboard() {
       const metrics = followUpViewCards || {};
       return current.cards.map((card) => {
         if (card.title === 'Disparos enviados') {
-          return { ...card, value: formatInteger(metrics.sent), subtitle: 'Rotinas/templates configurados' };
+          return { ...card, value: formatInteger(metrics.sent), subtitle: 'Envios com sucesso das rotinas configuradas' };
         }
         if (card.title === 'Respostas recebidas') {
-          return { ...card, value: formatInteger(metrics.responses), subtitle: 'Tags de métrica do Chatbot' };
+          return { ...card, value: formatInteger(metrics.responses), subtitle: 'Primeira mensagem inbound após o disparo' };
         }
         if (card.title === 'Agendamentos gerados') {
-          return { ...card, value: formatInteger(metrics.appointments), subtitle: 'Agendados + realizados após disparo' };
+          return { ...card, value: formatInteger(metrics.appointments), subtitle: 'Conversas finalizadas como Agendado' };
         }
         if (card.title === 'Clientes recuperados') {
-          return { ...card, value: formatInteger(metrics.recoveredCustomers), subtitle: 'Clientes com agendamento realizado' };
+          return { ...card, value: formatInteger(metrics.recoveredCustomers), subtitle: 'Agendado + realizado/resolvido no AppBarber' };
         }
         if (card.title === 'Melhor template') {
           return { ...card, value: metrics.bestTemplate || '—', subtitle: 'Mais respostas atribuídas' };
@@ -1809,7 +1809,7 @@ export default function Dashboard() {
         recovered: metrics.recoveredCustomers || 0,
       },
       description: byTemplate.length
-        ? 'Disparos das rotinas configuradas, respostas por tag de métrica, agendas e cortes atribuídos.'
+        ? 'Disparos das rotinas configuradas, primeira resposta do cliente, finalizações Agendado e realizados no AppBarber.'
         : 'Configure rotinas de follow-up na Dashboard para acompanhar o funil.',
     };
   }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpViewCards, followUpViewRows]);

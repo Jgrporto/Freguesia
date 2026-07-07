@@ -9675,6 +9675,7 @@ const buildDashboardClientMessagesByPhone = (store = {}) => {
     const clientMessages = (Array.isArray(rawMessages) ? rawMessages : [])
       .map((message) => ({
         id: String(message?.id || message?.messageId || "").trim(),
+        conversationId: String(conversationId || "").trim(),
         timestampMs: resolveDashboardMessageTimestampMs(message),
         direction: normalizeDashboardMessageDirection(message),
         text: String(message?.text || message?.content || message?.body || "").trim(),
@@ -9691,29 +9692,110 @@ const buildDashboardClientMessagesByPhone = (store = {}) => {
   return byPhone;
 };
 
-const getFollowUpDashboardFactKey = (routineId = "", phone = "") => `${String(routineId || "sem-rotina").trim()}:${normalizePhone(phone)}`;
+const DASHBOARD_SCHEDULED_RESOLUTION_TYPES = new Set([
+  "scheduled",
+  "agendado",
+  "agendada",
+  "appointment",
+  "appointment_scheduled",
+  "agendamento",
+]);
+
+const isDashboardScheduledResolutionType = (value = "") =>
+  DASHBOARD_SCHEDULED_RESOLUTION_TYPES.has(normalizeDashboardText(value));
+
+const normalizeDashboardScheduledResolutionFact = (value = {}) => {
+  const resolvedAtMs = Date.parse(String(value?.resolvedAt || value?.resolved_at || ""));
+  if (!Number.isFinite(resolvedAtMs)) return null;
+  const resolutionType = String(value?.resolutionType || value?.resolution_type || value?.type || "").trim();
+  if (!isDashboardScheduledResolutionType(resolutionType)) return null;
+  return {
+    ...value,
+    id: String(value?.id || "").trim(),
+    conversationId: String(value?.conversationId || value?.conversation_id || "").trim(),
+    phone: normalizePhone(value?.phone || ""),
+    resolutionType,
+    resolvedAt: new Date(resolvedAtMs).toISOString(),
+    resolvedAtMs,
+    resolvedById: String(value?.resolvedById || value?.resolved_by_id || "").trim(),
+    resolvedByName: String(value?.resolvedByName || value?.resolved_by_name || "").trim(),
+    source: String(value?.source || "").trim(),
+  };
+};
+
+const buildDashboardScheduledResolutionFacts = (operationStore = {}) => {
+  const persistedResolutionFacts = Array.isArray(operationStore?.attendanceResolutionFacts)
+    ? operationStore.attendanceResolutionFacts
+    : [];
+  const legacyCurrentFacts = (Array.isArray(operationStore?.conversationPreferences) ? operationStore.conversationPreferences : [])
+    .filter((preference) => String(preference?.resolution_status || "").trim() === "resolved")
+    .map((preference) => ({
+      id: "",
+      conversationId: preference?.conversation_id || preference?.conversationId || preference?.id || "",
+      phone: preference?.phone || "",
+      resolutionType: preference?.resolution_type || preference?.type || "",
+      resolvedAt: preference?.resolved_at || preference?.updated_date || preference?.created_date || "",
+      resolvedById: preference?.resolved_by_id || "",
+      resolvedByName: preference?.resolved_by_name || "",
+      source: "legacy_current_preference",
+    }));
+
+  const factsByKey = new Map();
+  [...persistedResolutionFacts, ...legacyCurrentFacts]
+    .map(normalizeDashboardScheduledResolutionFact)
+    .filter(Boolean)
+    .forEach((fact) => {
+      const factKey = String(
+        fact.id ||
+          `scheduled:${fact.conversationId || "sem-conversa"}:${fact.phone || "sem-telefone"}:${fact.resolvedAt}`,
+      ).trim();
+      if (!factKey) return;
+      factsByKey.set(factKey, fact);
+    });
+
+  return Array.from(factsByKey.values()).sort((left, right) => left.resolvedAt.localeCompare(right.resolvedAt));
+};
+
+const getFollowUpDashboardFactKey = (routineId = "", phone = "", sentAt = "", templateName = "") =>
+  [
+    String(routineId || "sem-rotina").trim() || "sem-rotina",
+    normalizePhone(phone) || "sem-telefone",
+    String(sentAt || "sem-disparo").trim() || "sem-disparo",
+    String(templateName || "sem-template").trim() || "sem-template",
+  ].join(":");
 
 const normalizeFollowUpDashboardFact = (value = {}) => {
   const sentAtMs = Date.parse(String(value?.sentAt || value?.sent_at || ""));
-  const responseAtMs = Date.parse(String(value?.responseAt || value?.response_at || ""));
-  const appointmentAtMs = Date.parse(String(value?.appointmentAt || value?.appointment_at || ""));
+  const responseAtMs = Date.parse(String(value?.firstResponseAt || value?.first_response_at || value?.responseAt || value?.response_at || ""));
+  const appointmentAtMs = Date.parse(String(value?.scheduledResolutionAt || value?.scheduled_resolution_at || value?.appointmentAt || value?.appointment_at || ""));
   const recoveredAtMs = Date.parse(String(value?.recoveredAt || value?.recovered_at || ""));
   const phone = normalizePhone(value?.phone || "");
   const routineId = String(value?.routineId || value?.routine_id || "sem-rotina").trim() || "sem-rotina";
+  const templateName = String(value?.templateName || value?.template_name || "Sem template").trim() || "Sem template";
+  const sentAt = Number.isFinite(sentAtMs) ? new Date(sentAtMs).toISOString() : null;
+  const firstResponseAt = Number.isFinite(responseAtMs) ? new Date(responseAtMs).toISOString() : null;
+  const scheduledResolutionAt = Number.isFinite(appointmentAtMs) ? new Date(appointmentAtMs).toISOString() : null;
+  const recoveredAt = Number.isFinite(recoveredAtMs) ? new Date(recoveredAtMs).toISOString() : null;
   return {
     ...value,
     routineId,
     routineName: String(value?.routineName || value?.routine_name || "Sem rotina").trim() || "Sem rotina",
-    templateName: String(value?.templateName || value?.template_name || "Sem template").trim() || "Sem template",
+    templateName,
+    conversationId: String(value?.conversationId || value?.conversation_id || "").trim(),
     phone,
-    sentAt: Number.isFinite(sentAtMs) ? new Date(sentAtMs).toISOString() : null,
-    responded: Boolean(value?.responded),
-    responseAt: Number.isFinite(responseAtMs) ? new Date(responseAtMs).toISOString() : null,
+    sentAt,
+    responded: Boolean(value?.responded || firstResponseAt),
+    firstResponseAt,
+    responseAt: firstResponseAt,
     responseSource: value?.responseSource || value?.response_source || null,
-    appointment: Boolean(value?.appointment),
-    appointmentAt: Number.isFinite(appointmentAtMs) ? new Date(appointmentAtMs).toISOString() : null,
-    recovered: Boolean(value?.recovered),
-    recoveredAt: Number.isFinite(recoveredAtMs) ? new Date(recoveredAtMs).toISOString() : null,
+    appointment: Boolean(value?.appointment || scheduledResolutionAt),
+    scheduledResolutionAt,
+    scheduledResolutionType: String(
+      value?.scheduledResolutionType || value?.scheduled_resolution_type || value?.resolutionType || value?.resolution_type || "",
+    ).trim(),
+    appointmentAt: scheduledResolutionAt,
+    recovered: Boolean(value?.recovered || recoveredAt),
+    recoveredAt,
   };
 };
 
@@ -9746,12 +9828,24 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   const logs = Array.isArray(operationStore?.routines?.logs) ? operationStore.routines.logs : [];
   const customerIndex = buildDashboardCustomerPhoneIndex(operationStore.customers);
   const conversationPhoneById = resolveDashboardConversationPhoneById(store);
+  const clientMessagesByPhone = buildDashboardClientMessagesByPhone(store);
   const responseMetricTagIds = new Set(dashboardSettings.followUpResponseMetricTagIds.map(normalizeDashboardText).filter(Boolean));
-  const responseWindowMs = dashboardSettings.templateResponseWindowDays * 24 * 60 * 60 * 1000;
   const recoveryWindowMs = dashboardSettings.templateRecoveryWindowDays * 24 * 60 * 60 * 1000;
-  const scheduledPhones = new Set();
-  const recoveredPhones = new Set();
-  const respondedDispatchKeys = new Set();
+  const scheduledResolutionFacts = buildDashboardScheduledResolutionFacts(operationStore);
+  const scheduledFactsByConversationId = new Map();
+  const scheduledFactsByPhoneKey = new Map();
+  scheduledResolutionFacts.forEach((fact) => {
+    if (fact.conversationId) {
+      const current = scheduledFactsByConversationId.get(fact.conversationId) || [];
+      current.push(fact);
+      scheduledFactsByConversationId.set(fact.conversationId, current);
+    }
+    buildDashboardPhoneKeys(fact.phone).forEach((phoneKey) => {
+      const current = scheduledFactsByPhoneKey.get(phoneKey) || [];
+      current.push(fact);
+      scheduledFactsByPhoneKey.set(phoneKey, current);
+    });
+  });
   const dayStats = new Map();
   const ensureFollowUpDayStats = (dayKey) => {
     if (!dayStats.has(dayKey)) {
@@ -9811,6 +9905,14 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     };
   };
 
+  const matchesSelectedRule = (candidates = []) => matchesSelectedFilter(selectedRule, candidates);
+
+  const buildFactRuleCandidates = (fact = {}) => [
+    fact?.routineId,
+    fact?.routineName,
+    fact?.templateName,
+  ];
+
   const periodLogs = logs.filter((entry) => {
     const createdAtMs = Date.parse(String(entry?.createdAt || entry?.created_at || ""));
     return isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs) && isFollowUpLog(entry);
@@ -9834,14 +9936,25 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       const row = buildRoutineRow(routine, entry);
       if (!matchesSelectedFilter(selectedTemplate, [row.templateName, details.templateName, details.quickReplyTitle])) return null;
       if (!routineRows.has(row.routineId)) routineRows.set(row.routineId, row);
+      const conversationId = String(
+        details.conversationId ||
+          details.conversation_id ||
+          entry?.conversationId ||
+          entry?.conversation_id ||
+          "",
+      ).trim();
       return {
         entry,
         rowKey: row.routineId,
+        routineName: row.routineName,
+        templateName: row.templateName,
         phone: normalizePhone(details.phone || entry.phone || ""),
+        conversationId,
         sentAtMs: Date.parse(String(entry.createdAt || entry.created_at || "")),
       };
     })
-    .filter((item) => item && item.phone && Number.isFinite(item.sentAtMs));
+    .filter((item) => item && item.phone && Number.isFinite(item.sentAtMs))
+    .sort((left, right) => left.sentAtMs - right.sentAtMs);
 
   const summarySent = selectedTemplate || !allowSummaryFallback ? 0 : periodLogs.reduce((total, entry) => {
     if (entry?.summary && Number.isFinite(Number(entry.summary.sent))) return total + Number(entry.summary.sent || 0);
@@ -9864,7 +9977,85 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   (Array.isArray(storedFactsSource) ? storedFactsSource : [])
     .map(normalizeFollowUpDashboardFact)
     .filter((fact) => fact.phone && fact.sentAt)
-    .forEach((fact) => dispatchFactsByKey.set(getFollowUpDashboardFactKey(fact.routineId, fact.phone), fact));
+    .forEach((fact) =>
+      dispatchFactsByKey.set(
+        getFollowUpDashboardFactKey(fact.routineId, fact.phone, fact.sentAt, fact.templateName),
+        fact,
+      ),
+    );
+
+  const successLogsByPhone = new Map();
+  successLogs.forEach((item) => {
+    const current = successLogsByPhone.get(item.phone) || [];
+    current.push(item);
+    successLogsByPhone.set(item.phone, current);
+  });
+  successLogsByPhone.forEach((items, phone) => {
+    items.sort((left, right) => left.sentAtMs - right.sentAtMs);
+    items.forEach((item, index) => {
+      item.nextDispatchAtMs = items[index + 1]?.sentAtMs || Number.POSITIVE_INFINITY;
+    });
+    successLogsByPhone.set(phone, items);
+  });
+
+  const findScheduledFactForDispatch = ({
+    conversationId = "",
+    phone = "",
+    customerPhone = "",
+    sentAtMs = 0,
+    nextDispatchAtMs = Number.POSITIVE_INFINITY,
+  }) => {
+    const matchedFacts = new Map();
+    if (conversationId) {
+      (scheduledFactsByConversationId.get(conversationId) || []).forEach((fact) => {
+        matchedFacts.set(
+          fact.id || `${fact.conversationId}:${fact.phone}:${fact.resolvedAt}`,
+          fact,
+        );
+      });
+    }
+    const phoneKeys = new Set([
+      ...buildDashboardPhoneKeys(phone),
+      ...buildDashboardPhoneKeys(customerPhone),
+    ]);
+    phoneKeys.forEach((phoneKey) => {
+      (scheduledFactsByPhoneKey.get(phoneKey) || []).forEach((fact) => {
+        matchedFacts.set(
+          fact.id || `${fact.conversationId}:${fact.phone}:${fact.resolvedAt}`,
+          fact,
+        );
+      });
+    });
+    return Array.from(matchedFacts.values())
+      .filter((fact) => {
+        if (fact.resolvedAtMs < sentAtMs || fact.resolvedAtMs > sentAtMs + recoveryWindowMs) return false;
+        if (Number.isFinite(nextDispatchAtMs) && fact.resolvedAtMs >= nextDispatchAtMs) return false;
+        return true;
+      })
+      .sort((left, right) => left.resolvedAtMs - right.resolvedAtMs)[0] || null;
+  };
+
+  const findFirstClientResponseForDispatch = (dispatch = {}) => {
+    const messages = clientMessagesByPhone.get(dispatch.phone) || [];
+    return messages.find((message) => {
+      if (message.timestampMs <= dispatch.sentAtMs) return false;
+      if (Number.isFinite(dispatch.nextDispatchAtMs) && message.timestampMs >= dispatch.nextDispatchAtMs) return false;
+      if (dispatch.conversationId && message.conversationId && message.conversationId !== dispatch.conversationId) return false;
+      return true;
+    }) || null;
+  };
+
+  const findDispatchForFallbackEvent = (phone = "", eventAtMs = 0, conversationId = "") => {
+    const items = successLogsByPhone.get(phone) || [];
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+      const item = items[index];
+      if (item.sentAtMs > eventAtMs) continue;
+      if (Number.isFinite(item.nextDispatchAtMs) && eventAtMs >= item.nextDispatchAtMs) continue;
+      if (conversationId && item.conversationId && item.conversationId !== conversationId) continue;
+      return item;
+    }
+    return null;
+  };
 
   successLogs.forEach((item) => {
     const row = routineRows.get(item.rowKey);
@@ -9875,47 +10066,66 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     dayEntry.sent += 1;
 
     const customer = findDashboardCustomerByPhone(customerIndex, item.phone);
-    const { pendingMs, resolvedMs } = getDashboardCustomerAppointmentStatusDates(customer);
-    const hasPendingAppointment =
-      Number.isFinite(pendingMs) &&
-      pendingMs >= item.sentAtMs &&
-      pendingMs <= item.sentAtMs + recoveryWindowMs;
-    const hasResolvedAppointment =
+    const normalizedCustomerPhone = getDashboardCustomerPhone(customer) || item.phone;
+    const scheduledFact = findScheduledFactForDispatch({
+      conversationId: item.conversationId,
+      phone: item.phone,
+      customerPhone: normalizedCustomerPhone,
+      sentAtMs: item.sentAtMs,
+      nextDispatchAtMs: item.nextDispatchAtMs,
+    });
+    const resolvedMs = getDashboardCustomerLastResolvedAppointmentMs(customer);
+    const hasAppointment = Boolean(scheduledFact);
+    const hasRecovered =
+      Boolean(scheduledFact) &&
       Number.isFinite(resolvedMs) &&
-      resolvedMs >= item.sentAtMs &&
+      resolvedMs >= scheduledFact.resolvedAtMs &&
       resolvedMs <= item.sentAtMs + recoveryWindowMs;
-
-    const factKey = getFollowUpDashboardFactKey(item.rowKey, item.phone);
-    const hasAppointment = hasPendingAppointment || hasResolvedAppointment;
-    if (hasAppointment && !scheduledPhones.has(factKey)) {
-      scheduledPhones.add(factKey);
-      row.appointments += 1;
-      dayEntry.appointments += 1;
-    }
-    if (hasResolvedAppointment && !recoveredPhones.has(factKey)) {
-      recoveredPhones.add(factKey);
-      row.recovered += 1;
-      dayEntry.recovered += 1;
-    }
-    const previousFact = dispatchFactsByKey.get(factKey) || {};
+    const clientResponse = findFirstClientResponseForDispatch(item);
+    const sentAtIso = new Date(item.sentAtMs).toISOString();
+    const factKey = getFollowUpDashboardFactKey(item.rowKey, item.phone, sentAtIso, item.templateName);
+    const previousFact = normalizeFollowUpDashboardFact(dispatchFactsByKey.get(factKey) || {});
+    const storedScheduledType = String(previousFact?.scheduledResolutionType || "").trim();
+    const hasStoredScheduledFact =
+      Boolean(previousFact?.scheduledResolutionAt) &&
+      isDashboardScheduledResolutionType(storedScheduledType);
     dispatchFactsByKey.set(factKey, {
       ...previousFact,
       routineId: item.rowKey,
       routineName: row.routineName,
-      templateName: row.templateName,
+      templateName: item.templateName,
+      conversationId: item.conversationId || clientResponse?.conversationId || previousFact.conversationId || "",
       phone: item.phone,
-      sentAt: new Date(item.sentAtMs).toISOString(),
-      responded: Boolean(previousFact.responded),
-      responseAt: previousFact.responseAt || null,
-      responseSource: previousFact.responseSource || null,
-      appointment: Boolean(previousFact.appointment || hasAppointment),
-      appointmentAt: hasPendingAppointment
-        ? new Date(pendingMs).toISOString()
-        : hasResolvedAppointment
-          ? new Date(resolvedMs).toISOString()
-          : previousFact.appointmentAt || null,
-      recovered: Boolean(previousFact.recovered || hasResolvedAppointment),
-      recoveredAt: hasResolvedAppointment ? new Date(resolvedMs).toISOString() : previousFact.recoveredAt || null,
+      sentAt: sentAtIso,
+      responded: Boolean(clientResponse || previousFact.firstResponseAt || previousFact.responseAt),
+      firstResponseAt: clientResponse
+        ? new Date(clientResponse.timestampMs).toISOString()
+        : previousFact.firstResponseAt || previousFact.responseAt || null,
+      responseAt: clientResponse
+        ? new Date(clientResponse.timestampMs).toISOString()
+        : previousFact.firstResponseAt || previousFact.responseAt || null,
+      responseSource: clientResponse ? "client_inbound_message" : previousFact.responseSource || null,
+      appointment: Boolean(hasAppointment || hasStoredScheduledFact),
+      scheduledResolutionAt: hasAppointment
+        ? scheduledFact.resolvedAt
+        : previousFact.scheduledResolutionAt || previousFact.appointmentAt || null,
+      scheduledResolutionType: hasAppointment
+        ? scheduledFact.resolutionType
+        : previousFact.scheduledResolutionType || storedScheduledType || "",
+      appointmentAt: hasAppointment
+        ? scheduledFact.resolvedAt
+        : previousFact.scheduledResolutionAt || previousFact.appointmentAt || null,
+      recovered: Boolean(
+        hasRecovered ||
+          (
+            previousFact.recovered &&
+            (previousFact.scheduledResolutionAt || previousFact.appointmentAt) &&
+            isDashboardScheduledResolutionType(storedScheduledType)
+          )
+      ),
+      recoveredAt: hasRecovered
+        ? new Date(resolvedMs).toISOString()
+        : previousFact.recoveredAt || null,
     });
   });
 
@@ -9935,53 +10145,73 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     const phone = conversationPhoneById.get(conversationId);
     if (!phone || !Number.isFinite(eventAtMs)) return;
 
-    const matchedSend = successLogs
-      .filter((item) => item.phone === phone && item.sentAtMs <= eventAtMs && eventAtMs <= item.sentAtMs + responseWindowMs)
-      .sort((left, right) => right.sentAtMs - left.sentAtMs)[0];
-    if (!matchedSend) return;
+    const fallbackDispatch = findDispatchForFallbackEvent(phone, eventAtMs, conversationId);
+    if (!fallbackDispatch) return;
 
-    const responseKey = getFollowUpDashboardFactKey(matchedSend.rowKey, phone);
-    if (respondedDispatchKeys.has(responseKey)) return;
-    respondedDispatchKeys.add(responseKey);
-    const row = routineRows.get(matchedSend.rowKey);
-    if (row) row.responses += 1;
-    const fact = dispatchFactsByKey.get(responseKey) || {};
+    const responseKey = getFollowUpDashboardFactKey(
+      fallbackDispatch.rowKey,
+      phone,
+      new Date(fallbackDispatch.sentAtMs).toISOString(),
+      fallbackDispatch.templateName,
+    );
+    const fact = normalizeFollowUpDashboardFact(dispatchFactsByKey.get(responseKey) || {});
+    if (fact.firstResponseAt || fact.responseAt) return;
+    const row = routineRows.get(fallbackDispatch.rowKey);
     dispatchFactsByKey.set(responseKey, {
       ...fact,
-      routineId: matchedSend.rowKey,
+      routineId: fallbackDispatch.rowKey,
       routineName: row?.routineName || fact.routineName || "Sem rotina",
       templateName: row?.templateName || fact.templateName || "Sem template",
+      conversationId: conversationId || fact.conversationId || "",
       phone,
-      sentAt: new Date(matchedSend.sentAtMs).toISOString(),
+      sentAt: new Date(fallbackDispatch.sentAtMs).toISOString(),
       responded: true,
+      firstResponseAt: new Date(eventAtMs).toISOString(),
       responseAt: new Date(eventAtMs).toISOString(),
       responseSource: "chatbot_metric_tag",
     });
-    ensureFollowUpDayStats(new Date(eventAtMs).toISOString().slice(0, 10)).responses += 1;
   });
 
   for (const fact of dispatchFactsByKey.values()) {
     const normalizedFact = normalizeFollowUpDashboardFact(fact);
     const sentAtMs = Date.parse(String(normalizedFact.sentAt || ""));
     if (!Number.isFinite(sentAtMs) || !isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) continue;
+    if (!matchesSelectedRule(buildFactRuleCandidates(normalizedFact))) continue;
+    if (!matchesSelectedFilter(selectedTemplate, [normalizedFact.templateName])) continue;
+    if (!routineRows.has(normalizedFact.routineId)) {
+      routineRows.set(
+        normalizedFact.routineId,
+        buildRoutineRow(
+          {
+            id: normalizedFact.routineId,
+            name: normalizedFact.routineName,
+            templateName: normalizedFact.templateName,
+          },
+          null,
+        ),
+      );
+    }
     const row = routineRows.get(normalizedFact.routineId);
     if (!row) continue;
     if (!matchesSelectedFilter(selectedTemplate, [row.templateName])) continue;
-    const factKey = getFollowUpDashboardFactKey(normalizedFact.routineId, normalizedFact.phone);
-    if (normalizedFact.appointment && !scheduledPhones.has(factKey)) {
-      scheduledPhones.add(factKey);
+    const hasOfficialResponse = Boolean(normalizedFact.firstResponseAt || normalizedFact.responseAt);
+    const hasOfficialAppointment =
+      Boolean(normalizedFact.scheduledResolutionAt || normalizedFact.appointmentAt) &&
+      isDashboardScheduledResolutionType(normalizedFact.scheduledResolutionType || "");
+    const hasOfficialRecovery =
+      hasOfficialAppointment &&
+      Boolean(normalizedFact.recoveredAt);
+    if (hasOfficialAppointment) {
       row.appointments += 1;
-      ensureFollowUpDayStats((normalizedFact.appointmentAt || normalizedFact.sentAt).slice(0, 10)).appointments += 1;
+      ensureFollowUpDayStats((normalizedFact.scheduledResolutionAt || normalizedFact.appointmentAt || normalizedFact.sentAt).slice(0, 10)).appointments += 1;
     }
-    if (normalizedFact.recovered && !recoveredPhones.has(factKey)) {
-      recoveredPhones.add(factKey);
+    if (hasOfficialRecovery) {
       row.recovered += 1;
-      ensureFollowUpDayStats((normalizedFact.recoveredAt || normalizedFact.sentAt).slice(0, 10)).recovered += 1;
+      ensureFollowUpDayStats((normalizedFact.recoveredAt || normalizedFact.scheduledResolutionAt || normalizedFact.sentAt).slice(0, 10)).recovered += 1;
     }
-    if (normalizedFact.responded && !respondedDispatchKeys.has(factKey)) {
-      respondedDispatchKeys.add(factKey);
+    if (hasOfficialResponse) {
       row.responses += 1;
-      ensureFollowUpDayStats((normalizedFact.responseAt || normalizedFact.sentAt).slice(0, 10)).responses += 1;
+      ensureFollowUpDayStats((normalizedFact.firstResponseAt || normalizedFact.responseAt || normalizedFact.sentAt).slice(0, 10)).responses += 1;
     }
   }
 
@@ -9996,7 +10226,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
 
   const bestTemplate = templateRows.find((item) => item.responses > 0)?.templateName || templateRows[0]?.templateName || "";
-  const totalResponses = respondedDispatchKeys.size;
+  const totalResponses = templateRows.reduce((total, item) => total + Number(item.responses || 0), 0);
   const totalAppointments = templateRows.reduce((total, item) => total + Number(item.appointments || 0), 0);
   const totalRecovered = templateRows.reduce((total, item) => total + Number(item.recovered || 0), 0);
   enumerateDashboardDayKeys(normalizedStartMs, normalizedEndMs).forEach((dayKey) => {
@@ -10031,6 +10261,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       .filter((fact) => {
         const sentAtMs = Date.parse(String(fact.sentAt || ""));
         if (!isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) return false;
+        if (!matchesSelectedRule(buildFactRuleCandidates(fact))) return false;
         const row = routineRows.get(fact.routineId);
         return row && matchesSelectedFilter(selectedTemplate, [row.templateName]);
       })
@@ -10042,7 +10273,12 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       templateRecoveryWindowDays: dashboardSettings.templateRecoveryWindowDays,
       selectedRule: filters.rule || "",
       selectedTemplate: filters.template || "",
-      responseSource: "client_reply_or_chatbot_metric_tag",
+      routineSelectionSource: "followUpRoutineNameKeywords",
+      responseSource: "first_client_inbound_message",
+      responseWindowDays: "unlimited",
+      metricTagFallbackEnabled: responseMetricTagIds.size > 0,
+      appointmentSource: "attendanceResolutionFacts",
+      recoveredSource: "attendanceResolutionFacts + AppBarber resolved appointment",
     },
   };
 };
