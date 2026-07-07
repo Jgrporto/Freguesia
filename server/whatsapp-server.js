@@ -9704,6 +9704,26 @@ const DASHBOARD_SCHEDULED_RESOLUTION_TYPES = new Set([
 const isDashboardScheduledResolutionType = (value = "") =>
   DASHBOARD_SCHEDULED_RESOLUTION_TYPES.has(normalizeDashboardText(value));
 
+const resolveDashboardScheduledResolutionFactPhone = (value = {}) => {
+  const directPhone = normalizePhone(
+    value?.phone ||
+      value?.customerPhone ||
+      value?.customer_phone ||
+      "",
+  );
+  if (directPhone) return directPhone;
+
+  const conversationId = String(value?.conversationId || value?.conversation_id || "").trim();
+  if (!conversationId) return "";
+
+  return normalizePhone(
+    conversationId
+      .replace(/^agg-/i, "")
+      .replace(/^wa-/i, "")
+      .replace(/^conversation[-_:]/i, ""),
+  );
+};
+
 const normalizeDashboardScheduledResolutionFact = (value = {}) => {
   const resolvedAtMs = Date.parse(String(value?.resolvedAt || value?.resolved_at || ""));
   if (!Number.isFinite(resolvedAtMs)) return null;
@@ -9713,7 +9733,7 @@ const normalizeDashboardScheduledResolutionFact = (value = {}) => {
     ...value,
     id: String(value?.id || "").trim(),
     conversationId: String(value?.conversationId || value?.conversation_id || "").trim(),
-    phone: normalizePhone(value?.phone || ""),
+    phone: resolveDashboardScheduledResolutionFactPhone(value),
     resolutionType,
     resolvedAt: new Date(resolvedAtMs).toISOString(),
     resolvedAtMs,
