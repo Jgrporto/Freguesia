@@ -7559,6 +7559,7 @@ const normalizeDashboardPersistedAdCustomers = (value = []) =>
       const stageId = String(item?.stageId || "conversation").trim();
       const firstScheduledAt = String(item?.firstScheduledAt || item?.appointmentAt || "").trim();
       const firstAttendedAt = String(item?.firstAttendedAt || item?.resolvedAt || "").trim();
+      const inferredAttendanceStatusId = firstAttendedAt ? "attended" : "not_attended";
       const inferredStatusId =
         stageId === "appointment" || stageId === "appbarber_customer" || stageId === "new_customer" || firstScheduledAt || firstAttendedAt
           ? "customer"
@@ -7573,6 +7574,8 @@ const normalizeDashboardPersistedAdCustomers = (value = []) =>
         stageLabel: String(item?.stageLabel || "Conversa").trim(),
         statusId,
         statusLabel: String(item?.statusLabel || (statusId === "customer" ? "CLIENTE" : "LEAD")).trim(),
+        attendanceStatusId: String(item?.attendanceStatusId || inferredAttendanceStatusId).trim() || inferredAttendanceStatusId,
+        attendanceStatusLabel: String(item?.attendanceStatusLabel || (firstAttendedAt ? "Compareceu" : "Não Compareceu")).trim(),
         firstAdSeenAt: String(item?.firstAdSeenAt || "").trim(),
         lastAdSeenAt: String(item?.lastAdSeenAt || "").trim(),
         lastMessageAt: String(item?.lastMessageAt || "").trim(),
@@ -7625,6 +7628,53 @@ const upsertDashboardAdCustomerRecords = (operationStore = {}, records = []) => 
     .slice(0, 2000);
   operationStore.dashboardAdCustomers = nextItems;
   return { mutated, items: nextItems };
+};
+
+const applyDashboardAcquisitionAttendanceState = (item = {}, override = null) => {
+  const manualStatusId = String(override?.manualAttendanceStatusId || "").trim().toLowerCase();
+  const manualScheduledAt = String(override?.manualScheduledAt || "").trim();
+  const manualAttendedAt = String(override?.manualAttendedAt || "").trim();
+  const currentScheduledAt = String(item?.firstScheduledAt || item?.appointmentAt || "").trim();
+  const currentAttendedAt = String(item?.firstAttendedAt || item?.resolvedAt || "").trim();
+
+  let effectiveScheduledAt = manualScheduledAt || currentScheduledAt;
+  let effectiveAttendedAt = manualAttendedAt || currentAttendedAt;
+
+  if (manualStatusId === "not_attended" && !manualScheduledAt && !manualAttendedAt) {
+    effectiveScheduledAt = "";
+    effectiveAttendedAt = "";
+  }
+  if (!effectiveScheduledAt && effectiveAttendedAt) {
+    effectiveScheduledAt = effectiveAttendedAt;
+  }
+
+  const attendanceStatusId =
+    manualStatusId === "attended"
+      ? "attended"
+      : manualStatusId === "not_attended"
+        ? "not_attended"
+        : effectiveAttendedAt
+          ? "attended"
+          : "not_attended";
+
+  return {
+    ...item,
+    firstScheduledAt: effectiveScheduledAt,
+    appointmentAt: effectiveScheduledAt,
+    firstAttendedAt: attendanceStatusId === "attended" ? effectiveAttendedAt : "",
+    resolvedAt: attendanceStatusId === "attended" ? effectiveAttendedAt : "",
+    attendanceStatusId,
+    attendanceStatusLabel:
+      String(override?.manualAttendanceStatusLabel || "").trim() || (attendanceStatusId === "attended" ? "Compareceu" : "Não Compareceu"),
+  };
+};
+
+const applyDashboardAcquisitionManualOverrides = (items = [], settings = {}) => {
+  const overrides = normalizeDashboardSettings(settings).acquisitionManualOverrides;
+  const overrideByPhone = new Map(overrides.map((item) => [normalizePhone(item.phone), item]));
+  return normalizeDashboardPersistedAdCustomers(items).map((item) =>
+    applyDashboardAcquisitionAttendanceState(item, overrideByPhone.get(normalizePhone(item.phone)) || null),
+  );
 };
 
 const resolveDashboardConversationPhone = (conversation = {}, conversationId = "") =>
@@ -8138,6 +8188,53 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   adKeywords: ["anuncio", "anúncio", "facebook", "instagram", "utm_", "fbclid", "ctwa"],
   adAttributionWindowDays: 45,
   appointmentAttributionWindowDays: 60,
+  acquisitionManualOverrides: [
+    {
+      phone: "5524981521393",
+      manualAttendanceStatusId: "attended",
+      manualAttendanceStatusLabel: "Compareceu",
+      manualScheduledAt: "2026-06-30T10:50:21.439Z",
+      manualAttendedAt: "2026-06-30T13:50:21.439Z",
+      notes: "Override manual de aquisicao",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+    },
+    {
+      phone: "5524998795905",
+      manualAttendanceStatusId: "attended",
+      manualAttendanceStatusLabel: "Compareceu",
+      manualScheduledAt: "2026-07-04T10:54:02.708Z",
+      manualAttendedAt: "2026-07-04T13:54:02.708Z",
+      notes: "Override manual de aquisicao",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+    },
+    {
+      phone: "5524993197990",
+      manualAttendanceStatusId: "attended",
+      manualAttendanceStatusLabel: "Compareceu",
+      manualScheduledAt: "2026-06-28T11:04:33.887Z",
+      manualAttendedAt: "2026-06-28T14:04:33.887Z",
+      notes: "Override manual de aquisicao",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+    },
+    {
+      phone: "5524992478084",
+      manualAttendanceStatusId: "attended",
+      manualAttendanceStatusLabel: "Compareceu",
+      manualScheduledAt: "2026-06-16T17:31:10.643Z",
+      manualAttendedAt: "2026-06-16T20:31:10.643Z",
+      notes: "Override manual de aquisicao",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+    },
+    {
+      phone: "5524999778266",
+      manualAttendanceStatusId: "not_attended",
+      manualAttendanceStatusLabel: "Não Compareceu",
+      manualScheduledAt: "",
+      manualAttendedAt: "",
+      notes: "Override manual de aquisicao",
+      updatedAt: "2026-07-07T00:00:00.000Z",
+    },
+  ],
   metaAcquisitionHistoryStartDate: META_ACQUISITION_HISTORY_START_DATE || "2010-01-01",
   metaAcquisitionSyncIntervalHours: META_ACQUISITION_SYNC_INTERVAL_HOURS_DEFAULT,
   metaAcquisitionRecentResyncDays: Math.max(1, META_ACQUISITION_RECENT_RESYNC_DAYS || 7),
@@ -8183,6 +8280,31 @@ const normalizeDashboardDateString = (value, fallback) => {
   return Number.isFinite(Date.parse(`${candidate}T00:00:00.000Z`)) ? candidate : fallback;
 };
 
+const normalizeDashboardAcquisitionManualOverrides = (value, fallback = []) => {
+  const source = Array.isArray(value) ? value : [];
+  const normalized = source
+    .map((item) => {
+      const phone = normalizePhone(item?.phone || "");
+      if (!phone) return null;
+      const manualAttendanceStatusId = String(item?.manualAttendanceStatusId || "").trim().toLowerCase();
+      const safeStatusId = manualAttendanceStatusId === "attended" ? "attended" : "not_attended";
+      const manualScheduledAt = String(item?.manualScheduledAt || "").trim();
+      const manualAttendedAt = String(item?.manualAttendedAt || "").trim();
+      return {
+        phone,
+        manualAttendanceStatusId: safeStatusId,
+        manualAttendanceStatusLabel:
+          String(item?.manualAttendanceStatusLabel || "").trim() || (safeStatusId === "attended" ? "Compareceu" : "Não Compareceu"),
+        manualScheduledAt: Number.isFinite(Date.parse(manualScheduledAt)) ? manualScheduledAt : "",
+        manualAttendedAt: Number.isFinite(Date.parse(manualAttendedAt)) ? manualAttendedAt : "",
+        notes: String(item?.notes || "").trim(),
+        updatedAt: String(item?.updatedAt || "").trim() || null,
+      };
+    })
+    .filter(Boolean);
+  return normalized.length ? normalized : [...fallback];
+};
+
 const normalizeDashboardSettings = (value = {}) => {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return {
@@ -8199,6 +8321,10 @@ const normalizeDashboardSettings = (value = {}) => {
       DASHBOARD_SETTINGS_DEFAULT.appointmentAttributionWindowDays,
       1,
       365,
+    ),
+    acquisitionManualOverrides: normalizeDashboardAcquisitionManualOverrides(
+      source.acquisitionManualOverrides,
+      DASHBOARD_SETTINGS_DEFAULT.acquisitionManualOverrides,
     ),
     metaAcquisitionHistoryStartDate: normalizeDashboardDateString(
       source.metaAcquisitionHistoryStartDate,
@@ -9397,15 +9523,17 @@ const buildAcquisitionDashboardMetrics = async (
           localByAdId.set(adId, localStats);
         }
       }
-      if (
-        hasAppointment &&
-        Number.isFinite(resolvedMs) &&
-        Number.isFinite(scheduledResolutionAtMs) &&
-        resolvedMs >= scheduledResolutionAtMs &&
-        isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)
-      ) {
+      if (Number.isFinite(resolvedMs) && isWithinDashboardRange(resolvedMs, normalizedStartMs, normalizedEndMs)) {
         resolvedAt = new Date(resolvedMs).toISOString();
         hasAttendance = true;
+        if (!hasAppointment) {
+          hasAppointment = true;
+          appointmentAt = resolvedAt;
+          if (localStats) {
+            localStats.localAppointments += 1;
+            localByAdId.set(adId, localStats);
+          }
+        }
       }
       const registrationMs = getDashboardCustomerRegistrationMs(customer);
       if (
@@ -9435,6 +9563,8 @@ const buildAcquisitionDashboardMetrics = async (
         stageLabel: stage.label,
         statusId,
         statusLabel,
+        attendanceStatusId: resolvedAt ? "attended" : "not_attended",
+        attendanceStatusLabel: resolvedAt ? "Compareceu" : "Não Compareceu",
         firstAdSeenAt: new Date(firstAdSeenAtMs).toISOString(),
         lastAdSeenAt: new Date(Math.max(adSignal.lastSignalAtMs || 0, lastMessageAtMs || 0, firstAdSeenAtMs)).toISOString(),
         lastMessageAt: lastMessageAtMs > 0 ? new Date(lastMessageAtMs).toISOString() : "",
@@ -9466,7 +9596,7 @@ const buildAcquisitionDashboardMetrics = async (
     });
   }
 
-  const currentCustomers = normalizeDashboardPersistedAdCustomers(adCustomerRecords).sort(
+  const currentCustomers = applyDashboardAcquisitionManualOverrides(adCustomerRecords, dashboardSettings).sort(
     (left, right) =>
       Date.parse(right.lastAdSeenAt || right.firstAdSeenAt || "") - Date.parse(left.lastAdSeenAt || left.firstAdSeenAt || ""),
   );
@@ -9474,10 +9604,34 @@ const buildAcquisitionDashboardMetrics = async (
   currentCustomers.forEach((item) => {
     mergedCustomersById.set(item.id, { ...(mergedCustomersById.get(item.id) || {}), ...item });
   });
-  const mergedCustomers = Array.from(mergedCustomersById.values()).sort(
+  const mergedCustomers = applyDashboardAcquisitionManualOverrides(Array.from(mergedCustomersById.values()), dashboardSettings).sort(
     (left, right) =>
       Date.parse(right.lastAdSeenAt || right.firstAdSeenAt || "") - Date.parse(left.lastAdSeenAt || left.firstAdSeenAt || ""),
   );
+  const mergedLocalByAdId = new Map();
+  const mergedKeywordStats = new Map();
+  mergedCustomers.forEach((item) => {
+    const adId = String(item?.adId || "").trim();
+    if (!adId) return;
+    const current = mergedLocalByAdId.get(adId) || { localConversations: 0, localAppointments: 0, localCustomers: 0 };
+    current.localConversations += 1;
+    if (item?.phone) current.localCustomers += 1;
+    if (item?.firstScheduledAt || item?.appointmentAt) current.localAppointments += 1;
+    mergedLocalByAdId.set(adId, current);
+  });
+  mergedCustomers.forEach((item) => {
+    const keywordKeys =
+      Array.isArray(item?.keywords) && item.keywords.length
+        ? item.keywords
+        : [item?.adId || item?.sourceId ? "referral_meta" : "sem_palavra"];
+    keywordKeys.forEach((keyword) => {
+      const current = mergedKeywordStats.get(keyword) || { keyword, conversations: 0, customers: 0, appointments: 0 };
+      current.conversations += 1;
+      if (item?.phone) current.customers += 1;
+      if (item?.firstScheduledAt || item?.appointmentAt) current.appointments += 1;
+      mergedKeywordStats.set(keyword, current);
+    });
+  });
   const liveConversationsStarted = whatsappConversationIds.size;
   const persistedConversationsStarted = mergedCustomers.length;
   const conversationsStarted = Math.max(liveConversationsStarted, persistedConversationsStarted);
@@ -9498,12 +9652,12 @@ const buildAcquisitionDashboardMetrics = async (
   ).size;
   const newCustomers = Math.max(liveNewCustomers, persistedNewCustomersCount);
   const spend = filteredMetaRows.reduce((total, row) => total + (Number(row?.spend || 0) || 0), 0);
-  const persistedAdCustomers = upsertDashboardAdCustomerRecords(operationStore, adCustomerRecords);
+  const persistedAdCustomers = upsertDashboardAdCustomerRecords(operationStore, currentCustomers);
   if (mutationState && persistedAdCustomers.mutated) {
     mutationState.mutated = true;
   }
   const ads = filteredMetaRows.map((row) => {
-    const local = localByAdId.get(row.adId) || {};
+    const local = mergedLocalByAdId.get(row.adId) || localByAdId.get(row.adId) || {};
     return {
       ...row,
       officialClicks: getOfficialMetaAdClicks(row),
@@ -9580,7 +9734,7 @@ const buildAcquisitionDashboardMetrics = async (
     adCustomers: mergedCustomers,
     customers: mergedCustomers,
     ads,
-    byKeyword: Array.from(keywordStats.values()).sort(
+    byKeyword: Array.from(mergedKeywordStats.values()).sort(
       (left, right) => right.conversations - left.conversations || right.appointments - left.appointments,
     ),
     filters: {

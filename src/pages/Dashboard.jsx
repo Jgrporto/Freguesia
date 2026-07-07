@@ -819,8 +819,8 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
     const normalizedSearch = search.trim().toLowerCase();
 
     return (Array.isArray(items) ? items : []).filter((item) => {
-      const matchesStatus = statusFilter === 'all' || String(item.statusId || '') === statusFilter;
-      const haystack = [item.name, item.phone, item.statusLabel, item.campaignName, item.adsetName, item.adName, item.headline]
+      const matchesStatus = statusFilter === 'all' || String(item.attendanceStatusId || '') === statusFilter;
+      const haystack = [item.name, item.phone, item.attendanceStatusLabel, item.campaignName, item.adsetName, item.adName, item.headline]
         .join(' ')
         .toLowerCase();
       const matchesSearch = !normalizedSearch || haystack.includes(normalizedSearch);
@@ -866,8 +866,8 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-xs font-semibold text-foreground outline-none transition-colors focus:border-primary/50"
             >
               <option value="all">Todos</option>
-              <option value="customer">CLIENTE</option>
-              <option value="lead">LEAD</option>
+              <option value="attended">Compareceu</option>
+              <option value="not_attended">Não Compareceu</option>
             </select>
           </label>
           <label className="space-y-1 text-xs font-semibold text-muted-foreground sm:w-44">
@@ -932,7 +932,7 @@ function AcquisitionCustomersTable({ items = [], onPreviewConversation }) {
                     </td>
                     <td className="px-4 py-3 align-middle">
                       <span className="inline-flex max-w-full items-center rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold text-primary">
-                        <span className="truncate">{item.statusLabel || 'LEAD'}</span>
+                        <span className="truncate">{item.attendanceStatusLabel || 'Não Compareceu'}</span>
                       </span>
                     </td>
                     <td className="px-4 py-3 align-middle text-muted-foreground">

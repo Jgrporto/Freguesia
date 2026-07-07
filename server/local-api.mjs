@@ -112,6 +112,53 @@ const DASHBOARD_SETTINGS_DEFAULT = {
   adKeywords: ['anuncio', 'anúncio', 'facebook', 'instagram', 'utm_', 'fbclid', 'ctwa'],
   adAttributionWindowDays: 45,
   appointmentAttributionWindowDays: 60,
+  acquisitionManualOverrides: [
+    {
+      phone: '5524981521393',
+      manualAttendanceStatusId: 'attended',
+      manualAttendanceStatusLabel: 'Compareceu',
+      manualScheduledAt: '2026-06-30T10:50:21.439Z',
+      manualAttendedAt: '2026-06-30T13:50:21.439Z',
+      notes: 'Override manual de aquisicao',
+      updatedAt: '2026-07-07T00:00:00.000Z',
+    },
+    {
+      phone: '5524998795905',
+      manualAttendanceStatusId: 'attended',
+      manualAttendanceStatusLabel: 'Compareceu',
+      manualScheduledAt: '2026-07-04T10:54:02.708Z',
+      manualAttendedAt: '2026-07-04T13:54:02.708Z',
+      notes: 'Override manual de aquisicao',
+      updatedAt: '2026-07-07T00:00:00.000Z',
+    },
+    {
+      phone: '5524993197990',
+      manualAttendanceStatusId: 'attended',
+      manualAttendanceStatusLabel: 'Compareceu',
+      manualScheduledAt: '2026-06-28T11:04:33.887Z',
+      manualAttendedAt: '2026-06-28T14:04:33.887Z',
+      notes: 'Override manual de aquisicao',
+      updatedAt: '2026-07-07T00:00:00.000Z',
+    },
+    {
+      phone: '5524992478084',
+      manualAttendanceStatusId: 'attended',
+      manualAttendanceStatusLabel: 'Compareceu',
+      manualScheduledAt: '2026-06-16T17:31:10.643Z',
+      manualAttendedAt: '2026-06-16T20:31:10.643Z',
+      notes: 'Override manual de aquisicao',
+      updatedAt: '2026-07-07T00:00:00.000Z',
+    },
+    {
+      phone: '5524999778266',
+      manualAttendanceStatusId: 'not_attended',
+      manualAttendanceStatusLabel: 'Não Compareceu',
+      manualScheduledAt: '',
+      manualAttendedAt: '',
+      notes: 'Override manual de aquisicao',
+      updatedAt: '2026-07-07T00:00:00.000Z',
+    },
+  ],
   metaAcquisitionHistoryStartDate: String(process.env.META_ACQUISITION_HISTORY_START_DATE || '2010-01-01').trim() || '2010-01-01',
   metaAcquisitionSyncIntervalHours: Math.min(
     720,
@@ -2498,6 +2545,31 @@ const normalizeDashboardDateString = (value, fallback) => {
   return Number.isFinite(Date.parse(`${candidate}T00:00:00.000Z`)) ? candidate : fallback;
 };
 
+const normalizeDashboardAcquisitionManualOverrides = (value, fallback = []) => {
+  const source = Array.isArray(value) ? value : [];
+  const normalized = source
+    .map((item) => {
+      const phone = String(item?.phone || '').replace(/\D/g, '');
+      if (!phone) return null;
+      const manualAttendanceStatusId = String(item?.manualAttendanceStatusId || '').trim().toLowerCase();
+      const safeStatusId = manualAttendanceStatusId === 'attended' ? 'attended' : 'not_attended';
+      const manualScheduledAt = String(item?.manualScheduledAt || '').trim();
+      const manualAttendedAt = String(item?.manualAttendedAt || '').trim();
+      return {
+        phone,
+        manualAttendanceStatusId: safeStatusId,
+        manualAttendanceStatusLabel:
+          String(item?.manualAttendanceStatusLabel || '').trim() || (safeStatusId === 'attended' ? 'Compareceu' : 'Não Compareceu'),
+        manualScheduledAt: Number.isFinite(Date.parse(manualScheduledAt)) ? manualScheduledAt : '',
+        manualAttendedAt: Number.isFinite(Date.parse(manualAttendedAt)) ? manualAttendedAt : '',
+        notes: String(item?.notes || '').trim(),
+        updatedAt: String(item?.updatedAt || '').trim() || null,
+      };
+    })
+    .filter(Boolean);
+  return normalized.length ? normalized : [...fallback];
+};
+
 const normalizeDashboardSettings = (value = {}) => {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
@@ -2514,6 +2586,10 @@ const normalizeDashboardSettings = (value = {}) => {
       DASHBOARD_SETTINGS_DEFAULT.appointmentAttributionWindowDays,
       1,
       365,
+    ),
+    acquisitionManualOverrides: normalizeDashboardAcquisitionManualOverrides(
+      source.acquisitionManualOverrides,
+      DASHBOARD_SETTINGS_DEFAULT.acquisitionManualOverrides,
     ),
     metaAcquisitionHistoryStartDate: normalizeDashboardDateString(
       source.metaAcquisitionHistoryStartDate,
