@@ -9933,9 +9933,10 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     fact?.templateName,
   ];
 
-  const periodLogs = logs.filter((entry) => {
+  const followUpLogs = logs.filter((entry) => isFollowUpLog(entry));
+  const periodLogs = followUpLogs.filter((entry) => {
     const createdAtMs = Date.parse(String(entry?.createdAt || entry?.created_at || ""));
-    return isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs) && isFollowUpLog(entry);
+    return isWithinDashboardRange(createdAtMs, normalizedStartMs, normalizedEndMs);
   });
 
   const routineRows = new Map();
@@ -9944,7 +9945,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     routineRows.set(row.routineId, row);
   });
 
-  const successLogs = periodLogs
+  const successLogs = followUpLogs
     .filter((entry) => {
       const status = String(entry.status || entry.level || "").toLowerCase();
       const details = entry?.details && typeof entry.details === "object" ? entry.details : {};
@@ -9988,7 +9989,6 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     if (entry?.summary && Number.isFinite(Number(entry.summary.skipped))) return total + Number(entry.summary.skipped || 0);
     return total;
   }, 0);
-  const sent = successLogs.length || summarySent;
   const storedFactsSource =
     operationStore?.dashboardFacts?.followup?.dispatchFacts ||
     operationStore?.dashboardFacts?.followup?.facts ||
@@ -10078,13 +10078,6 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   };
 
   successLogs.forEach((item) => {
-    const row = routineRows.get(item.rowKey);
-    if (!row) return;
-    row.sent += 1;
-    const sentDay = new Date(item.sentAtMs).toISOString().slice(0, 10);
-    const dayEntry = ensureFollowUpDayStats(sentDay);
-    dayEntry.sent += 1;
-
     const customer = findDashboardCustomerByPhone(customerIndex, item.phone);
     const normalizedCustomerPhone = getDashboardCustomerPhone(customer) || item.phone;
     const scheduledFact = findScheduledFactForDispatch({
@@ -10112,7 +10105,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     dispatchFactsByKey.set(factKey, {
       ...previousFact,
       routineId: item.rowKey,
-      routineName: row.routineName,
+      routineName: item.routineName || previousFact.routineName || "Sem rotina",
       templateName: item.templateName,
       conversationId: item.conversationId || clientResponse?.conversationId || previousFact.conversationId || "",
       phone: item.phone,
@@ -10195,7 +10188,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   for (const fact of dispatchFactsByKey.values()) {
     const normalizedFact = normalizeFollowUpDashboardFact(fact);
     const sentAtMs = Date.parse(String(normalizedFact.sentAt || ""));
-    if (!Number.isFinite(sentAtMs) || !isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) continue;
+    if (!Number.isFinite(sentAtMs)) continue;
     if (!matchesSelectedRule(buildFactRuleCandidates(normalizedFact))) continue;
     if (!matchesSelectedFilter(selectedTemplate, [normalizedFact.templateName])) continue;
     if (!routineRows.has(normalizedFact.routineId)) {
@@ -10214,22 +10207,31 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     const row = routineRows.get(normalizedFact.routineId);
     if (!row) continue;
     if (!matchesSelectedFilter(selectedTemplate, [row.templateName])) continue;
-    const hasOfficialResponse = Boolean(normalizedFact.firstResponseAt || normalizedFact.responseAt);
-    const hasOfficialAppointment =
-      Boolean(normalizedFact.scheduledResolutionAt || normalizedFact.appointmentAt) &&
-      isDashboardScheduledResolutionType(normalizedFact.scheduledResolutionType || "");
-    const hasOfficialRecovery =
-      hasOfficialAppointment &&
-      Boolean(normalizedFact.recoveredAt);
-    if (hasOfficialAppointment) {
+    const firstResponseAtMs = Date.parse(String(normalizedFact.firstResponseAt || normalizedFact.responseAt || ""));
+    const scheduledResolutionAtMs = Date.parse(String(normalizedFact.scheduledResolutionAt || normalizedFact.appointmentAt || ""));
+    const recoveredAtMs = Date.parse(String(normalizedFact.recoveredAt || ""));
+    const dispatchPeriodMatch = isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs);
+    const responsePeriodMatch = isWithinDashboardRange(firstResponseAtMs, normalizedStartMs, normalizedEndMs);
+    const appointmentPeriodMatch =
+      isDashboardScheduledResolutionType(normalizedFact.scheduledResolutionType || "") &&
+      isWithinDashboardRange(scheduledResolutionAtMs, normalizedStartMs, normalizedEndMs);
+    const recoveryPeriodMatch =
+      isDashboardScheduledResolutionType(normalizedFact.scheduledResolutionType || "") &&
+      isWithinDashboardRange(recoveredAtMs, normalizedStartMs, normalizedEndMs);
+    if (!dispatchPeriodMatch && !responsePeriodMatch && !appointmentPeriodMatch && !recoveryPeriodMatch) continue;
+    if (dispatchPeriodMatch) {
+      row.sent += 1;
+      ensureFollowUpDayStats((normalizedFact.sentAt || "").slice(0, 10)).sent += 1;
+    }
+    if (appointmentPeriodMatch) {
       row.appointments += 1;
       ensureFollowUpDayStats((normalizedFact.scheduledResolutionAt || normalizedFact.appointmentAt || normalizedFact.sentAt).slice(0, 10)).appointments += 1;
     }
-    if (hasOfficialRecovery) {
+    if (recoveryPeriodMatch) {
       row.recovered += 1;
       ensureFollowUpDayStats((normalizedFact.recoveredAt || normalizedFact.scheduledResolutionAt || normalizedFact.sentAt).slice(0, 10)).recovered += 1;
     }
-    if (hasOfficialResponse) {
+    if (responsePeriodMatch) {
       row.responses += 1;
       ensureFollowUpDayStats((normalizedFact.firstResponseAt || normalizedFact.responseAt || normalizedFact.sentAt).slice(0, 10)).responses += 1;
     }
@@ -10246,6 +10248,8 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     .sort((left, right) => right.responses - left.responses || right.recovered - left.recovered || right.sent - left.sent);
 
   const bestTemplate = templateRows.find((item) => item.responses > 0)?.templateName || templateRows[0]?.templateName || "";
+  const sentFromFacts = templateRows.reduce((total, item) => total + Number(item.sent || 0), 0);
+  const sent = sentFromFacts || summarySent;
   const totalResponses = templateRows.reduce((total, item) => total + Number(item.responses || 0), 0);
   const totalAppointments = templateRows.reduce((total, item) => total + Number(item.appointments || 0), 0);
   const totalRecovered = templateRows.reduce((total, item) => total + Number(item.recovered || 0), 0);
@@ -10277,13 +10281,29 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     byTemplate: templateRows,
     byDay,
     dispatchFacts: Array.from(dispatchFactsByKey.values())
-      .map(normalizeFollowUpDashboardFact)
+      .map((fact) => {
+        const normalizedFact = normalizeFollowUpDashboardFact(fact);
+        const sentAtMs = Date.parse(String(normalizedFact.sentAt || ""));
+        const firstResponseAtMs = Date.parse(String(normalizedFact.firstResponseAt || normalizedFact.responseAt || ""));
+        const scheduledResolutionAtMs = Date.parse(String(normalizedFact.scheduledResolutionAt || normalizedFact.appointmentAt || ""));
+        const recoveredAtMs = Date.parse(String(normalizedFact.recoveredAt || ""));
+        return {
+          ...normalizedFact,
+          dispatchPeriodMatch: isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs),
+          responsePeriodMatch: isWithinDashboardRange(firstResponseAtMs, normalizedStartMs, normalizedEndMs),
+          appointmentPeriodMatch:
+            isDashboardScheduledResolutionType(normalizedFact.scheduledResolutionType || "") &&
+            isWithinDashboardRange(scheduledResolutionAtMs, normalizedStartMs, normalizedEndMs),
+          recoveryPeriodMatch:
+            isDashboardScheduledResolutionType(normalizedFact.scheduledResolutionType || "") &&
+            isWithinDashboardRange(recoveredAtMs, normalizedStartMs, normalizedEndMs),
+        };
+      })
       .filter((fact) => {
-        const sentAtMs = Date.parse(String(fact.sentAt || ""));
-        if (!isWithinDashboardRange(sentAtMs, normalizedStartMs, normalizedEndMs)) return false;
         if (!matchesSelectedRule(buildFactRuleCandidates(fact))) return false;
         const row = routineRows.get(fact.routineId);
-        return row && matchesSelectedFilter(selectedTemplate, [row.templateName]);
+        if (!row || !matchesSelectedFilter(selectedTemplate, [row.templateName])) return false;
+        return fact.dispatchPeriodMatch || fact.responsePeriodMatch || fact.appointmentPeriodMatch || fact.recoveryPeriodMatch;
       })
       .slice(0, 500),
     settings: {
@@ -10299,6 +10319,10 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       metricTagFallbackEnabled: responseMetricTagIds.size > 0,
       appointmentSource: "attendanceResolutionFacts",
       recoveredSource: "attendanceResolutionFacts + AppBarber resolved appointment",
+      sentPeriodBase: "sentAt",
+      responsePeriodBase: "firstResponseAt",
+      appointmentPeriodBase: "scheduledResolutionAt",
+      recoveryPeriodBase: "recoveredAt",
     },
   };
 };

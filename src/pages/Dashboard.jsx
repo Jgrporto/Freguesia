@@ -1809,7 +1809,7 @@ export default function Dashboard() {
         recovered: metrics.recoveredCustomers || 0,
       },
       description: byTemplate.length
-        ? 'Disparos das rotinas configuradas, primeira resposta do cliente, finalizações Agendado e realizados no AppBarber.'
+        ? 'Cada métrica respeita a data do próprio evento: envio, primeira resposta, Agendado e realizado no AppBarber.'
         : 'Configure rotinas de follow-up na Dashboard para acompanhar o funil.',
     };
   }, [activeDashboard, baseMetrics, currentMain, experienceMetrics, followUpViewCards, followUpViewRows]);
