@@ -1008,6 +1008,8 @@ const ROUTINES_STORE_PATH = process.env.ROUTINES_STORE_PATH || "server/data/rout
 const ROUTINE_LOG_STORE_PATH = process.env.ROUTINE_LOG_STORE_PATH || "server/data/routine-logs.json";
 const META_ACQUISITION_HISTORY_PATH =
   process.env.META_ACQUISITION_HISTORY_PATH || "server/data/meta-acquisition-history.json";
+const FOLLOWUP_DISPATCH_HISTORY_PATH =
+  process.env.FOLLOWUP_DISPATCH_HISTORY_PATH || "server/data/followup-dispatch-history.json";
 const SCHEDULED_MESSAGES_STORE_PATH =
   process.env.SCHEDULED_MESSAGES_STORE_PATH || "server/data/scheduled-messages.json";
 const LABEL_CAMPAIGN_STATE_PATH =
@@ -1325,6 +1327,7 @@ const checkoutTokenPath = path.resolve(process.cwd(), CHECKOUT_TOKEN_STORE_PATH)
 const checkoutRenewLogPath = path.resolve(process.cwd(), CHECKOUT_RENEW_LOG_PATH);
 const messageDeliveryLogPath = path.resolve(process.cwd(), MESSAGE_DELIVERY_LOG_PATH);
 const metaAcquisitionHistoryStorePath = path.resolve(process.cwd(), META_ACQUISITION_HISTORY_PATH);
+const followUpDispatchHistoryStorePath = path.resolve(process.cwd(), FOLLOWUP_DISPATCH_HISTORY_PATH);
 const safeReadJsonFile = async (filePath, fallback) => {
   const readFromJsonFile = async () => {
     try {
@@ -1361,6 +1364,7 @@ const atomicWriteJson = async (filePath, data) => {
 };
 
 const META_ACQUISITION_HISTORY_VERSION = "2026-07-06-meta-acquisition-history-v2";
+const FOLLOWUP_DISPATCH_HISTORY_VERSION = "2026-07-07-followup-dispatch-history-v1";
 
 const emptyMetaAcquisitionHistoryStore = () => ({
   version: META_ACQUISITION_HISTORY_VERSION,
@@ -1375,6 +1379,16 @@ const emptyMetaAcquisitionHistoryStore = () => ({
     backfillCompletedAt: null,
     backfillCursor: null,
     syncedDays: {},
+  },
+});
+
+const emptyFollowUpDispatchHistoryStore = () => ({
+  version: FOLLOWUP_DISPATCH_HISTORY_VERSION,
+  rows: [],
+  sync: {
+    lastSeededAt: null,
+    lastReconciledAt: null,
+    lastWriteAt: null,
   },
 });
 
@@ -1405,6 +1419,36 @@ const writeMetaAcquisitionHistoryStore = async (store) => {
       ...emptyMetaAcquisitionHistoryStore().sync,
       ...sync,
       syncedDays: sync?.syncedDays && typeof sync.syncedDays === "object" ? sync.syncedDays : {},
+    },
+  });
+};
+
+const readFollowUpDispatchHistoryStore = async () => {
+  const data = await safeReadJsonFile(followUpDispatchHistoryStorePath, emptyFollowUpDispatchHistoryStore());
+  const sync = data?.sync && typeof data.sync === "object" ? data.sync : {};
+  return {
+    ...emptyFollowUpDispatchHistoryStore(),
+    ...(data && typeof data === "object" ? data : {}),
+    rows: Array.isArray(data?.rows) ? data.rows : [],
+    sync: {
+      ...emptyFollowUpDispatchHistoryStore().sync,
+      ...sync,
+    },
+  };
+};
+
+const writeFollowUpDispatchHistoryStore = async (store) => {
+  const next = store && typeof store === "object" ? store : emptyFollowUpDispatchHistoryStore();
+  const sync = next.sync && typeof next.sync === "object" ? next.sync : {};
+  await atomicWriteJson(followUpDispatchHistoryStorePath, {
+    ...emptyFollowUpDispatchHistoryStore(),
+    ...next,
+    version: FOLLOWUP_DISPATCH_HISTORY_VERSION,
+    rows: Array.isArray(next.rows) ? next.rows : [],
+    sync: {
+      ...emptyFollowUpDispatchHistoryStore().sync,
+      ...sync,
+      lastWriteAt: nowIso(),
     },
   });
 };
@@ -9784,11 +9828,24 @@ const getFollowUpDashboardFactKey = (routineId = "", phone = "", sentAt = "", te
     String(templateName || "sem-template").trim() || "sem-template",
   ].join(":");
 
+const getFollowUpDispatchHistoryCoverage = (rows = []) => {
+  const dates = (Array.isArray(rows) ? rows : [])
+    .map((row) => String(row?.sentAt || "").trim())
+    .filter(Boolean)
+    .sort();
+  return {
+    historyCoverageStart: dates[0] || null,
+    historyCoverageEnd: dates[dates.length - 1] || null,
+    historyRows: Array.isArray(rows) ? rows.length : 0,
+  };
+};
+
 const normalizeFollowUpDashboardFact = (value = {}) => {
   const sentAtMs = Date.parse(String(value?.sentAt || value?.sent_at || ""));
   const responseAtMs = Date.parse(String(value?.firstResponseAt || value?.first_response_at || value?.responseAt || value?.response_at || ""));
   const appointmentAtMs = Date.parse(String(value?.scheduledResolutionAt || value?.scheduled_resolution_at || value?.appointmentAt || value?.appointment_at || ""));
   const recoveredAtMs = Date.parse(String(value?.recoveredAt || value?.recovered_at || ""));
+  const updatedAtMs = Date.parse(String(value?.updatedAt || value?.updated_at || ""));
   const phone = normalizePhone(value?.phone || "");
   const routineId = String(value?.routineId || value?.routine_id || "sem-rotina").trim() || "sem-rotina";
   const templateName = String(value?.templateName || value?.template_name || "Sem template").trim() || "Sem template";
@@ -9796,6 +9853,9 @@ const normalizeFollowUpDashboardFact = (value = {}) => {
   const firstResponseAt = Number.isFinite(responseAtMs) ? new Date(responseAtMs).toISOString() : null;
   const scheduledResolutionAt = Number.isFinite(appointmentAtMs) ? new Date(appointmentAtMs).toISOString() : null;
   const recoveredAt = Number.isFinite(recoveredAtMs) ? new Date(recoveredAtMs).toISOString() : null;
+  const updatedAt = Number.isFinite(updatedAtMs)
+    ? new Date(updatedAtMs).toISOString()
+    : sentAt || nowIso();
   return {
     ...value,
     routineId,
@@ -9812,14 +9872,15 @@ const normalizeFollowUpDashboardFact = (value = {}) => {
     scheduledResolutionAt,
     scheduledResolutionType: String(
       value?.scheduledResolutionType || value?.scheduled_resolution_type || value?.resolutionType || value?.resolution_type || "",
-    ).trim(),
-    appointmentAt: scheduledResolutionAt,
-    recovered: Boolean(value?.recovered || recoveredAt),
-    recoveredAt,
+      ).trim(),
+      appointmentAt: scheduledResolutionAt,
+      recovered: Boolean(value?.recovered || recoveredAt),
+      recoveredAt,
+      updatedAt,
+    };
   };
-};
 
-const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {}, filters = {} } = {}) => {
+const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, store = {}, filters = {}, historyStore = null } = {}) => {
   const range = getDefaultAttendanceDashboardRange();
   const normalizedStartMs = Number.isFinite(startMs) ? startMs : range.startMs;
   const normalizedEndMs = Number.isFinite(endMs) ? endMs : range.endMs;
@@ -9933,6 +9994,53 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     fact?.templateName,
   ];
 
+  const normalizedHistoryStore = historyStore && typeof historyStore === "object"
+    ? {
+        ...emptyFollowUpDispatchHistoryStore(),
+        ...historyStore,
+        rows: Array.isArray(historyStore?.rows) ? historyStore.rows : [],
+        sync: {
+          ...emptyFollowUpDispatchHistoryStore().sync,
+          ...(historyStore?.sync && typeof historyStore.sync === "object" ? historyStore.sync : {}),
+        },
+      }
+    : emptyFollowUpDispatchHistoryStore();
+  let historyMutated = false;
+  const dispatchFactsByKey = new Map();
+  const mergeDispatchFact = (value = {}, { preserveUpdatedAt = false } = {}) => {
+    const normalized = normalizeFollowUpDashboardFact(value);
+    if (!normalized.phone || !normalized.sentAt) return null;
+    const factKey = getFollowUpDashboardFactKey(
+      normalized.routineId,
+      normalized.phone,
+      normalized.sentAt,
+      normalized.templateName,
+    );
+    const previous = normalizeFollowUpDashboardFact(dispatchFactsByKey.get(factKey) || {});
+    const baseNext = normalizeFollowUpDashboardFact({
+      ...previous,
+      ...normalized,
+      updatedAt: preserveUpdatedAt
+        ? normalized.updatedAt || previous.updatedAt || nowIso()
+        : previous.updatedAt || normalized.updatedAt || nowIso(),
+    });
+    const previousComparable = previous ? { ...previous, updatedAt: undefined } : null;
+    const nextComparable = { ...baseNext, updatedAt: undefined };
+    const next = normalizeFollowUpDashboardFact({
+      ...baseNext,
+      updatedAt: JSON.stringify(previousComparable) === JSON.stringify(nextComparable)
+        ? previous.updatedAt || baseNext.updatedAt || nowIso()
+        : nowIso(),
+    });
+    if (JSON.stringify(previous) !== JSON.stringify(next)) {
+      dispatchFactsByKey.set(factKey, next);
+      historyMutated = true;
+    } else if (!dispatchFactsByKey.has(factKey)) {
+      dispatchFactsByKey.set(factKey, next);
+    }
+    return next;
+  };
+
   const followUpLogs = logs.filter((entry) => isFollowUpLog(entry));
   const periodLogs = followUpLogs.filter((entry) => {
     const createdAtMs = Date.parse(String(entry?.createdAt || entry?.created_at || ""));
@@ -9989,34 +10097,59 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     if (entry?.summary && Number.isFinite(Number(entry.summary.skipped))) return total + Number(entry.summary.skipped || 0);
     return total;
   }, 0);
-  const storedFactsSource =
-    operationStore?.dashboardFacts?.followup?.dispatchFacts ||
-    operationStore?.dashboardFacts?.followup?.facts ||
-    [];
-  const dispatchFactsByKey = new Map();
-  (Array.isArray(storedFactsSource) ? storedFactsSource : [])
-    .map(normalizeFollowUpDashboardFact)
-    .filter((fact) => fact.phone && fact.sentAt)
-    .forEach((fact) =>
-      dispatchFactsByKey.set(
-        getFollowUpDashboardFactKey(fact.routineId, fact.phone, fact.sentAt, fact.templateName),
-        fact,
-      ),
-    );
+  (Array.isArray(normalizedHistoryStore.rows) ? normalizedHistoryStore.rows : []).forEach((fact) => {
+    mergeDispatchFact(fact, { preserveUpdatedAt: true });
+  });
+  historyMutated = false;
+  (
+    Array.isArray(operationStore?.dashboardFacts?.followup?.dispatchFacts)
+      ? operationStore.dashboardFacts.followup.dispatchFacts
+      : Array.isArray(operationStore?.dashboardFacts?.followup?.facts)
+        ? operationStore.dashboardFacts.followup.facts
+        : []
+  ).forEach((fact) => {
+    mergeDispatchFact(fact, { preserveUpdatedAt: true });
+  });
 
-  const successLogsByPhone = new Map();
   successLogs.forEach((item) => {
-    const current = successLogsByPhone.get(item.phone) || [];
-    current.push(item);
-    successLogsByPhone.set(item.phone, current);
-  });
-  successLogsByPhone.forEach((items, phone) => {
-    items.sort((left, right) => left.sentAtMs - right.sentAtMs);
-    items.forEach((item, index) => {
-      item.nextDispatchAtMs = items[index + 1]?.sentAtMs || Number.POSITIVE_INFINITY;
+    mergeDispatchFact({
+      routineId: item.rowKey,
+      routineName: item.routineName,
+      templateName: item.templateName,
+      conversationId: item.conversationId,
+      phone: item.phone,
+      sentAt: new Date(item.sentAtMs).toISOString(),
+      updatedAt: new Date(item.sentAtMs).toISOString(),
     });
-    successLogsByPhone.set(phone, items);
   });
+
+  const buildDispatchesByPhone = () => {
+    const byPhone = new Map();
+    Array.from(dispatchFactsByKey.values())
+      .map(normalizeFollowUpDashboardFact)
+      .filter((fact) => fact.phone && fact.sentAt)
+      .sort((left, right) => Date.parse(left.sentAt || "") - Date.parse(right.sentAt || ""))
+      .forEach((fact) => {
+        const sentAtMs = Date.parse(String(fact.sentAt || ""));
+        if (!Number.isFinite(sentAtMs)) return;
+        const current = byPhone.get(fact.phone) || [];
+        current.push({
+          ...fact,
+          sentAtMs,
+          nextDispatchAtMs: Number.POSITIVE_INFINITY,
+        });
+        byPhone.set(fact.phone, current);
+      });
+    byPhone.forEach((items, phone) => {
+      items.forEach((item, index) => {
+        item.nextDispatchAtMs = items[index + 1]?.sentAtMs || Number.POSITIVE_INFINITY;
+      });
+      byPhone.set(phone, items);
+    });
+    return byPhone;
+  };
+
+  let dispatchesByPhone = buildDispatchesByPhone();
 
   const findScheduledFactForDispatch = ({
     conversationId = "",
@@ -10066,7 +10199,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
   };
 
   const findDispatchForFallbackEvent = (phone = "", eventAtMs = 0, conversationId = "") => {
-    const items = successLogsByPhone.get(phone) || [];
+    const items = dispatchesByPhone.get(phone) || [];
     for (let index = items.length - 1; index >= 0; index -= 1) {
       const item = items[index];
       if (item.sentAtMs > eventAtMs) continue;
@@ -10077,7 +10210,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     return null;
   };
 
-  successLogs.forEach((item) => {
+  Array.from(dispatchesByPhone.values()).flat().forEach((item) => {
     const customer = findDashboardCustomerByPhone(customerIndex, item.phone);
     const normalizedCustomerPhone = getDashboardCustomerPhone(customer) || item.phone;
     const scheduledFact = findScheduledFactForDispatch({
@@ -10096,15 +10229,15 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       resolvedMs <= item.sentAtMs + recoveryWindowMs;
     const clientResponse = findFirstClientResponseForDispatch(item);
     const sentAtIso = new Date(item.sentAtMs).toISOString();
-    const factKey = getFollowUpDashboardFactKey(item.rowKey, item.phone, sentAtIso, item.templateName);
+    const factKey = getFollowUpDashboardFactKey(item.routineId, item.phone, sentAtIso, item.templateName);
     const previousFact = normalizeFollowUpDashboardFact(dispatchFactsByKey.get(factKey) || {});
     const storedScheduledType = String(previousFact?.scheduledResolutionType || "").trim();
     const hasStoredScheduledFact =
       Boolean(previousFact?.scheduledResolutionAt) &&
       isDashboardScheduledResolutionType(storedScheduledType);
-    dispatchFactsByKey.set(factKey, {
+    mergeDispatchFact({
       ...previousFact,
-      routineId: item.rowKey,
+      routineId: item.routineId,
       routineName: item.routineName || previousFact.routineName || "Sem rotina",
       templateName: item.templateName,
       conversationId: item.conversationId || clientResponse?.conversationId || previousFact.conversationId || "",
@@ -10162,17 +10295,17 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     if (!fallbackDispatch) return;
 
     const responseKey = getFollowUpDashboardFactKey(
-      fallbackDispatch.rowKey,
+      fallbackDispatch.routineId,
       phone,
       new Date(fallbackDispatch.sentAtMs).toISOString(),
       fallbackDispatch.templateName,
     );
     const fact = normalizeFollowUpDashboardFact(dispatchFactsByKey.get(responseKey) || {});
     if (fact.firstResponseAt || fact.responseAt) return;
-    const row = routineRows.get(fallbackDispatch.rowKey);
-    dispatchFactsByKey.set(responseKey, {
+    const row = routineRows.get(fallbackDispatch.routineId);
+    mergeDispatchFact({
       ...fact,
-      routineId: fallbackDispatch.rowKey,
+      routineId: fallbackDispatch.routineId,
       routineName: row?.routineName || fact.routineName || "Sem rotina",
       templateName: row?.templateName || fact.templateName || "Sem template",
       conversationId: conversationId || fact.conversationId || "",
@@ -10184,6 +10317,8 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       responseSource: "chatbot_metric_tag",
     });
   });
+
+  dispatchesByPhone = buildDispatchesByPhone();
 
   for (const fact of dispatchFactsByKey.values()) {
     const normalizedFact = normalizeFollowUpDashboardFact(fact);
@@ -10257,6 +10392,21 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     ensureFollowUpDayStats(dayKey);
   });
   const byDay = Array.from(dayStats.values()).sort((left, right) => left.date.localeCompare(right.date));
+  const allDispatchFacts = Array.from(dispatchFactsByKey.values())
+    .map(normalizeFollowUpDashboardFact)
+    .filter((fact) => fact.phone && fact.sentAt)
+    .sort((left, right) => Date.parse(left.sentAt || "") - Date.parse(right.sentAt || ""));
+  const historyCoverage = getFollowUpDispatchHistoryCoverage(allDispatchFacts);
+  const nextHistoryStore = {
+    ...normalizedHistoryStore,
+    version: FOLLOWUP_DISPATCH_HISTORY_VERSION,
+    rows: allDispatchFacts,
+    sync: {
+      ...normalizedHistoryStore.sync,
+      lastSeededAt: successLogs.length ? nowIso() : normalizedHistoryStore?.sync?.lastSeededAt || null,
+      lastReconciledAt: nowIso(),
+    },
+  };
 
   return {
     period: {
@@ -10280,7 +10430,7 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
     },
     byTemplate: templateRows,
     byDay,
-    dispatchFacts: Array.from(dispatchFactsByKey.values())
+    dispatchFacts: allDispatchFacts
       .map((fact) => {
         const normalizedFact = normalizeFollowUpDashboardFact(fact);
         const sentAtMs = Date.parse(String(normalizedFact.sentAt || ""));
@@ -10306,6 +10456,10 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
         return fact.dispatchPeriodMatch || fact.responsePeriodMatch || fact.appointmentPeriodMatch || fact.recoveryPeriodMatch;
       })
       .slice(0, 500),
+    historyCoverageStart: historyCoverage.historyCoverageStart,
+    historyCoverageEnd: historyCoverage.historyCoverageEnd,
+    historyRows: historyCoverage.historyRows,
+    readMode: "persisted_followup_history",
     settings: {
       followUpRoutineNameKeywords: dashboardSettings.followUpRoutineNameKeywords,
       followUpResponseMetricTagIds: dashboardSettings.followUpResponseMetricTagIds,
@@ -10323,7 +10477,13 @@ const buildFollowUpDashboardMetrics = (operationStore = {}, { startMs, endMs, st
       responsePeriodBase: "firstResponseAt",
       appointmentPeriodBase: "scheduledResolutionAt",
       recoveryPeriodBase: "recoveredAt",
+      historyCoverageStart: historyCoverage.historyCoverageStart,
+      historyCoverageEnd: historyCoverage.historyCoverageEnd,
+      historyRows: historyCoverage.historyRows,
+      readMode: "persisted_followup_history",
     },
+    _historyStore: nextHistoryStore,
+    _historyMutated: historyMutated,
   };
 };
 
@@ -36318,28 +36478,28 @@ const server = http.createServer(async (req, res) => {
       const endMs = parseDashboardDateBoundary(url.searchParams.get("end"), "end");
       const operationStore = await readOperationStore();
       const store = await readStore({ mutable: false });
-      const hasViewFilters = Boolean(
-        url.searchParams.get("start") ||
-          url.searchParams.get("end") ||
-          url.searchParams.get("rule") ||
-          url.searchParams.get("template"),
-      );
+      const followUpHistoryStore = await readFollowUpDispatchHistoryStore();
       const hasTemplateFilter = Boolean(url.searchParams.get("template"));
       const metrics = buildFollowUpDashboardMetrics(operationStore, {
         startMs,
         endMs,
         store,
+        historyStore: followUpHistoryStore,
         filters: {
           rule: url.searchParams.get("rule") || "",
           template: url.searchParams.get("template") || "",
           allowSummaryFallback: !hasTemplateFilter,
         },
       });
-      if (!hasViewFilters && persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
+      if (metrics?._historyMutated) {
+        await writeFollowUpDispatchHistoryStore(metrics._historyStore);
+      }
+      if (persistDashboardMetricSnapshot(operationStore, "followup", metrics)) {
         await writeOperationStore(operationStore);
       }
+      const { _historyStore, _historyMutated, ...responsePayload } = metrics || {};
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(metrics));
+      res.end(JSON.stringify(responsePayload));
     } catch (error) {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: error?.message || "Follow-up dashboard error" }));

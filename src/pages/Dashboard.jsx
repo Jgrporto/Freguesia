@@ -1772,6 +1772,21 @@ export default function Dashboard() {
       .join(' ');
   }, [activeDashboard, acquisitionMetrics, start]);
 
+  const followUpScopeNote = useMemo(() => {
+    if (activeDashboard !== 'followup') return '';
+    const coverageStart = String(followUpMetrics?.historyCoverageStart || '').trim();
+    const coverageEnd = String(followUpMetrics?.historyCoverageEnd || '').trim();
+    const notes = [
+      'Cada card respeita a data do próprio evento: envio, primeira resposta, Agendado e realizado no AppBarber.',
+    ];
+    if (coverageStart && start && start < coverageStart.slice(0, 10)) {
+      notes.push(`Histórico parcial disponível a partir de ${formatDashboardDate(coverageStart)}.`);
+    } else if (coverageStart && coverageEnd) {
+      notes.push(`Histórico persistido entre ${formatDashboardDate(coverageStart)} e ${formatDashboardDate(coverageEnd)}.`);
+    }
+    return notes.join(' ');
+  }, [activeDashboard, followUpMetrics, start]);
+
   const mainChartProps = useMemo(() => {
     if (activeDashboard === 'base') {
       const distribution = baseMetrics?.distribution || {};
@@ -2000,6 +2015,11 @@ export default function Dashboard() {
         </>
       ) : activeDashboard === 'followup' ? (
         <>
+          {followUpScopeNote ? (
+            <section className="rounded-xl border border-primary/10 bg-primary/5 px-4 py-3 text-sm text-foreground shadow-[0_4px_16px_rgba(15,23,42,0.04)]">
+              {followUpScopeNote}
+            </section>
+          ) : null}
           <AcquisitionFunnel values={mainChartProps.values} mode="followup" />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             <FollowUpRulePerformanceCard items={filteredFollowUpRows} />

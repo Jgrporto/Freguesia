@@ -47,6 +47,7 @@ const FILE_BASENAME_TO_KEY = Object.freeze({
   "store.json": "main_store",
   "whatsapp-store.json": "whatsapp_store",
   "meta-acquisition-history.json": "meta_acquisition_history",
+  "followup-dispatch-history.json": "followup_dispatch_history",
   "whatsapp-coexistencia.json": "whatsapp_coexistence",
   "painel-customers.json": "painel_customers",
   "painel-sync.json": "painel_sync",

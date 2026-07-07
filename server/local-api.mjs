@@ -13,6 +13,9 @@ const PORT = Number.parseInt(process.env.PORT || '5053', 10);
 const DATA_DIR = path.join(__dirname, 'data');
 const STORE_PATH = path.join(DATA_DIR, 'store.json');
 const WHATSAPP_STORE_PATH = process.env.WHATSAPP_STORE_PATH || path.join(DATA_DIR, 'whatsapp-store.json');
+const FOLLOWUP_DISPATCH_HISTORY_PATH =
+  process.env.FOLLOWUP_DISPATCH_HISTORY_PATH || path.join(DATA_DIR, 'followup-dispatch-history.json');
+const FOLLOWUP_DISPATCH_HISTORY_VERSION = '2026-07-07-followup-dispatch-history-v1';
 const DEFAULT_CUSTOMER_AUTO_SYNC_INTERVAL_MS = Number.parseInt(
   process.env.CUSTOMER_AUTO_SYNC_INTERVAL_MS || `${60 * 60 * 1000}`,
   10,
@@ -3288,6 +3291,165 @@ const writeStore = async (store) => {
   await writeJsonBackedStore(STORE_PATH, nextStore, writeToJsonFile);
   storeCache = nextStore;
   return nextStore;
+};
+
+const emptyFollowUpDispatchHistoryStore = () => ({
+  version: FOLLOWUP_DISPATCH_HISTORY_VERSION,
+  rows: [],
+  sync: {
+    lastSeededAt: null,
+    lastReconciledAt: null,
+    lastWriteAt: null,
+  },
+});
+
+const readFollowUpDispatchHistoryStore = async () => {
+  const readFromJsonFile = async () => {
+    try {
+      const raw = await fs.readFile(FOLLOWUP_DISPATCH_HISTORY_PATH, 'utf8');
+      return JSON.parse(raw);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return emptyFollowUpDispatchHistoryStore();
+      throw error;
+    }
+  };
+  const data = await readJsonBackedStore(
+    FOLLOWUP_DISPATCH_HISTORY_PATH,
+    emptyFollowUpDispatchHistoryStore(),
+    readFromJsonFile,
+  );
+  const sync = data?.sync && typeof data.sync === 'object' ? data.sync : {};
+  return {
+    ...emptyFollowUpDispatchHistoryStore(),
+    ...(data && typeof data === 'object' ? data : {}),
+    rows: Array.isArray(data?.rows) ? data.rows : [],
+    sync: {
+      ...emptyFollowUpDispatchHistoryStore().sync,
+      ...sync,
+    },
+  };
+};
+
+const writeFollowUpDispatchHistoryStore = async (store) => {
+  const nextStore = store && typeof store === 'object' ? store : emptyFollowUpDispatchHistoryStore();
+  const sync = nextStore?.sync && typeof nextStore.sync === 'object' ? nextStore.sync : {};
+  const payload = {
+    ...emptyFollowUpDispatchHistoryStore(),
+    ...nextStore,
+    version: FOLLOWUP_DISPATCH_HISTORY_VERSION,
+    rows: Array.isArray(nextStore?.rows) ? nextStore.rows : [],
+    sync: {
+      ...emptyFollowUpDispatchHistoryStore().sync,
+      ...sync,
+      lastWriteAt: nowIso(),
+    },
+  };
+  const writeToJsonFile = async () => {
+    await fs.mkdir(path.dirname(FOLLOWUP_DISPATCH_HISTORY_PATH), { recursive: true });
+    const tempPath = `${FOLLOWUP_DISPATCH_HISTORY_PATH}.tmp-${process.pid}-${Date.now()}`;
+    await fs.writeFile(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+    await fs.rename(tempPath, FOLLOWUP_DISPATCH_HISTORY_PATH);
+  };
+  await writeJsonBackedStore(FOLLOWUP_DISPATCH_HISTORY_PATH, payload, writeToJsonFile);
+  return payload;
+};
+
+const normalizeFollowUpHistoryText = (value) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+const getFollowUpHistoryFactKey = (routineId = '', phone = '', sentAt = '', templateName = '') =>
+  [
+    String(routineId || 'sem-rotina').trim() || 'sem-rotina',
+    normalizePhone(phone) || 'sem-telefone',
+    String(sentAt || 'sem-disparo').trim() || 'sem-disparo',
+    String(templateName || 'sem-template').trim() || 'sem-template',
+  ].join(':');
+
+const getFollowUpHistoryTemplateName = (routine = {}, fallback = '') =>
+  String(
+    routine?.hsm?.templateName ||
+      routine?.templateName ||
+      fallback ||
+      'Sem template',
+  ).trim() || 'Sem template';
+
+const isEligibleFollowUpRoutineForHistory = (routine = {}, store = {}) => {
+  const type = String(routine?.type || '').trim();
+  if (type === 'follow_up' || type === 'disparo') return true;
+  const settings = normalizeDashboardSettings(store?.dashboardSettings);
+  const tokens = settings.followUpRoutineNameKeywords.map(normalizeFollowUpHistoryText).filter(Boolean);
+  if (!tokens.length) return false;
+  const haystack = normalizeFollowUpHistoryText([
+    routine?.id,
+    routine?.name,
+    routine?.title,
+    routine?.templateName,
+    routine?.hsm?.templateName,
+    routine?.followUp?.targetLabelName,
+    routine?.followUp?.targetLabelId,
+  ].join(' '));
+  return tokens.some((token) => haystack.includes(token) || token.includes(haystack));
+};
+
+const persistFollowUpDispatchHistoryFacts = async ({ routine = {}, store = {}, facts = [] } = {}) => {
+  if (!isEligibleFollowUpRoutineForHistory(routine, store)) return false;
+  const normalizedFacts = (Array.isArray(facts) ? facts : [])
+    .map((fact) => {
+      const sentAtMs = Date.parse(String(fact?.sentAt || ''));
+      if (!Number.isFinite(sentAtMs)) return null;
+      const sentAt = new Date(sentAtMs).toISOString();
+      return {
+        routineId: String(routine?.id || 'sem-rotina').trim() || 'sem-rotina',
+        routineName: String(routine?.name || 'Sem rotina').trim() || 'Sem rotina',
+        templateName: getFollowUpHistoryTemplateName(routine, fact?.templateName || fact?.quickReplyTitle || ''),
+        conversationId: String(fact?.conversationId || '').trim(),
+        phone: normalizePhone(fact?.phone || ''),
+        sentAt,
+        firstResponseAt: null,
+        responseSource: null,
+        scheduledResolutionAt: null,
+        scheduledResolutionType: '',
+        recoveredAt: null,
+        updatedAt: sentAt,
+      };
+    })
+    .filter((fact) => fact?.phone && fact?.sentAt);
+  if (!normalizedFacts.length) return false;
+
+  const historyStore = await readFollowUpDispatchHistoryStore();
+  const rows = Array.isArray(historyStore?.rows) ? historyStore.rows : [];
+  const byKey = new Map(
+    rows.map((row) => [getFollowUpHistoryFactKey(row?.routineId, row?.phone, row?.sentAt, row?.templateName), row]),
+  );
+  let mutated = false;
+  normalizedFacts.forEach((fact) => {
+    const key = getFollowUpHistoryFactKey(fact.routineId, fact.phone, fact.sentAt, fact.templateName);
+    const previous = byKey.get(key);
+    const next = {
+      ...previous,
+      ...fact,
+      updatedAt: nowIso(),
+    };
+    if (JSON.stringify(previous || null) !== JSON.stringify(next)) {
+      byKey.set(key, next);
+      mutated = true;
+    }
+  });
+  if (!mutated) return false;
+
+  await writeFollowUpDispatchHistoryStore({
+    ...historyStore,
+    rows: Array.from(byKey.values()).sort((left, right) => Date.parse(left?.sentAt || '') - Date.parse(right?.sentAt || '')),
+    sync: {
+      ...(historyStore?.sync && typeof historyStore.sync === 'object' ? historyStore.sync : {}),
+      lastSeededAt: nowIso(),
+    },
+  });
+  return true;
 };
 
 const emptyWhatsappStore = () => ({
@@ -6914,6 +7076,7 @@ const executeFollowUpRoutineNow = async (routine, runId, startedAt, options = {}
   let skipped = 0;
   const stateUpdates = {};
   const detailLogs = [];
+  const historyFacts = [];
 
   for (const item of forecast.items) {
     if (
@@ -7117,6 +7280,27 @@ const executeFollowUpRoutineNow = async (routine, runId, startedAt, options = {}
     };
     return current;
   });
+
+  if (!historyFacts.length) {
+    detailLogs
+      .filter((entry) => String(entry?.status || '') === 'success' && entry?.phone)
+      .forEach((entry) => {
+        historyFacts.push({
+          phone: entry.phone,
+          conversationId: entry.customerId || '',
+          templateName: getFollowUpHistoryTemplateName(routine, ''),
+          sentAt: String(entry.createdAt || finishedAt).trim() || finishedAt,
+        });
+      });
+  }
+
+  if (historyFacts.length) {
+    await persistFollowUpDispatchHistoryFacts({
+      routine,
+      store,
+      facts: historyFacts,
+    });
+  }
 
   await persistRoutineLog({
     id: `${runId}-summary-live`,
