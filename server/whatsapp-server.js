@@ -25212,6 +25212,34 @@ const createTemplate = async ({
 
 
 
+const resolveOutgoingContextMessageId = async (to, contextMessageId) => {
+  const rawId = String(contextMessageId || "").trim();
+  if (!rawId) return null;
+  if (rawId.startsWith("wamid.")) return rawId;
+  try {
+    const waId = normalizePhone(to) || String(to || "").trim();
+    const lookupStore = await readStore({ mutable: false });
+    const conversationId = mergeConversationIds(lookupStore, waId);
+    const messages = lookupStore.messages?.[conversationId] || [];
+    const match = messages.find((message) =>
+      [
+        message.id,
+        message.clientMessageId,
+        message.client_message_id,
+        message.serverMessageId,
+        message.server_message_id,
+      ]
+        .map((value) => String(value || ""))
+        .includes(rawId)
+    );
+    const resolvedId =
+      match?.providerMessageId || match?.provider_message_id || match?.wamid || null;
+    return resolvedId || rawId;
+  } catch (error) {
+    return rawId;
+  }
+};
+
 const sendTextMessage = async ({
   to,
   text,
@@ -32606,6 +32634,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
           timestamp,
           attachments,
           replyTo,
+          replyToId: message?.context?.id || null,
           origin: "device",
           phoneNumberId: linePhoneNumberId,
           displayPhoneNumber: lineDisplayPhoneNumber,
@@ -33488,6 +33517,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
 
                 messageId, attachments,
     replyTo,
+    replyToId: message?.context?.id || null,
     incrementUnread: false,
     phoneNumberId: linePhoneNumberId,
     displayPhoneNumber: lineDisplayPhoneNumber,
@@ -34350,6 +34380,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
 
               messageId, attachments,
     replyTo,
+    replyToId: message?.context?.id || null,
     incrementUnread: false,
     phoneNumberId: linePhoneNumberId,
     displayPhoneNumber: lineDisplayPhoneNumber,
@@ -34575,6 +34606,26 @@ const handleWebhookPayload = async (payload, options = {}) => {
           continue;
         }
         const messageType = String(message?.type || "").toLowerCase();
+        const unsupportedType = String(message?.unsupported?.type || "").toLowerCase();
+        if (messageType === "edit" || messageType === "edited" || unsupportedType === "edit") {
+          await appendMessageDeliveryLog({
+            category: "incoming-message",
+            level: "info",
+            source: "meta-webhook",
+            event: "message-edit-diagnostic",
+            messageId: message?.id || null,
+            message: JSON.stringify({
+              event_id: message?.id || null,
+              message_type: message?.type || null,
+              unsupported_type: message?.unsupported?.type || null,
+              context_id: message?.context?.id || null,
+              errors: message?.errors || null,
+              edit: message?.edit || message?.edited || null,
+              timestamp: message?.timestamp || null,
+              from: message?.from || null,
+            }),
+          });
+        }
         if (messageType === "reaction") {
           await applyWebhookReactionMessage({ message, businessNumber });
           continue;
@@ -34606,6 +34657,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
             timestamp,
             attachments,
             replyTo,
+            replyToId: message?.context?.id || null,
             origin: "device",
             phoneNumberId: linePhoneNumberId,
             displayPhoneNumber: lineDisplayPhoneNumber,
@@ -34635,6 +34687,7 @@ const handleWebhookPayload = async (payload, options = {}) => {
           messageId,
           attachments,
           replyTo,
+          replyToId: message?.context?.id || null,
           phoneNumberId: linePhoneNumberId,
           displayPhoneNumber: lineDisplayPhoneNumber,
           wabaId: lineWabaId,
@@ -37544,6 +37597,7 @@ const server = http.createServer(async (req, res) => {
         message: `Tentativa de envio de documento para ${normalizedTo || "-"}.`,
       });
 
+      const resolvedContextMessageId = await resolveOutgoingContextMessageId(normalizedTo, contextMessageId);
       const decoded = decodeBase64Payload({
         base64Value: documentBase64,
         mimeType: mimetype,
@@ -37565,7 +37619,7 @@ const server = http.createServer(async (req, res) => {
         mediaId,
         caption,
         filename: safeFilename,
-        contextMessageId,
+        contextMessageId: resolvedContextMessageId,
         routeKey: metaSelector.routeKey,
         phoneNumberId: metaSelector.phoneNumberId,
         displayPhoneNumber: metaSelector.displayPhoneNumber,
@@ -37645,6 +37699,7 @@ const server = http.createServer(async (req, res) => {
         message: `Tentativa de envio de video para ${normalizedTo || "-"}.`,
       });
 
+      const resolvedContextMessageId = await resolveOutgoingContextMessageId(normalizedTo, contextMessageId);
       const decoded = decodeBase64Payload({
         base64Value: videoBase64,
         mimeType: mimetype,
@@ -37668,7 +37723,7 @@ const server = http.createServer(async (req, res) => {
         mediaType: "video",
         mediaId,
         caption,
-        contextMessageId,
+        contextMessageId: resolvedContextMessageId,
         routeKey: metaSelector.routeKey,
         phoneNumberId: metaSelector.phoneNumberId,
         displayPhoneNumber: metaSelector.displayPhoneNumber,
@@ -56137,6 +56192,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
 
 
       const normalizedTo = normalizePhone(to) || String(to || "").trim();
+      const resolvedContextMessageId = await resolveOutgoingContextMessageId(normalizedTo, contextMessageId);
       await appendMessageDeliveryLog({
         category: "message-send",
         level: "info",
@@ -56148,7 +56204,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
       const result = await sendTextMessage({
         to: normalizedTo,
         text,
-        contextMessageId,
+        contextMessageId: resolvedContextMessageId,
         routeKey: metaSelector.routeKey,
         phoneNumberId: metaSelector.phoneNumberId,
         displayPhoneNumber: metaSelector.displayPhoneNumber,
@@ -56581,6 +56637,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         message: `Tentativa de envio de audio para ${normalizedTo || "-"}.`,
       });
 
+      const resolvedContextMessageId = await resolveOutgoingContextMessageId(normalizedTo, contextMessageId);
       const decoded = decodeBase64Payload({
         base64Value: audioBase64,
         mimeType: mimetype,
@@ -56603,7 +56660,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         to: normalizedTo,
         mediaType: "audio",
         mediaId,
-        contextMessageId,
+        contextMessageId: resolvedContextMessageId,
         ptt: typeof ptt === "boolean" ? ptt : true,
         routeKey: metaSelector.routeKey,
         phoneNumberId: metaSelector.phoneNumberId,
@@ -56745,6 +56802,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         message: `Tentativa de envio de imagem para ${normalizedTo || "-"}.`,
       });
 
+      const resolvedContextMessageId = await resolveOutgoingContextMessageId(normalizedTo, contextMessageId);
       const decoded = decodeBase64Payload({
         base64Value: imageBase64,
         mimeType: mimetype,
@@ -56768,7 +56826,7 @@ if (req.method === "GET" && url.pathname === "/api/painel/playlist") {
         mediaType: "image",
         mediaId,
         caption,
-        contextMessageId,
+        contextMessageId: resolvedContextMessageId,
         routeKey: metaSelector.routeKey,
         phoneNumberId: metaSelector.phoneNumberId,
         displayPhoneNumber: metaSelector.displayPhoneNumber,

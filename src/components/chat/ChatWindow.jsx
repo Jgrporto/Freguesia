@@ -148,13 +148,44 @@ function buildReplyPreview(replyToMessage) {
   };
 }
 
+function resolveReplyContextId(message) {
+  return (
+    message?.provider_message_id ||
+    message?.providerMessageId ||
+    message?.server_message_id ||
+    message?.serverMessageId ||
+    message?.wamid ||
+    message?.raw?.wamid ||
+    message?.raw?.provider_message_id ||
+    message?.id ||
+    null
+  );
+}
+
+function indexMessageAliases(map, message) {
+  const ids = [
+    message?.id,
+    message?.temp_id,
+    message?.client_message_id,
+    message?.clientMessageId,
+    message?.server_message_id,
+    message?.serverMessageId,
+    message?.provider_message_id,
+    message?.providerMessageId,
+    message?.wamid,
+    message?.raw?.id,
+    message?.raw?.wamid,
+  ];
+
+  ids.filter(Boolean).forEach((id) => {
+    map.set(String(id).trim(), message);
+  });
+}
+
 function hydrateReplyRelations(messages) {
   const safeMessages = Array.isArray(messages) ? messages : [];
-  const byId = new Map(
-    safeMessages
-      .map((message) => [String(message?.id || message?.temp_id || '').trim(), message])
-      .filter(([id]) => id)
-  );
+  const byId = new Map();
+  safeMessages.forEach((message) => indexMessageAliases(byId, message));
 
   return safeMessages.map((message) => {
     if (message?.reply_preview) {
@@ -1613,7 +1644,7 @@ export default function ChatWindow({
       const result = await sendWhatsappTextMessage({
           to: conversation.contact_phone,
           text: content.trim(),
-          contextMessageId: replyToMessage?.id || null,
+          contextMessageId: resolveReplyContextId(replyToMessage),
           replyTo: replyToMessage?.content || null,
           agentName: currentUserName,
           routeSelector: activeManualRouteSelector,
@@ -1675,7 +1706,7 @@ export default function ChatWindow({
           imageBase64,
           mimetype: mimetype || file?.type || 'image/jpeg',
           caption,
-          contextMessageId: replyToMessage?.id || null,
+          contextMessageId: resolveReplyContextId(replyToMessage),
           replyTo: replyToMessage?.content || null,
           agentName: currentUserName,
           routeSelector: activeManualRouteSelector,
@@ -1752,7 +1783,7 @@ export default function ChatWindow({
           audioBase64: payload,
           mimetype: mimetype || file?.type || 'audio/ogg',
           ptt: true,
-          contextMessageId: replyToMessage?.id || null,
+          contextMessageId: resolveReplyContextId(replyToMessage),
           replyTo: replyToMessage?.content || null,
           agentName: currentUserName,
           routeSelector: activeManualRouteSelector,
@@ -1830,7 +1861,7 @@ export default function ChatWindow({
           mimetype: mimetype || file?.type || 'application/octet-stream',
           filename: safeName,
           caption,
-          contextMessageId: replyToMessage?.id || null,
+          contextMessageId: resolveReplyContextId(replyToMessage),
           replyTo: replyToMessage?.content || null,
           agentName: currentUserName,
           routeSelector: activeManualRouteSelector,
@@ -1896,7 +1927,7 @@ export default function ChatWindow({
           mimetype: mimetype || file?.type || 'video/mp4',
           filename: safeName,
           caption,
-          contextMessageId: replyToMessage?.id || null,
+          contextMessageId: resolveReplyContextId(replyToMessage),
           replyTo: replyToMessage?.content || null,
           agentName: currentUserName,
           routeSelector: activeManualRouteSelector,
