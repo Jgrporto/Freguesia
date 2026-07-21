@@ -999,8 +999,8 @@ export default function ChatMessage({
         />
       )}
 
-      <div className={cn('flex items-end gap-1.5 max-w-[72%]', isAgent && 'flex-row-reverse')}>
-        <div className="relative">
+      <div className={cn('flex items-end gap-1.5 max-w-[72%] min-w-0', isAgent && 'flex-row-reverse')}>
+        <div className="relative min-w-0">
           <MessageContextMenu
             isOpen={isContextMenuOpen}
             position={contextMenuPosition}
