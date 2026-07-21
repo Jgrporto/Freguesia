@@ -4,6 +4,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$SshHost,
   [string]$RemoteRoot = "/root/Freguesia",
+  [string]$WebRoot = "/var/www/freguesia/current",
   [switch]$SkipBuild,
   [switch]$SkipRestart
 )
@@ -34,6 +35,8 @@ ssh $SshHost $restoreScript
 if (-not $SkipBuild) {
   Write-Host "Executando build remoto"
   ssh $SshHost "cd '$RemoteRoot' && npm run build"
+  Write-Host "Publicando dist em $WebRoot"
+  ssh $SshHost "rsync -a --delete '$RemoteRoot/dist/' '$WebRoot/'"
 }
 
 if (-not $SkipRestart) {
