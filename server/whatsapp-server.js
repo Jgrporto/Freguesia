@@ -29481,6 +29481,73 @@ const upsertMessageReaction = async ({ conversationId, targetMessageId, from, em
   return updatedMessage;
 };
 
+const extractEditedMessageContent = (editPayload) => {
+  const editedMessage = editPayload?.message;
+  if (!editedMessage) return "";
+  const type = String(editedMessage.type || "").toLowerCase();
+  if (type === "text") return String(editedMessage.text?.body || "").trim();
+  if (editedMessage.caption) return String(editedMessage.caption || "").trim();
+  return "";
+};
+
+const applyWebhookMessageEdit = async ({ waId, originalMessageId, editEventId, editedContent, editedAt }) => {
+  const normalizedOriginalId = String(originalMessageId || "").trim();
+  if (!waId || !normalizedOriginalId || !editedContent) return null;
+
+  const store = await readStore();
+  const conversationId = mergeConversationIds(store, waId);
+  const messages = store.messages?.[conversationId];
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+
+  const index = messages.findIndex((item) =>
+    [
+      item.id,
+      item.clientMessageId,
+      item.client_message_id,
+      item.serverMessageId,
+      item.server_message_id,
+      item.providerMessageId,
+      item.provider_message_id,
+      item.wamid,
+    ]
+      .map((value) => String(value || ""))
+      .includes(normalizedOriginalId)
+  );
+  if (index < 0) return null;
+
+  const current = messages[index];
+  const previousContent = current.content;
+  const editHistory = Array.isArray(current.edit_history) ? current.edit_history : [];
+  const editedAtIso = editedAt || nowIso();
+  const next = {
+    ...current,
+    content: editedContent,
+    original_content: current.original_content || previousContent,
+    is_edited: true,
+    edited_at: editedAtIso,
+    edit_event_id: editEventId || current.edit_event_id || undefined,
+    edit_history: [...editHistory, { content: previousContent, edited_at: editedAtIso }],
+  };
+  messages[index] = next;
+  store.messages[conversationId] = messages;
+
+  const conversation = store.conversations?.[conversationId];
+  if (conversation) {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage && lastMessage.id === next.id) {
+      const previewText = resolveConversationPreviewText({
+        content: next.content,
+        attachments: next.attachments,
+        storedMessage: next,
+      });
+      conversation.lastMessage = previewText || conversation.lastMessage;
+    }
+  }
+
+  await writeStore(store);
+  return { conversationId, message: next };
+};
+
 const applyWebhookReactionMessage = async ({ message, businessNumber, fallbackConversationId = null }) => {
   const from = normalizeWebhookWaId(message?.from);
   const to = normalizeWebhookWaId(message?.to);
@@ -34625,6 +34692,33 @@ const handleWebhookPayload = async (payload, options = {}) => {
               from: message?.from || null,
             }),
           });
+
+          const editPayload = message?.edit || message?.edited || null;
+          const originalMessageId = String(editPayload?.original_message_id || "").trim();
+          const editedContent = extractEditedMessageContent(editPayload);
+          const editedAt = parseWebhookTimestamp(message?.timestamp);
+
+          if (from && originalMessageId && editedContent) {
+            const result = await applyWebhookMessageEdit({
+              waId: from,
+              originalMessageId,
+              editEventId: message?.id || null,
+              editedContent,
+              editedAt,
+            });
+            await appendMessageDeliveryLog({
+              category: "incoming-message",
+              level: result ? "info" : "warning",
+              source: "meta-webhook",
+              event: result ? "message-edit-applied" : "message-edit-target-not-found",
+              messageId: originalMessageId,
+              conversationId: result?.conversationId || null,
+              message: result
+                ? `Mensagem editada aplicada na conversa ${result.conversationId}.`
+                : `Mensagem original da edicao (${originalMessageId}) nao encontrada no historico.`,
+            });
+          }
+          continue;
         }
         if (messageType === "reaction") {
           await applyWebhookReactionMessage({ message, businessNumber });

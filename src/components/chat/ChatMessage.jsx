@@ -1184,6 +1184,7 @@ export default function ChatMessage({
                   isAgent ? 'text-primary-foreground/50' : 'text-muted-foreground'
                 )}
               >
+                {message.is_edited && <span className="text-[10px] italic">editada</span>}
                 <span className="text-[10px]">{time}</span>
                 {isAgent &&
                   (message.status === 'pending' ? (

@@ -427,6 +427,9 @@ export const normalizeWhatsappMessage = (message = {}, options = {}) => {
     source_account_name: routeSelector.sourceAccountName || null,
     source_phone_number: routeSelector.sourcePhoneNumber || null,
     is_read: Boolean(message.isRead),
+    is_edited: Boolean(message.is_edited),
+    edited_at: message.edited_at || null,
+    original_content: message.original_content || null,
     raw: message,
     fetch_index: message.__fetchIndex ?? null,
   };
